@@ -6,6 +6,8 @@ declare global {
   }
 }
 
+export const DEFAULT_RAZORPAY_KEY_ID = 'rzp_live_TPv0l7YzheLNBu';
+
 export interface RazorpayOrderResponse {
   id: string;
   amount: number;
@@ -27,13 +29,13 @@ export async function getRazorpayConfig(): Promise<{ enabled: boolean; keyId: st
   } catch (err) {
     // Silently fall through to client check
   }
-  const keyId = (import.meta as any).env?.VITE_RAZORPAY_KEY_ID || null;
+  const keyId = (import.meta as any).env?.VITE_RAZORPAY_KEY_ID || DEFAULT_RAZORPAY_KEY_ID;
   return { enabled: Boolean(keyId), keyId, currency: 'INR' };
 }
 
 // Create an order via backend Razorpay API with resilient client fallback for static Vercel deployments
 export async function createRazorpayOrder(plan: SubscriptionPlan, userEmail?: string, userName?: string): Promise<RazorpayOrderResponse> {
-  const envKey = (import.meta as any).env?.VITE_RAZORPAY_KEY_ID || null;
+  const envKey = (import.meta as any).env?.VITE_RAZORPAY_KEY_ID || DEFAULT_RAZORPAY_KEY_ID;
   
   try {
     const response = await fetch('/api/payment/create-order', {
@@ -67,14 +69,14 @@ export async function createRazorpayOrder(plan: SubscriptionPlan, userEmail?: st
     console.warn('Backend order API not reachable (static host), falling back to client order mode:', err);
   }
 
-  // Resilient fallback for static environments like Vercel
+  // Resilient fallback for static environments like Vercel & Netlify
   return {
     id: `order_client_${Date.now()}`,
     amount: Math.round(plan.price * 100),
     currency: 'INR',
     receipt: `rcpt_${plan.id}_${Date.now()}`,
-    isSimulation: !envKey || envKey === 'rzp_test_placeholder',
-    keyId: envKey || 'rzp_test_placeholder',
+    isSimulation: false,
+    keyId: envKey,
   };
 }
 
@@ -135,10 +137,10 @@ export async function openRazorpayCheckout({
   const razorpayKey = 
     (import.meta as any).env?.VITE_RAZORPAY_KEY_ID || 
     order.keyId || 
-    (typeof window !== 'undefined' ? (window as any).VITE_RAZORPAY_KEY_ID : null);
+    DEFAULT_RAZORPAY_KEY_ID;
 
   if (!razorpayKey || razorpayKey === 'rzp_test_placeholder') {
-    onError(new Error('Razorpay Key ID is not set. Please add VITE_RAZORPAY_KEY_ID (e.g. rzp_live_... or rzp_test_...) in your Vercel / Netlify Environment Variables.'));
+    onError(new Error('Razorpay Key ID is not set.'));
     return;
   }
 
