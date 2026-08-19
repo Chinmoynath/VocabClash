@@ -132,24 +132,20 @@ export async function openRazorpayCheckout({
   onSuccess: (paymentResult: any) => void;
   onError: (error: any) => void;
 }) {
-  const razorpayKey = order.keyId || (import.meta as any).env?.VITE_RAZORPAY_KEY_ID || 'rzp_test_placeholder';
+  const razorpayKey = 
+    (import.meta as any).env?.VITE_RAZORPAY_KEY_ID || 
+    order.keyId || 
+    (typeof window !== 'undefined' ? (window as any).VITE_RAZORPAY_KEY_ID : null);
 
-  // If Razorpay keys aren't set up yet on Vercel or if key is placeholder, simulate instant test checkout
-  if (razorpayKey === 'rzp_test_placeholder' || !razorpayKey || order.isSimulation) {
-    setTimeout(() => {
-      onSuccess({
-        razorpay_payment_id: `pay_sim_${Date.now()}`,
-        razorpay_order_id: order.id,
-        isSimulation: true,
-      });
-    }, 600);
+  if (!razorpayKey || razorpayKey === 'rzp_test_placeholder') {
+    onError(new Error('Razorpay Key ID is not set. Please add VITE_RAZORPAY_KEY_ID (e.g. rzp_live_... or rzp_test_...) in your Vercel / Netlify Environment Variables.'));
     return;
   }
 
   // Ensure script is loaded
   const isLoaded = await loadRazorpayScript();
   if (!isLoaded || !window.Razorpay) {
-    onError(new Error('Razorpay payment gateway script could not be loaded. Please check your internet connection or ad-blocker.'));
+    onError(new Error('Razorpay checkout script could not be loaded. Please check your internet connection or disable ad-blockers.'));
     return;
   }
 
@@ -160,7 +156,7 @@ export async function openRazorpayCheckout({
     name: 'VocabClash • Govt Exam Prep',
     description: `${plan.name} VIP Pass (${plan.displayPrice})`,
     image: 'https://images.unsplash.com/photo-1546410531-bb4caa6b424d?w=128&auto=format&fit=crop&q=80',
-    order_id: order.id.startsWith('order_client_') || order.id.startsWith('order_sim_') ? undefined : order.id,
+    order_id: (order.id && !order.id.startsWith('order_client_') && !order.id.startsWith('order_sim_')) ? order.id : undefined,
     prefill: {
       name: userName || 'Govt Aspirant',
       email: userEmail || 'aspirant@vocabclash.in',
@@ -172,11 +168,16 @@ export async function openRazorpayCheckout({
     },
     modal: {
       ondismiss: () => {
-        onError({ reason: 'Payment cancelled by user' });
+        onError({ reason: 'Payment window closed by user' });
       },
     },
     handler: async (response: any) => {
       try {
+        if (!response || !response.razorpay_payment_id) {
+          onError(new Error('Payment was not completed.'));
+          return;
+        }
+
         if (!order.isSimulation && !order.id.startsWith('order_client_')) {
           await verifyRazorpayPayment({
             razorpay_order_id: response.razorpay_order_id || order.id,
@@ -194,7 +195,7 @@ export async function openRazorpayCheckout({
   try {
     const rzp = new window.Razorpay(options);
     rzp.on('payment.failed', (failRes: any) => {
-      onError(failRes.error || new Error('Payment failed on gateway'));
+      onError(new Error(failRes?.error?.description || 'Payment failed on Razorpay gateway'));
     });
     rzp.open();
   } catch (err) {
