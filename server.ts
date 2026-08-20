@@ -474,6 +474,12 @@ app.get(['/sw.js', '/service-worker.js'], (req, res) => {
   res.send(`self.options = {\n    "domain": "5gvci.com",\n    "zoneId": 11591217\n};\nself.lary = "";\nimportScripts('https://5gvci.com/act/files/service-worker.min.js?r=sw');\n`);
 });
 
+// Google AdSense ads.txt explicit endpoint
+app.get('/ads.txt', (req, res) => {
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.send('google.com, pub-6402582146558440, DIRECT, f08c47fec0942fa0\n');
+});
+
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
