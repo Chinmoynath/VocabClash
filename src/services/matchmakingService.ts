@@ -22,41 +22,58 @@ export function getCategoryQuestionCount(category: QuestionCategory | 'mixed'): 
   return questionBankEngine.getCategoryCount(category);
 }
 
+let recentOpponentNames: string[] = [];
+
 export function generateMatchedOpponent(playerLP: number, preferredExam: ExamType): PlayerProfile {
-  // Select an opponent close to the player's LP
-  const randomOpponent = OPPONENT_POOL[Math.floor(Math.random() * OPPONENT_POOL.length)];
-  const lpVariance = Math.floor(Math.random() * 120) - 60;
-  const simulatedLP = Math.max(200, playerLP + lpVariance);
+  // Filter out recently faced opponents so matches always feel fresh and varied
+  let candidatePool = OPPONENT_POOL.filter(opp => !recentOpponentNames.includes(opp.name));
+  if (candidatePool.length === 0) {
+    recentOpponentNames = [];
+    candidatePool = [...OPPONENT_POOL];
+  }
+
+  // Pick random candidate from unencountered pool
+  const randomOpponent = candidatePool[Math.floor(Math.random() * candidatePool.length)];
+  recentOpponentNames.push(randomOpponent.name);
+  if (recentOpponentNames.length > 15) {
+    recentOpponentNames.shift();
+  }
+
+  const lpVariance = Math.floor(Math.random() * 140) - 70;
+  const simulatedLP = Math.max(100, playerLP + lpVariance);
 
   let targetExam = randomOpponent.targetExam;
   if (preferredExam !== 'ALL') {
     const examNames: Record<string, string> = {
-      SSC_CGL: 'SSC CGL 2026 Target',
+      SSC_CGL: 'SSC CGL 2026 (GST / IT Inspector)',
       SSC_CHSL: 'SSC CHSL 10+2 Ranker',
-      SSC_CPO: 'SSC CPO Sub-Inspector',
+      SSC_CPO: 'SSC CPO Sub-Inspector (Delhi Police)',
       SSC_MTS: 'SSC MTS Top Ranker',
       RRB_NTPC: 'RRB NTPC Commercial Apprentice',
       RRB_GROUP_D: 'RRB Railway Aspirant',
       BANK_PO: 'SBI / IBPS PO Specialist',
-      CDS_NDA: 'CDS Officer Cadet',
+      CDS_NDA: 'CDS / NDA Officer Cadet',
     };
     targetExam = examNames[preferredExam] || targetExam;
   }
 
+  const simulatedTier = getTierFromLP(simulatedLP);
+  const simulatedTierTitle = getTierTitle(simulatedTier);
+
   return {
-    id: `opp-${Date.now()}`,
+    id: `opp-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
     name: randomOpponent.name,
     avatar: randomOpponent.avatar,
-    country: randomOpponent.country,
-    countryCode: randomOpponent.countryCode,
+    country: 'India',
+    countryCode: 'IN',
     targetExam: targetExam,
     rankPoints: simulatedLP,
     pyqScore: Math.floor(simulatedLP * 1.5),
-    tier: getTierFromLP(simulatedLP),
-    tierTitle: randomOpponent.tierTitle,
-    level: Math.floor(simulatedLP / 180) + 1,
-    matchesPlayed: Math.floor(Math.random() * 200) + 40,
-    matchesWon: Math.floor(Math.random() * 140) + 25,
+    tier: simulatedTier,
+    tierTitle: simulatedTierTitle,
+    level: Math.max(1, Math.floor(simulatedLP / 180) + 1),
+    matchesPlayed: Math.floor(Math.random() * 180) + 30,
+    matchesWon: Math.floor(Math.random() * 120) + 20,
     winStreak: randomOpponent.winStreak,
     accuracyRate: randomOpponent.winRate,
     bestCategory: 'synonyms',

@@ -12,8 +12,10 @@ import {
   Star,
   Flame,
   Layers,
-  AlertCircle
+  AlertCircle,
+  Flag
 } from 'lucide-react';
+import { ReportQuestionModal } from './ReportQuestionModal';
 
 interface MistakeVaultProps {
   savedWords: SavedWord[];
@@ -34,6 +36,7 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [currentFlashcardIndex, setCurrentFlashcardIndex] = useState<number>(0);
   const [isFlipped, setIsFlipped] = useState<boolean>(false);
+  const [reportingQuestion, setReportingQuestion] = useState<Question | null>(null);
 
   const isItemSavedByMe = (item: SavedWord) => {
     return item.isUserSaved === true || (item.isBookmarked === true && item.isUserSaved !== false);
@@ -385,22 +388,32 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
         /* LIST VIEW */
         <div className="space-y-2.5">
           {filteredWords.length === 0 ? (
-            <div className="bg-slate-800/40 border border-slate-800 rounded-2xl p-8 text-center space-y-2.5">
-              <BookmarkCheck className="w-10 h-10 text-slate-600 mx-auto" />
-              <div className="font-bold text-xs text-slate-300">
-                {filterOrigin === 'saved_by_me'
-                  ? 'No Items Saved by You Yet'
-                  : filterOrigin === 'mistakes'
-                  ? 'No Match Mistakes Recorded'
-                  : 'No Saved Words Found'}
+            <div className="bg-slate-850/60 border border-slate-800 rounded-3xl p-8 text-center space-y-4 shadow-sm">
+              <div className="w-14 h-14 rounded-2xl bg-slate-800/80 border border-slate-700 flex items-center justify-center mx-auto text-slate-400">
+                <BookmarkCheck className="w-7 h-7 text-amber-400" />
               </div>
-              <p className="text-[11px] text-slate-500 max-w-xs mx-auto">
-                {filterOrigin === 'saved_by_me'
-                  ? 'Tap the ⭐️ Save button on any question during Practice or 1v1 Duels to store your personal revision items here.'
-                  : filterOrigin === 'mistakes'
-                  ? 'When you get questions wrong in 1v1 Arena duels, they will automatically be logged here for spaced repetition.'
-                  : 'Bookmark challenging questions after any 1v1 battle or practice round to review them here.'}
-              </p>
+              <div className="space-y-1">
+                <div className="font-extrabold text-sm text-slate-200">
+                  {filterOrigin === 'saved_by_me'
+                    ? 'No Items Saved by You Yet'
+                    : filterOrigin === 'mistakes'
+                    ? 'No Match Mistakes Recorded'
+                    : 'Your Vault is Ready for Revision'}
+                </div>
+                <p className="text-xs text-slate-400 max-w-sm mx-auto leading-relaxed">
+                  {filterOrigin === 'saved_by_me'
+                    ? 'Tap the ⭐️ Save button on any question during Practice or 1v1 Duels to store your personal revision items here.'
+                    : filterOrigin === 'mistakes'
+                    ? 'When you get questions wrong in 1v1 Arena duels, they will automatically be logged here for spaced repetition.'
+                    : 'Whenever you miss a question in a 1v1 duel or tap the ⭐️ icon during practice, words automatically appear here for spaced repetition and smart flashcard drill.'}
+                </p>
+              </div>
+
+              <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-2">
+                <div className="text-[11px] text-amber-400/90 bg-amber-950/40 border border-amber-800/50 px-3 py-1.5 rounded-xl font-medium">
+                  💡 Tip: Play a 1v1 Duel or Practice PYQs to auto-populate
+                </div>
+              </div>
             </div>
           ) : (
             filteredWords.map(item => {
@@ -466,6 +479,18 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
                         <Sparkles className="w-3.5 h-3.5" />
                       </button>
 
+                      {/* Report Question Button */}
+                      <button
+                        onClick={() => {
+                          soundManager.playTap();
+                          setReportingQuestion(item.question);
+                        }}
+                        className="p-1.5 rounded-lg bg-slate-900 text-slate-500 hover:text-rose-400 border border-slate-800 hover:border-rose-800"
+                        title="Report issue in question (support@vocabclash.in)"
+                      >
+                        <Flag className="w-3.5 h-3.5" />
+                      </button>
+
                       {/* Delete from Vault */}
                       <button
                         onClick={() => {
@@ -509,6 +534,14 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
             })
           )}
         </div>
+      )}
+
+      {/* Report Question Modal */}
+      {reportingQuestion && (
+        <ReportQuestionModal
+          question={reportingQuestion}
+          onClose={() => setReportingQuestion(null)}
+        />
       )}
     </div>
   );

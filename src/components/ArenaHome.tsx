@@ -105,16 +105,16 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
 
   return (
     <div className="flex-1 p-4 space-y-3.5 pb-6 overflow-y-auto no-scrollbar">
-      {/* Live Aspirants ticker banner */}
+      {/* Real-time Matchmaking status ticker banner */}
       <div className="bg-emerald-950/40 border border-emerald-800/40 rounded-xl px-3 py-1.5 flex items-center justify-between text-xs text-emerald-300">
         <div className="flex items-center gap-2">
           <span className="relative flex h-2 w-2">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
             <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
           </span>
-          <span className="font-semibold text-emerald-200">5,400+ Aspirants Live</span>
+          <span className="font-semibold text-emerald-200">Instant 1v1 Matchmaking</span>
         </div>
-        <span className="text-[11px] text-emerald-400/80 font-mono">Avg Match: 2.1s</span>
+        <span className="text-[11px] text-emerald-400/80 font-mono">Avg Queue: 2.1s</span>
       </div>
 
       {/* Guest Sign-In Banner if not signed in */}

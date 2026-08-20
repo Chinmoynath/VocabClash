@@ -45,6 +45,7 @@ import { MistakeVault } from './components/MistakeVault';
 import { PracticeMode } from './components/PracticeMode';
 import { LeaderboardView } from './components/LeaderboardView';
 import { AiTutorModal } from './components/AiTutorModal';
+import { AiTutorTab } from './components/AiTutorTab';
 import { ProfileModal } from './components/ProfileModal';
 import { PremiumModal } from './components/PremiumModal';
 import { InterstitialAdModal } from './components/InterstitialAdModal';
@@ -901,29 +902,7 @@ export default function App() {
             )}
 
             {currentTab === 'ai_coach' && (
-              <div className="flex-1 p-4 flex flex-col justify-center items-center text-center space-y-4">
-                <div className="w-16 h-16 rounded-full bg-purple-950/80 border-2 border-purple-500 flex items-center justify-center text-3xl shadow-xl animate-pulse">
-                  🤖
-                </div>
-                <div>
-                  <h2 className="text-base font-extrabold text-slate-100">
-                    AI Govt Exam Vocabulary Tutor
-                  </h2>
-                  <p className="text-xs text-slate-400 max-w-xs mx-auto mt-1">
-                    Dissect root words, discover Hinglish memory mnemonics, and explore repeat exam patterns with Gemini 3.7 Flash.
-                  </p>
-                </div>
-                <button
-                  onClick={() => {
-                    soundManager.playTap();
-                    setActiveAiQuestion(null);
-                    setShowAiModal(true);
-                  }}
-                  className="bg-purple-600 hover:bg-purple-500 text-white font-extrabold px-5 py-3 rounded-2xl text-xs shadow-lg shadow-purple-950 flex items-center gap-2"
-                >
-                  <span>Launch AI Vocabulary Studio</span>
-                </button>
-              </div>
+              <AiTutorTab />
             )}
           </>
         )}

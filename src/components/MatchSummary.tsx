@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   Trophy, 
   Award, 
@@ -11,12 +11,14 @@ import {
   X, 
   ChevronDown,
   Shield,
-  HelpCircle
+  HelpCircle,
+  Flag
 } from 'lucide-react';
 import { MatchState, PlayerProfile, Question } from '../types';
 import { soundManager } from '../utils/audio';
 import { AdSenseUnit } from './AdSenseUnit';
 import { ADSENSE_BANNER_SLOT } from '../services/adSenseService';
+import { ReportQuestionModal } from './ReportQuestionModal';
 
 interface MatchSummaryProps {
   player: PlayerProfile;
@@ -39,6 +41,7 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
   bookmarkedIds,
   isPremium = false,
 }) => {
+  const [reportingQuestion, setReportingQuestion] = useState<Question | null>(null);
   const isWinner = matchState.playerScore > matchState.opponentScore;
   const isDraw = matchState.playerScore === matchState.opponentScore;
 
@@ -169,6 +172,18 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
                   </div>
 
                   <div className="flex items-center gap-1">
+                    {/* Report Button */}
+                    <button
+                      onClick={() => {
+                        soundManager.playTap();
+                        setReportingQuestion(q);
+                      }}
+                      className="p-1.5 rounded-lg border border-slate-700 bg-slate-800 hover:bg-rose-950/40 hover:border-rose-700/60 text-slate-400 hover:text-rose-300 text-xs transition-colors"
+                      title="Report discrepancy in question (support@vocabclash.in)"
+                    >
+                      <Flag className="w-3.5 h-3.5 text-rose-400" />
+                    </button>
+
                     {/* Bookmark Button */}
                     <button
                       onClick={() => {
@@ -232,6 +247,15 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
           })}
         </div>
       </div>
+
+      {/* Report Question Modal */}
+      {reportingQuestion && (
+        <ReportQuestionModal
+          question={reportingQuestion}
+          userName={player.name}
+          onClose={() => setReportingQuestion(null)}
+        />
+      )}
     </div>
   );
 };

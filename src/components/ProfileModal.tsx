@@ -17,8 +17,11 @@ import {
   Crown,
   Sparkles,
   ChevronRight,
-  ShieldCheck
+  ShieldCheck,
+  LifeBuoy,
+  Mail
 } from 'lucide-react';
+import { SupportModal } from './SupportModal';
 
 export const TARGET_EXAM_GROUPS = [
   {
@@ -117,6 +120,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
 }) => {
   const [isEditing, setIsEditing] = useState<boolean>(false);
   const [showResetConfirm, setShowResetConfirm] = useState<boolean>(false);
+  const [showSupportModal, setShowSupportModal] = useState<boolean>(false);
   const [name, setName] = useState<string>(player.name);
   const [avatar, setAvatar] = useState<string>(player.avatar);
   const [targetExam, setTargetExam] = useState<string>(player.targetExam);
@@ -419,6 +423,33 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
           </button>
         )}
 
+        {/* 24/7 Help & Support Button */}
+        {!isEditing && (
+          <button
+            onClick={() => {
+              soundManager.playTap();
+              setShowSupportModal(true);
+            }}
+            className="w-full bg-gradient-to-r from-slate-850 to-slate-800 hover:from-slate-800 hover:to-slate-750 border border-slate-700/90 text-slate-200 font-bold p-2.5 rounded-xl text-xs flex items-center justify-between shadow-sm transition-all"
+          >
+            <div className="flex items-center gap-2.5">
+              <div className="w-7 h-7 rounded-lg bg-sky-500/20 text-sky-400 border border-sky-500/30 flex items-center justify-center">
+                <LifeBuoy className="w-4 h-4" />
+              </div>
+              <div className="text-left">
+                <div className="text-slate-100 font-bold flex items-center gap-1.5">
+                  <span>Help & Aspirant Support</span>
+                  <span className="text-[9px] bg-sky-950 text-sky-300 border border-sky-800/80 px-1.5 py-0.2 rounded font-mono font-normal">
+                    24/7
+                  </span>
+                </div>
+                <div className="text-[10px] text-sky-400 font-mono">support@vocabclash.in</div>
+              </div>
+            </div>
+            <ChevronRight className="w-4 h-4 text-slate-400" />
+          </button>
+        )}
+
         {/* Edit / Save Action */}
         <div className="space-y-2">
           {isEditing ? (
@@ -477,6 +508,15 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
             </div>
           )}
         </div>
+
+        {/* Support & Help Modal */}
+        {showSupportModal && (
+          <SupportModal
+            onClose={() => setShowSupportModal(false)}
+            player={player}
+            subscription={subscription}
+          />
+        )}
       </div>
     </div>
   );

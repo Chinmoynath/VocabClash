@@ -21,10 +21,14 @@ import {
   ChevronDown,
   ChevronUp,
   Layers,
-  Lightbulb
+  Lightbulb,
+  Flag,
+  LifeBuoy
 } from 'lucide-react';
 import { AdSenseUnit } from './AdSenseUnit';
 import { ADSENSE_BANNER_SLOT } from '../services/adSenseService';
+import { ReportQuestionModal } from './ReportQuestionModal';
+import { SupportModal } from './SupportModal';
 
 interface PracticeModeProps {
   pyqScore: number;
@@ -67,6 +71,8 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
   const [sessionSolvedCount, setSessionSolvedCount] = useState<number>(0);
   const [saveToast, setSaveToast] = useState<string | null>(null);
   const [showAllOptionBreakdown, setShowAllOptionBreakdown] = useState<boolean>(true);
+  const [showReportModal, setShowReportModal] = useState<boolean>(false);
+  const [showSupportModal, setShowSupportModal] = useState<boolean>(false);
   const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Overall mastery summary for top stats
@@ -251,44 +257,60 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
       {/* Question Card */}
       {currentQ && (
         <div className="space-y-3 pt-1">
-          {/* Top Info & Save Option Header */}
-          <div className="flex items-center justify-between text-xs text-slate-400">
-            <div className="flex items-center gap-1.5">
-              <span className="bg-amber-950/80 text-amber-300 border border-amber-800/60 px-2 py-0.5 rounded-full font-bold text-[10px]">
+          {/* Top Info & Actions Header (Clean 1-line layout) */}
+          <div className="flex items-center justify-between text-xs text-slate-400 gap-2">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="bg-amber-950/80 text-amber-300 border border-amber-800/60 px-2 py-0.5 rounded-full font-bold text-[10px] shrink-0">
                 🔥 Repeated {currentQ.repeatCount}x
               </span>
 
               {/* Mastery tag for this word */}
               {currentMastery && currentMastery.correctCount >= 10 ? (
-                <span className="bg-emerald-950/90 text-emerald-300 border border-emerald-700/80 px-2 py-0.5 rounded-full font-bold text-[10px] flex items-center gap-1">
+                <span className="bg-emerald-950/90 text-emerald-300 border border-emerald-700/80 px-2 py-0.5 rounded-full font-bold text-[10px] flex items-center gap-1 shrink-0">
                   <CheckCircle2 className="w-2.5 h-2.5" />
                   Mastered ({currentMastery.correctCount}✓)
                 </span>
               ) : currentMastery && currentMastery.correctCount > 0 ? (
-                <span className="bg-blue-950/80 text-blue-300 border border-blue-800/60 px-2 py-0.5 rounded-full font-semibold text-[10px]">
+                <span className="bg-blue-950/80 text-blue-300 border border-blue-800/60 px-2 py-0.5 rounded-full font-semibold text-[10px] shrink-0">
                   Learning ({currentMastery.correctCount}/10✓)
                 </span>
               ) : (
-                <span className="bg-slate-800 text-slate-400 border border-slate-700 px-2 py-0.5 rounded-full font-medium text-[10px]">
+                <span className="bg-slate-800 text-slate-400 border border-slate-700 px-2 py-0.5 rounded-full font-medium text-[10px] shrink-0">
                   Fresh Word
                 </span>
               )}
             </div>
 
-            {/* Quick Save / Bookmark Button at Top Right */}
-            <button
-              onClick={handleToggleBookmark}
-              id="pyq-save-button"
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg border text-xs font-bold transition-all ${
-                isBookmarked
-                  ? 'bg-amber-950 border-amber-600 text-amber-400 shadow-sm'
-                  : 'bg-slate-800 hover:bg-slate-750 border-slate-700 text-slate-300'
-              }`}
-              title="Save to Mistake & Revision Vault"
-            >
-              <Bookmark className={`w-3.5 h-3.5 ${isBookmarked ? 'fill-amber-400 text-amber-400' : 'text-slate-400'}`} />
-              <span>{isBookmarked ? 'Saved' : 'Save Question'}</span>
-            </button>
+            {/* Right side: Transparent Red Flag Icon + Save Button */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              {/* Transparent Red Flag Report Button */}
+              <button
+                onClick={() => {
+                  soundManager.playTap();
+                  setShowReportModal(true);
+                }}
+                className="p-1.5 rounded-lg text-rose-500/80 hover:text-rose-400 hover:bg-rose-950/40 active:scale-95 transition-all"
+                title="Report issue in this question (support@vocabclash.in)"
+                aria-label="Report Question"
+              >
+                <Flag className="w-3.5 h-3.5" />
+              </button>
+
+              {/* Save / Bookmark Button */}
+              <button
+                onClick={handleToggleBookmark}
+                id="pyq-save-button"
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-lg border text-xs font-bold transition-all ${
+                  isBookmarked
+                    ? 'bg-amber-950 border-amber-600 text-amber-400 shadow-sm'
+                    : 'bg-slate-800 hover:bg-slate-750 border-slate-700 text-slate-300'
+                }`}
+                title="Save to Mistake & Revision Vault"
+              >
+                <Bookmark className={`w-3.5 h-3.5 ${isBookmarked ? 'fill-amber-400 text-amber-400' : 'text-slate-400'}`} />
+                <span>{isBookmarked ? 'Saved' : 'Save Question'}</span>
+              </button>
+            </div>
           </div>
 
           <div className="bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700 rounded-2xl p-4 shadow-lg text-center space-y-1 relative">
@@ -540,6 +562,23 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
         <div className="pt-2">
           <AdSenseUnit slotId={ADSENSE_BANNER_SLOT} format="horizontal" isPremium={isPremium} />
         </div>
+      )}
+
+      {/* Question Discrepancy / Report Modal */}
+      {showReportModal && currentQ && (
+        <ReportQuestionModal
+          question={currentQ}
+          onClose={() => setShowReportModal(false)}
+        />
+      )}
+
+      {/* Support & Help Modal */}
+      {showSupportModal && (
+        <SupportModal
+          onClose={() => setShowSupportModal(false)}
+          prefilledSubject={`[PYQ Drill Support] VocabClash Question: "${currentQ?.wordOrPhrase || ''}"`}
+          prefilledBody={`Hi VocabClash Support,\n\nI am practicing in PYQ Drill Mode and have a query regarding word: "${currentQ?.wordOrPhrase || ''}" (ID: ${currentQ?.id || ''}).\n\nIssue/Query details:`}
+        />
       )}
     </div>
   );
