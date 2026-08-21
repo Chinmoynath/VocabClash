@@ -10,7 +10,7 @@ export const AndroidDeviceShell: React.FC<AndroidDeviceShellProps> = ({ children
   const [isPhoneFrame, setIsPhoneFrame] = useState<boolean>(true);
 
   return (
-    <div className="h-screen w-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-0 md:p-3 select-none overflow-hidden">
+    <div className="h-[100dvh] w-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-0 md:p-3 select-none overflow-hidden fixed inset-0">
       {/* Top Desktop Controls & Mode Toggle */}
       <aside aria-label="Device Controls" className="hidden md:flex items-center justify-between w-full max-w-md mb-2 px-2 text-xs text-slate-400 shrink-0">
         <div className="flex items-center gap-2">

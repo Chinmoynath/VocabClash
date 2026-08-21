@@ -282,7 +282,7 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
   const isTimerCritical = timeRemaining <= 3;
 
   return (
-    <div className="flex-1 flex flex-col justify-between p-3.5 relative overflow-hidden">
+    <div className="flex-1 flex flex-col justify-between p-3.5 space-y-3 pb-5 relative min-h-full">
       {/* Floating Reaction Emotes */}
       <div className="absolute inset-0 pointer-events-none z-40 overflow-hidden">
         {floatingEmotes.map(emote => (

@@ -85,7 +85,7 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
   const currentCard = filteredWords[currentFlashcardIndex];
 
   return (
-    <div className="flex-1 p-4 space-y-3.5 overflow-y-auto pb-8">
+    <div className="p-3.5 space-y-3 pb-3">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>

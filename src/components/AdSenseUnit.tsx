@@ -54,11 +54,11 @@ export const AdSenseUnit: React.FC<AdSenseUnitProps> = ({
   return (
     <div className={`w-full overflow-hidden flex flex-col items-center justify-center relative ${className}`}>
       {/* Real Google AdSense Slot */}
-      <div className="w-full flex justify-center items-center relative min-h-[100px]">
+      <div className="w-full flex justify-center items-center relative">
         <ins
           ref={adRef}
           className="adsbygoogle"
-          style={{ display: 'block', width: '100%', minHeight: '100px' }}
+          style={{ display: 'block', width: '100%' }}
           data-ad-client={ADSENSE_CLIENT_ID}
           data-ad-slot={slotId}
           data-ad-format={format}

@@ -817,7 +817,7 @@ export default function App() {
       />
 
       {/* Main Dynamic View Content */}
-      <main className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
+      <main id="app-main-content" className="flex-1 min-h-0 relative overflow-y-auto flex flex-col">
         {matchState ? (
           !isMatchCompleted ? (
             /* Live 1v1 Battle Arena Screen */

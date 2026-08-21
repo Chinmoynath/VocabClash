@@ -139,7 +139,7 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ player, isPrem
   ];
 
   return (
-    <div className="flex-1 p-4 space-y-3.5 overflow-y-auto pb-8">
+    <div className="p-3.5 space-y-3 pb-3">
       {/* Top Standings Banner */}
       <div className="bg-slate-850/80 border border-slate-800 rounded-2xl p-3.5 space-y-2.5">
         <div className="flex items-center justify-between">

@@ -104,7 +104,7 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
   const progressPercent = Math.min(100, Math.max(0, Math.round(((currentLP - prevTierLP) / (nextTierLP - prevTierLP)) * 100)));
 
   return (
-    <div className="flex-1 p-4 space-y-3.5 pb-6 overflow-y-auto no-scrollbar">
+    <div className="p-3.5 space-y-3 pb-3">
       {/* Real-time Matchmaking status ticker banner */}
       <div className="bg-emerald-950/40 border border-emerald-800/40 rounded-xl px-3 py-1.5 flex items-center justify-between text-xs text-emerald-300">
         <div className="flex items-center gap-2">

@@ -85,7 +85,7 @@ export const AiTutorTab: React.FC = () => {
   };
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 overflow-y-auto p-4 space-y-4 pb-12">
+    <div className="p-3.5 space-y-3 pb-3">
       {/* Header Banner */}
       <div className="bg-gradient-to-r from-purple-950/80 via-slate-900 to-indigo-950/80 border border-purple-800/40 rounded-2xl p-4 shadow-lg flex items-center justify-between">
         <div className="space-y-1">
