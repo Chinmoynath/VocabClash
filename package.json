@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "prebuild": "node scripts/generate-icons.js",
     "dev": "tsx server.ts",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
@@ -30,8 +31,10 @@
     "@types/express": "^5.0.6",
     "@types/node": "^22.14.0",
     "@types/nodemailer": "^8.0.1",
+    "@types/pngjs": "^6.0.5",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.28.2",
+    "pngjs": "^7.0.0",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.23.12",
     "typescript": "~5.8.2",
