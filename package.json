@@ -24,6 +24,7 @@
     "razorpay": "^2.9.8",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
+    "sharp": "^0.35.3",
     "vite": "^6.2.3"
   },
   "devDependencies": {
