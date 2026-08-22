@@ -114,11 +114,10 @@ export const DailyTargetCard: React.FC<DailyTargetCardProps> = ({
   return (
     <div 
       id="daily-target-container"
-      className="bg-gradient-to-br from-slate-900 via-slate-850 to-slate-900 border-2 border-amber-500/40 rounded-2xl p-4 shadow-xl relative overflow-hidden space-y-3 transition-all"
+      className="bg-gradient-to-br from-slate-900/95 via-slate-850/95 to-slate-900/95 border border-amber-500/30 rounded-2xl p-3 shadow-lg relative overflow-hidden space-y-2.5 transition-all"
     >
       {/* Background ambient lighting */}
-      <div className="absolute -top-12 -right-12 w-36 h-36 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute -bottom-10 -left-10 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute -top-12 -right-12 w-32 h-32 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
 
       {/* Floating Claim Toast */}
       {claimToast && (
@@ -129,26 +128,26 @@ export const DailyTargetCard: React.FC<DailyTargetCardProps> = ({
       )}
 
       {/* Top Header */}
-      <div className="flex items-center justify-between relative z-10">
-        <div className="flex items-center gap-2">
-          <span className="p-1.5 bg-amber-500/20 border border-amber-400/40 rounded-xl text-amber-400">
+      <div className="flex items-center justify-between gap-2 relative z-10">
+        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+          <span className="p-1.5 bg-amber-500/15 border border-amber-400/30 rounded-xl text-amber-400 shrink-0">
             <Target className="w-4 h-4" />
           </span>
-          <div>
-            <div className="flex items-center gap-1.5">
-              <h3 className="text-xs font-black uppercase tracking-wider text-amber-400">
-                Daily Question Target
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="text-xs font-black uppercase tracking-wider text-amber-400 truncate">
+                Daily Target
               </h3>
-              <span className="bg-amber-950/80 border border-amber-700/60 text-amber-300 text-[10px] font-extrabold px-2 py-0.5 rounded-full flex items-center gap-1">
-                <Flame className="w-3 h-3 fill-orange-400 text-orange-400" />
+              <span className="bg-amber-950/80 border border-amber-700/60 text-amber-300 text-[9px] font-extrabold px-1.5 py-0.5 rounded-md flex items-center gap-1 shrink-0 whitespace-nowrap shadow-sm">
+                <Flame className="w-2.5 h-2.5 fill-orange-400 text-orange-400" />
                 <span>+{potentialRewardLP} LP</span>
               </span>
             </div>
-            <p className="text-[11px] text-slate-300 font-medium">
+            <p className="text-[10px] text-slate-300 font-medium truncate mt-0.5">
               {isCompleted ? (
-                <span className="text-emerald-400 font-bold">🎉 Target achieved! Claim your bonus LP reward.</span>
+                <span className="text-emerald-400 font-bold">🎉 Target achieved! Claim your bonus LP.</span>
               ) : (
-                <span>Solve <b className="text-amber-300">{remaining} more questions</b> today to complete.</span>
+                <span>Solve <b className="text-amber-300">{remaining} more Qs</b> today to complete.</span>
               )}
             </p>
           </div>
@@ -160,15 +159,15 @@ export const DailyTargetCard: React.FC<DailyTargetCardProps> = ({
             soundManager.playTap();
             setShowSettings(!showSettings);
           }}
-          className={`p-2 rounded-xl border text-xs flex items-center gap-1 transition-all ${
+          className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold flex items-center gap-1.5 transition-all shrink-0 ml-1 active:scale-95 shadow-sm ${
             showSettings
-              ? 'bg-amber-500 text-slate-950 border-amber-400 font-bold shadow-md'
-              : 'bg-slate-800 hover:bg-slate-750 border-slate-700 text-slate-300'
+              ? 'bg-amber-500 text-slate-950 border-amber-400 font-black'
+              : 'bg-slate-800/90 hover:bg-slate-750 border-slate-700/80 text-slate-200'
           }`}
           title="Customize Daily Target (20 to 500 questions)"
         >
-          <Sliders className="w-3.5 h-3.5" />
-          <span className="text-[11px] font-bold hidden sm:inline">Target: {target}</span>
+          <Sliders className="w-3 h-3 text-amber-400" />
+          <span>{target} Qs</span>
         </button>
       </div>
 
@@ -243,72 +242,60 @@ export const DailyTargetCard: React.FC<DailyTargetCardProps> = ({
       )}
 
       {/* Progress Bar & Solved Status */}
-      <div className="space-y-2 bg-slate-950/70 border border-slate-800/80 rounded-xl p-3">
-        <div className="flex items-center justify-between text-xs">
+      <div className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-2.5">
+        <div className="flex items-center justify-between text-[11px] mb-1.5">
           <div className="flex items-center gap-1.5 font-bold">
-            <span className="text-slate-300">Progress:</span>
-            <span className="text-amber-400 font-mono text-sm font-black">{solved}</span>
+            <span className="text-slate-400">Progress:</span>
+            <span className="text-amber-400 font-mono font-black">{solved}</span>
             <span className="text-slate-500 font-mono">/ {target} questions</span>
+            <span className="text-amber-400/90 font-bold ml-0.5">({percentage}%)</span>
           </div>
 
-          <div className="flex items-center gap-2">
-            <span className={`font-bold font-mono text-xs ${
-              isCompleted ? 'text-emerald-400' : 'text-slate-300'
-            }`}>
-              {percentage}%
-            </span>
-            <div className="flex items-center gap-1 text-[10px] text-slate-400 font-mono border-l border-slate-800 pl-2">
-              <Clock className="w-3 h-3 text-sky-400" />
-              <span>{timeLeft}</span>
-            </div>
+          <div className="flex items-center gap-1 text-[10px] text-slate-400 font-mono">
+            <Clock className="w-3 h-3 text-sky-400" />
+            <span>{timeLeft}</span>
           </div>
         </div>
 
         {/* The Progress Bar */}
-        <div className="w-full bg-slate-900 rounded-full h-3.5 overflow-hidden border border-slate-700/60 relative p-0.5 shadow-inner">
+        <div className="w-full bg-slate-900 rounded-full h-2 overflow-hidden border border-slate-800 relative shadow-inner">
           <div 
-            className={`h-full rounded-full transition-all duration-500 relative flex items-center justify-end pr-1 shadow-md ${
+            className={`h-full rounded-full transition-all duration-500 ${
               isCompleted 
-                ? 'bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-400' 
-                : 'bg-gradient-to-r from-amber-500 via-orange-500 to-amber-400'
+                ? 'bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-400 shadow-sm shadow-emerald-500/50' 
+                : 'bg-gradient-to-r from-amber-500 via-orange-500 to-amber-400 shadow-sm shadow-orange-500/50'
             }`}
-            style={{ width: `${Math.max(4, percentage)}%` }}
-          >
-            {percentage >= 25 && (
-              <span className="text-[9px] font-black text-slate-950 font-mono leading-none">
-                {percentage}%
-              </span>
-            )}
-          </div>
+            style={{ width: `${Math.max(2, percentage)}%` }}
+          />
         </div>
       </div>
 
       {/* Action / Claim Footer */}
       <div className="flex items-center justify-between gap-2 pt-0.5">
-        <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
-          <Zap className="w-3.5 h-3.5 text-amber-400" />
-          <span>Counts 1v1 Matches & PYQ Drill practice</span>
+        <div className="text-[10px] text-slate-400 flex items-center gap-1 truncate">
+          <Zap className="w-3 h-3 text-amber-400 shrink-0" />
+          <span className="truncate">Counts 1v1 Matches & Drill practice</span>
         </div>
 
         <div>
           {isClaimed ? (
-            <div className="flex items-center gap-1 text-xs font-bold text-emerald-400 bg-emerald-950/80 border border-emerald-800/60 px-3 py-1.5 rounded-xl shadow-sm">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>Reward Claimed ✓</span>
+            <div className="flex items-center gap-1 text-xs font-bold text-emerald-400 bg-emerald-950/80 border border-emerald-800/60 px-2.5 py-1 rounded-lg shadow-sm">
+              <CheckCircle2 className="w-3 h-3" />
+              <span>Claimed ✓</span>
             </div>
           ) : isCompleted ? (
             <button
               onClick={handleClaim}
               id="claim-daily-target-reward-btn"
-              className="bg-gradient-to-r from-amber-400 via-orange-400 to-amber-300 hover:from-amber-300 hover:to-orange-300 active:scale-95 text-slate-950 font-black text-xs px-3.5 py-1.5 rounded-xl shadow-xl flex items-center gap-1.5 border border-amber-100 animate-bounce"
+              className="bg-gradient-to-r from-amber-400 via-orange-400 to-amber-300 hover:from-amber-300 hover:to-orange-300 active:scale-95 text-slate-950 font-black text-xs px-3 py-1 rounded-lg shadow-md flex items-center gap-1 border border-amber-100 animate-bounce"
             >
-              <Gift className="w-3.5 h-3.5 fill-slate-950" />
+              <Gift className="w-3 h-3 fill-slate-950" />
               <span>CLAIM +{potentialRewardLP} LP</span>
             </button>
           ) : (
             <button
               onClick={handleQuickAction}
-              className="bg-gradient-to-r from-sky-600 to-sky-500 hover:from-sky-500 hover:to-sky-400 active:scale-95 text-white font-bold text-xs px-3 py-1.5 rounded-xl border border-sky-400/40 flex items-center gap-1 shadow-md transition-all"
+              className="bg-sky-500 hover:bg-sky-400 active:scale-95 text-slate-950 font-black text-xs px-3 py-1.5 rounded-xl border border-sky-400/40 flex items-center gap-1 shadow-sm transition-all"
             >
               <span>Practice Now</span>
               <ChevronRight className="w-3.5 h-3.5" />

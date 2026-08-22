@@ -145,36 +145,6 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
             <ChevronRight className="w-3 h-3" />
           </div>
         </div>
-      ) : currentUser ? (
-        <div
-          onClick={() => {
-            soundManager.playTap();
-            if (onOpenProfile) onOpenProfile();
-          }}
-          className="bg-emerald-950/30 border border-emerald-700/40 rounded-2xl p-2.5 flex items-center justify-between cursor-pointer hover:border-emerald-500/60 transition-all shadow-sm"
-        >
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 flex items-center justify-center shrink-0">
-              <Cloud className="w-4 h-4 text-emerald-400" />
-            </div>
-            <div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs font-bold text-emerald-300">Cloud Synced</span>
-                <span className="text-[9px] bg-emerald-900/60 text-emerald-200 border border-emerald-600/40 px-1.5 py-0.2 rounded font-mono font-bold">
-                  Active
-                </span>
-              </div>
-              <p className="text-[10px] text-slate-300 truncate max-w-[200px]">
-                {currentUser.email || currentUser.displayName || 'Logged in'} • LP & stats secured
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-1 text-[10px] font-bold text-emerald-400">
-            <span>View Profile</span>
-            <ChevronRight className="w-3 h-3" />
-          </div>
-        </div>
       ) : null}
 
       {/* Premium VIP Banner (matches user design style) */}
@@ -183,82 +153,33 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
           soundManager.playTap();
           onOpenPremium();
         }}
-        className={`rounded-2xl p-3 border cursor-pointer transition-all flex items-center justify-between shadow-lg ${
+        className={`rounded-2xl p-3 border cursor-pointer transition-all flex items-center justify-between gap-3 shadow-lg ${
           subscription.isPremium
             ? 'bg-gradient-to-r from-purple-950/80 via-slate-900 to-indigo-950/80 border-purple-600/50 hover:border-purple-400'
             : 'bg-gradient-to-r from-[#24123b] via-[#1a1329] to-[#161026] border-purple-500/50 hover:border-purple-400 shadow-[0_0_15px_rgba(147,51,234,0.15)]'
         }`}
       >
-        <div className="flex items-center gap-3">
-          <VocabClashLogo size="md" className="rounded-xl ring-2 ring-purple-400/50 shadow-md" />
-          <div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs font-black text-white">
-                {subscription.isPremium ? 'Premium Active' : 'VocabClash Premium'}
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          <VocabClashLogo size="md" className="rounded-xl ring-2 ring-purple-400/50 shadow-md shrink-0" />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-black text-white truncate">
+                {subscription.isPremium ? 'VocabClash VIP' : 'VocabClash Premium'}
               </span>
-              <span className="text-[9px] bg-purple-900/90 text-purple-200 border border-purple-500/50 px-1.5 py-0.2 rounded font-bold uppercase">
-                {subscription.isPremium ? 'VIP' : 'From ₹19/mo'}
+              <span className="text-[9px] bg-purple-900/90 text-purple-200 border border-purple-400/40 px-1.5 py-0.5 rounded-md font-bold uppercase tracking-wider whitespace-nowrap shadow-sm">
+                {subscription.isPremium ? 'VIP Active' : '₹19/mo'}
               </span>
             </div>
-            <p className="text-[10px] text-purple-300/90 line-clamp-1">
+            <p className="text-[10px] text-purple-300/90 truncate mt-0.5">
               {subscription.isPremium 
                 ? (subscription.renewalDate || 'Always Ad-Free • Unlimited Passes') 
-                : 'Always Ad-Free • 1v1 Battles • Offline Practice'}
+                : 'Ad-Free • Unlimited 1v1 Battles • Offline Mode'}
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-1 bg-purple-900/60 hover:bg-purple-800 text-purple-200 border border-purple-500/40 px-2.5 py-1 rounded-xl text-[11px] font-bold shrink-0">
+        <div className="flex items-center gap-1 bg-gradient-to-r from-purple-700 to-indigo-600 hover:from-purple-600 hover:to-indigo-500 text-white px-3 py-1.5 rounded-xl text-xs font-bold shrink-0 shadow-md shadow-purple-950/50 border border-purple-400/30 transition-all ml-2">
           <span>{subscription.isPremium ? 'Manage' : 'Upgrade'}</span>
-          <ChevronRight className="w-3.5 h-3.5" />
-        </div>
-      </div>
-
-      {/* Daily Streak Banner */}
-      <div
-        onClick={() => {
-          soundManager.playTap();
-          onOpenStreak();
-        }}
-        className={`rounded-2xl p-3 border cursor-pointer transition-all flex items-center justify-between shadow-lg ${
-          dailyStreak.currentStreak > 0
-            ? 'bg-gradient-to-r from-[#2a1708] via-[#1f1208] to-[#170e06] border-orange-600/50 hover:border-orange-400 shadow-[0_0_15px_rgba(249,115,22,0.15)]'
-            : 'bg-slate-900/90 border-slate-800 hover:border-slate-700'
-        }`}
-      >
-        <div className="flex items-center gap-3">
-          <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-md border shrink-0 ${
-            dailyStreak.currentStreak > 0
-              ? 'bg-gradient-to-tr from-amber-600 to-orange-600 border-amber-400/50'
-              : 'bg-slate-800 border-slate-700 text-slate-500'
-          }`}>
-            <Flame className={`w-5 h-5 ${
-              dailyStreak.currentStreak > 0 ? 'fill-amber-200 text-amber-200 animate-bounce' : 'text-slate-500'
-            }`} />
-          </div>
-          <div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs font-black text-white">
-                {dailyStreak.currentStreak > 0 ? `${dailyStreak.currentStreak}-Day Streak Active` : 'Start Daily Streak'}
-              </span>
-              <span className={`text-[9px] px-1.5 py-0.2 rounded font-bold uppercase ${
-                dailyStreak.currentStreak > 0
-                  ? 'bg-orange-950/90 text-orange-200 border border-orange-500/50'
-                  : 'bg-slate-800 text-slate-400 border border-slate-700'
-              }`}>
-                {dailyStreak.currentStreak > 0 ? 'On Fire 🔥' : '0 Days'}
-              </span>
-            </div>
-            <p className="text-[10px] text-orange-300/90 line-clamp-1">
-              {dailyStreak.currentStreak > 0
-                ? 'Practice daily to keep streak • Resets to 0 if 1 day missed'
-                : 'Complete 1 duel or practice drill today to ignite streak'}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-1 bg-orange-950/70 hover:bg-orange-900 text-orange-200 border border-orange-500/40 px-2.5 py-1 rounded-xl text-[11px] font-bold shrink-0">
-          <span>Tracker</span>
           <ChevronRight className="w-3.5 h-3.5" />
         </div>
       </div>
@@ -430,28 +351,30 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
             soundManager.playTap();
             onStartMatchmaking('1v1_ranked');
           }}
-          className="w-full bg-gradient-to-r from-amber-600 via-orange-500 to-amber-500 hover:from-amber-500 hover:to-orange-400 active:scale-[0.98] text-slate-950 font-black p-3.5 rounded-2xl shadow-lg shadow-orange-950/60 flex items-center justify-between border border-amber-300/40 transition-all group"
+          className="w-full bg-gradient-to-r from-amber-600 via-orange-500 to-amber-500 hover:from-amber-500 hover:to-orange-400 active:scale-[0.98] text-slate-950 font-black p-3.5 rounded-2xl shadow-lg shadow-orange-950/60 flex items-center justify-between gap-3 border border-amber-300/40 transition-all group"
         >
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-xl bg-slate-950/20 flex items-center justify-center text-xl shadow-inner group-hover:rotate-12 transition-transform">
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            <div className="w-11 h-11 rounded-xl bg-slate-950/20 flex items-center justify-center text-xl shadow-inner group-hover:rotate-12 transition-transform shrink-0">
               ⚔️
             </div>
-            <div className="text-left">
-              <div className="text-sm font-extrabold tracking-wide uppercase text-slate-950 flex items-center gap-1.5">
-                <span>1v1 Head-to-Head Duel</span>
-                <span className="text-[10px] bg-slate-950/40 text-amber-100 font-mono px-1.5 py-0.2 rounded">
-                  20 Questions
+            <div className="text-left min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs sm:text-sm font-extrabold tracking-wide uppercase text-slate-950 truncate">
+                  1v1 Vocab Online Duel
+                </span>
+                <span className="text-[9px] bg-slate-950/30 text-amber-950 font-extrabold px-1.5 py-0.5 rounded-md border border-slate-950/20 whitespace-nowrap">
+                  20 Qs
                 </span>
               </div>
-              <div className="text-[11px] text-slate-900/80 font-semibold">
+              <div className="text-[11px] text-slate-900/85 font-semibold truncate mt-0.5">
                 Full 20-Round Battle • +30 LP on Victory
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-1 bg-slate-950/20 px-2.5 py-1.5 rounded-xl text-slate-950 font-bold text-xs">
+          <div className="flex items-center gap-1 bg-slate-950/25 hover:bg-slate-950/35 px-3 py-1.5 rounded-xl text-slate-950 font-black text-xs shrink-0 shadow-sm border border-slate-950/15 ml-1">
             <span>START</span>
-            <ChevronRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+            <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
           </div>
         </button>
 
