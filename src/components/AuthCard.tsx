@@ -10,6 +10,7 @@ import {
   getFriendlyAuthErrorMessage
 } from '../services/firebaseService';
 import { soundManager } from '../utils/audio';
+import { extractCleanUserName } from '../utils/nameHelper';
 import { 
   Cloud, 
   CheckCircle2, 
@@ -228,7 +229,7 @@ export const AuthCard: React.FC<AuthCardProps> = ({
             </div>
             <p className="text-[10px] text-slate-400">
               {currentUser
-                ? `Logged in as ${currentUser.displayName || currentUser.email || 'Aspirant'}`
+                ? `Logged in as ${extractCleanUserName(currentUser.displayName, currentUser.email)}`
                 : 'Sign in or register directly to protect your rank & streak.'}
             </p>
           </div>
@@ -286,12 +287,12 @@ export const AuthCard: React.FC<AuthCardProps> = ({
                 />
               ) : (
                 <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-indigo-600 to-purple-600 text-white flex items-center justify-center text-xs font-black shrink-0 shadow-sm">
-                  {currentUser.displayName ? currentUser.displayName[0].toUpperCase() : (currentUser.email ? currentUser.email[0].toUpperCase() : 'U')}
+                  {extractCleanUserName(currentUser.displayName, currentUser.email).charAt(0).toUpperCase()}
                 </div>
               )}
               <div className="truncate">
                 <div className="text-xs text-slate-100 font-bold truncate flex items-center gap-1">
-                  <span>{currentUser.displayName || 'Govt Aspirant'}</span>
+                  <span>{extractCleanUserName(currentUser.displayName, currentUser.email)}</span>
                   {currentUser.emailVerified && (
                     <ShieldCheck className="w-3 h-3 text-emerald-400" title="Email Verified" />
                   )}

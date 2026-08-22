@@ -18,6 +18,7 @@ import {
 } from './services/matchmakingService';
 import { soundManager } from './utils/audio';
 import { isAdDue, resetAdTimerForTest } from './utils/adManager';
+import { extractCleanUserName, formatNameFromEmail } from './utils/nameHelper';
 import { 
   getInitialStreak, 
   saveStreakState, 
@@ -86,13 +87,13 @@ function sanitizeProfile(raw: any, googleUser?: FirebaseUser | null): PlayerProf
     (raw.matchesPlayed === 48 && (raw.rankPoints === 1840 || raw.rankPoints === 1865 || raw.rankPoints >= 1800)) ||
     (raw.tierTitle && raw.tierTitle.includes('2800 GP') && raw.matchesPlayed <= 50);
 
-  const googleName = googleUser?.displayName?.trim() || (googleUser?.email ? googleUser.email.split('@')[0] : '');
+  const cleanUserName = extractCleanUserName(googleUser?.displayName, googleUser?.email);
 
   if (isLegacyDemo) {
     return {
       ...INITIAL_PLAYER,
       id: googleUser ? googleUser.uid : 'user-live-1',
-      name: googleName || 'Govt Aspirant',
+      name: cleanUserName || 'Govt Aspirant',
       photoURL: googleUser?.photoURL || undefined,
       email: googleUser?.email || undefined,
       rankPoints: 100,
@@ -117,11 +118,20 @@ function sanitizeProfile(raw: any, googleUser?: FirebaseUser | null): PlayerProf
   const tierTitle = getTierTitle(tier);
   const level = Math.max(1, Math.floor(matchesPlayed / 3) + 1);
 
+  // If raw name is the default placeholder or looks like a raw email prefix without spaces and with digits, format it cleanly
+  let effectiveName = raw.name;
+  if (!effectiveName || effectiveName === 'Aspirant Rahul') {
+    effectiveName = cleanUserName || 'Govt Aspirant';
+  } else if (!effectiveName.includes(' ') && /\d/.test(effectiveName)) {
+    // Looks like raw email prefix stored previously (e.g. "surajkumarhero7399")
+    effectiveName = extractCleanUserName(effectiveName, googleUser?.email || raw.email);
+  }
+
   return {
     ...INITIAL_PLAYER,
     ...raw,
     id: googleUser ? googleUser.uid : (raw.id || 'user-live-1'),
-    name: (raw.name && raw.name !== 'Aspirant Rahul') ? raw.name : (googleName || 'Govt Aspirant'),
+    name: effectiveName || cleanUserName || 'Govt Aspirant',
     photoURL: googleUser?.photoURL || raw.photoURL || undefined,
     email: googleUser?.email || raw.email || undefined,
     rankPoints,
@@ -252,10 +262,18 @@ export default function App() {
 
           // Try to load existing cloud data for this user
           const cloudData = await fetchUserDataFromFirestore(user.uid);
-          const googleName = user.displayName?.trim() || (user.email ? user.email.split('@')[0] : '');
+          const cleanAuthName = extractCleanUserName(user.displayName, user.email);
           
           if (cloudData && cloudData.player) {
             const cloudP = cloudData.player;
+            // Clean up cloud name if it was previously saved as a raw email username
+            let resolvedName = cloudP.name;
+            if (!resolvedName || resolvedName === 'Aspirant Rahul') {
+              resolvedName = cleanAuthName || localPlayer.name || 'Govt Aspirant';
+            } else if (!resolvedName.includes(' ') && /\d/.test(resolvedName)) {
+              resolvedName = extractCleanUserName(resolvedName, user.email || cloudP.email);
+            }
+
             // Intelligently merge: preserve whichever source has higher progress
             const mergedLP = Math.max(cloudP.rankPoints ?? 0, localPlayer.rankPoints ?? 0, 100);
             const mergedPYQScore = Math.max(cloudP.pyqScore ?? 0, localPlayer.pyqScore ?? 0);
@@ -271,7 +289,7 @@ export default function App() {
               ...INITIAL_PLAYER,
               ...cloudP,
               id: user.uid,
-              name: (cloudP.name && cloudP.name !== 'Aspirant Rahul') ? cloudP.name : (googleName || localPlayer.name || 'Govt Aspirant'),
+              name: resolvedName || cleanAuthName || localPlayer.name || 'Govt Aspirant',
               avatar: cloudP.avatar || localPlayer.avatar || '👨‍💼',
               country: cloudP.country || localPlayer.country || 'India',
               countryCode: cloudP.countryCode || localPlayer.countryCode || 'IN',
@@ -328,7 +346,7 @@ export default function App() {
             const newPlayer: PlayerProfile = {
               ...INITIAL_PLAYER,
               id: user.uid,
-              name: googleName || localPlayer.name || 'Govt Aspirant',
+              name: cleanAuthName || localPlayer.name || 'Govt Aspirant',
               avatar: localPlayer.avatar || '👨‍💼',
               country: localPlayer.country || 'India',
               countryCode: localPlayer.countryCode || 'IN',
@@ -718,10 +736,10 @@ export default function App() {
   };
 
   const handleResetStats = async () => {
-    const googleName = currentUser?.displayName?.trim() || (currentUser?.email ? currentUser.email.split('@')[0] : '');
+    const cleanAuthName = extractCleanUserName(currentUser?.displayName, currentUser?.email);
     const cleanPlayer: PlayerProfile = {
       id: currentUser ? currentUser.uid : 'user-live-1',
-      name: googleName || player.name || 'Govt Aspirant',
+      name: cleanAuthName || player.name || 'Govt Aspirant',
       avatar: player.avatar || '👨‍💼',
       country: 'India',
       countryCode: 'IN',

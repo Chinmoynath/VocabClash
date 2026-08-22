@@ -10,6 +10,7 @@ import { soundManager } from '../utils/audio';
 import { createRazorpayOrder, openRazorpayCheckout } from '../services/razorpayService';
 import { GoogleAuthCard } from './GoogleAuthCard';
 import { VocabClashLogo } from './VocabClashLogo';
+import { extractCleanUserName } from '../utils/nameHelper';
 import { 
   X, 
   Check, 
@@ -110,7 +111,7 @@ export const PremiumModal: React.FC<PremiumModalProps> = ({
   const [statusMessage, setStatusMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
 
   const effectiveEmail = currentUser?.email || currentUserEmail || player?.email;
-  const effectiveName = currentUser?.displayName || player?.name || 'Govt Aspirant';
+  const effectiveName = extractCleanUserName(currentUser?.displayName || player?.name, effectiveEmail);
 
   const selectedPlan = SUBSCRIPTION_PLANS.find(p => p.id === selectedPlanId) || SUBSCRIPTION_PLANS[1];
 

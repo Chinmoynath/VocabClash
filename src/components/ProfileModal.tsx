@@ -4,6 +4,7 @@ import { soundManager } from '../utils/audio';
 import { User as FirebaseUser } from 'firebase/auth';
 import { GoogleAuthCard } from './GoogleAuthCard';
 import { VocabClashLogo } from './VocabClashLogo';
+import { extractCleanUserName } from '../utils/nameHelper';
 import { 
   User, 
   X, 
@@ -278,9 +279,11 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
             </div>
           ) : (
             <div>
-              <h2 className="text-base font-extrabold text-slate-100">{player.name}</h2>
+              <h2 className="text-base font-extrabold text-slate-100">
+                {extractCleanUserName(player.name, currentUser?.email || player.email)}
+              </h2>
               {currentUser?.email && (
-                <div className="text-[10px] text-slate-400 font-mono">{currentUser.email}</div>
+                <div className="text-[10px] text-slate-400 font-mono mt-0.5">{currentUser.email}</div>
               )}
             </div>
           )}

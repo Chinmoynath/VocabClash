@@ -8,10 +8,9 @@
   "theme_color": "#0f172a",
   "icons": [
     {
-      "src": "/favicon.svg",
+      "src": "https://firebasestorage.googleapis.com/v0/b/tactile-world-jq6d2.firebasestorage.app/o/WhatsApp%20Image%202026-08-20%20at%2020.49.29.jpeg?alt=media&token=9f2a6019-fcc3-437f-8a31-29248bd200b8",
       "sizes": "192x192 512x512",
-      "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "type": "image/jpeg"
     }
   ]
 }

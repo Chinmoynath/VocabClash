@@ -2,6 +2,7 @@ import React from 'react';
 import { Flame, Volume2, VolumeX, Shield, Crown } from 'lucide-react';
 import { PlayerProfile, UserSubscription, DailyStreakState } from '../types';
 import { soundManager } from '../utils/audio';
+import { extractCleanUserName } from '../utils/nameHelper';
 
 interface TopBarProps {
   player: PlayerProfile;
@@ -52,8 +53,8 @@ export const TopBar: React.FC<TopBarProps> = ({
 
         <div>
           <div className="flex items-center gap-1">
-            <span className="font-bold text-xs text-slate-100 group-hover:text-amber-400 transition-colors">
-              {player.name}
+            <span className="font-bold text-xs text-slate-100 group-hover:text-amber-400 transition-colors truncate max-w-[120px] sm:max-w-[160px]">
+              {extractCleanUserName(player.name, player.email)}
             </span>
             <span className="text-[10px] bg-slate-800 text-slate-300 px-1 py-0.2 rounded font-mono">
               🇮🇳 IN
