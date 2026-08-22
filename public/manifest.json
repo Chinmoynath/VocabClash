@@ -53,7 +53,7 @@
     },
     {
       "src": "/screenshot-wide.png",
-      "sizes": "512x512",
+      "sizes": "1024x512",
       "type": "image/png",
       "form_factor": "wide",
       "label": "VocabClash 1v1 Arena Desktop View"
