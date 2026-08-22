@@ -52,6 +52,7 @@ import { PremiumModal } from './components/PremiumModal';
 import { InterstitialAdModal } from './components/InterstitialAdModal';
 import { StreakModal } from './components/StreakModal';
 import { OnboardingTourModal } from './components/OnboardingTourModal';
+import { WifiOff } from 'lucide-react';
 
 const STORAGE_KEY_PLAYER = 'vocabclash_player_v5';
 const STORAGE_KEY_VAULT = 'vocabclash_vault_v2';
@@ -205,6 +206,31 @@ export default function App() {
   const [selectedCategory, setSelectedCategory] = useState<QuestionCategory | 'mixed'>('mixed');
   const [selectedExam, setSelectedExam] = useState<ExamType>('SSC_CGL');
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
+
+  // Online / Network state
+  const [isOnline, setIsOnline] = useState<boolean>(() => {
+    return typeof navigator !== 'undefined' ? navigator.onLine : true;
+  });
+
+  // Listen to network status changes
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+      // Immediately cancel any active matchmaking when offline
+      setIsMatchmaking(false);
+      setMatchedOpponent(null);
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   // Matchmaking & Game state
   const [isMatchmaking, setIsMatchmaking] = useState<boolean>(false);
@@ -488,8 +514,13 @@ export default function App() {
     }
   };
 
-  // Start matchmaking flow
+  // Start matchmaking flow (STRICTLY BLOCKED WHEN OFFLINE)
   const handleStartMatchmaking = (mode: '1v1_ranked' | 'quick_duel' | 'daily_challenge') => {
+    // If device is offline, block 1v1 battle matchmaking completely - no bot opponent creation
+    if (!navigator.onLine || !isOnline) {
+      soundManager.playWrong();
+      return;
+    }
     setMatchMode(mode);
     const opp = generateMatchedOpponent(player.rankPoints, selectedExam);
     setMatchedOpponent(opp);
@@ -498,7 +529,11 @@ export default function App() {
 
   // When matchmaking countdown finishes -> transition to Live Duel
   const handleReadyToFight = () => {
-    if (!matchedOpponent) return;
+    if (!navigator.onLine || !isOnline || !matchedOpponent) {
+      setIsMatchmaking(false);
+      setMatchedOpponent(null);
+      return;
+    }
 
     const roundCount = matchMode === 'quick_duel' ? 10 : 20;
     const questions = getFilteredQuestions(selectedCategory, selectedExam, roundCount);
@@ -834,6 +869,16 @@ export default function App() {
         }}
       />
 
+      {/* Global Offline Network Alert Banner */}
+      {!isOnline && (
+        <div className="bg-red-950/95 border-b-2 border-red-500/80 px-3.5 py-2.5 text-center text-red-100 flex items-center justify-center gap-2 shadow-lg shadow-red-950/50 shrink-0 z-30">
+          <WifiOff className="w-4 h-4 text-red-400 animate-pulse shrink-0" />
+          <span className="font-extrabold text-xs sm:text-sm tracking-wide">
+            arena connection failed: please connect to the internet to play 1v1 battles
+          </span>
+        </div>
+      )}
+
       {/* Main Dynamic View Content */}
       <main id="app-main-content" className="flex-1 min-h-0 relative overflow-y-auto flex flex-col">
         {matchState ? (
@@ -880,6 +925,7 @@ export default function App() {
                 selectedCategory={selectedCategory}
                 selectedExam={selectedExam}
                 currentUser={currentUser}
+                isOnline={isOnline}
                 onSelectCategory={setSelectedCategory}
                 onSelectExam={setSelectedExam}
                 onStartMatchmaking={handleStartMatchmaking}

@@ -25,7 +25,8 @@ import {
   ChevronRight,
   TrendingUp,
   LogOut,
-  AlertTriangle
+  AlertTriangle,
+  WifiOff
 } from 'lucide-react';
 
 interface LiveDuelArenaProps {
@@ -51,6 +52,19 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
   onSendEmote,
   onLeaveMatch,
 }) => {
+  const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
   const currentQIndex = matchState.currentQuestionIndex;
   const currentQuestion = matchState.questions[currentQIndex];
 
@@ -283,6 +297,24 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
 
   return (
     <div className="flex-1 flex flex-col justify-between p-3.5 space-y-3 pb-5 relative min-h-full">
+      {/* Offline Alert Banner in Live Duel */}
+      {!isOnline && (
+        <div className="bg-red-950/95 border-2 border-red-500/90 rounded-2xl p-3.5 shadow-2xl flex items-center justify-between gap-3 text-red-100 z-50">
+          <div className="flex items-center gap-2.5">
+            <WifiOff className="w-5 h-5 text-red-400 animate-pulse shrink-0" />
+            <span className="font-black text-xs sm:text-sm">
+              arena connection failed: please connect to the internet to play 1v1 battles
+            </span>
+          </div>
+          <button
+            onClick={onLeaveMatch}
+            className="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl text-xs shrink-0"
+          >
+            Leave Match
+          </button>
+        </div>
+      )}
+
       {/* Floating Reaction Emotes */}
       <div className="absolute inset-0 pointer-events-none z-40 overflow-hidden">
         {floatingEmotes.map(emote => (
