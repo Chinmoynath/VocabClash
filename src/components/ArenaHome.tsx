@@ -147,42 +147,38 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
         </div>
       ) : null}
 
-      {/* Premium VIP Banner (matches user design style) */}
-      <div 
-        onClick={() => {
-          soundManager.playTap();
-          onOpenPremium();
-        }}
-        className={`rounded-2xl p-3 border cursor-pointer transition-all flex items-center justify-between gap-3 shadow-lg ${
-          subscription.isPremium
-            ? 'bg-gradient-to-r from-purple-950/80 via-slate-900 to-indigo-950/80 border-purple-600/50 hover:border-purple-400'
-            : 'bg-gradient-to-r from-[#24123b] via-[#1a1329] to-[#161026] border-purple-500/50 hover:border-purple-400 shadow-[0_0_15px_rgba(147,51,234,0.15)]'
-        }`}
-      >
-        <div className="flex items-center gap-3 min-w-0 flex-1">
-          <VocabClashLogo size="md" className="rounded-xl ring-2 ring-purple-400/50 shadow-md shrink-0" />
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs font-black text-white truncate">
-                {subscription.isPremium ? 'VocabClash VIP' : 'VocabClash Premium'}
-              </span>
-              <span className="text-[9px] bg-purple-900/90 text-purple-200 border border-purple-400/40 px-1.5 py-0.5 rounded-md font-bold uppercase tracking-wider whitespace-nowrap shadow-sm">
-                {subscription.isPremium ? 'VIP Active' : '₹19/mo'}
-              </span>
+      {/* Premium VIP Banner (Only shown to free users. Automatically hidden when VIP active, reappears if expired) */}
+      {!subscription.isPremium && (
+        <div 
+          onClick={() => {
+            soundManager.playTap();
+            onOpenPremium();
+          }}
+          className="rounded-2xl p-3 border cursor-pointer transition-all flex items-center justify-between gap-3 shadow-lg bg-gradient-to-r from-[#24123b] via-[#1a1329] to-[#161026] border-purple-500/50 hover:border-purple-400 shadow-[0_0_15px_rgba(147,51,234,0.15)]"
+        >
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            <VocabClashLogo size="md" className="rounded-xl ring-2 ring-purple-400/50 shadow-md shrink-0" />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-black text-white truncate">
+                  VocabClash Premium
+                </span>
+                <span className="text-[9px] bg-purple-900/90 text-purple-200 border border-purple-400/40 px-1.5 py-0.5 rounded-md font-bold uppercase tracking-wider whitespace-nowrap shadow-sm">
+                  ₹19/mo
+                </span>
+              </div>
+              <p className="text-[10px] text-purple-300/90 truncate mt-0.5">
+                Ad-Free • Unlimited 1v1 Battles • Offline Mode
+              </p>
             </div>
-            <p className="text-[10px] text-purple-300/90 truncate mt-0.5">
-              {subscription.isPremium 
-                ? (subscription.renewalDate || 'Always Ad-Free • Unlimited Passes') 
-                : 'Ad-Free • Unlimited 1v1 Battles • Offline Mode'}
-            </p>
+          </div>
+
+          <div className="flex items-center gap-1 bg-gradient-to-r from-purple-700 to-indigo-600 hover:from-purple-600 hover:to-indigo-500 text-white px-3 py-1.5 rounded-xl text-xs font-bold shrink-0 shadow-md shadow-purple-950/50 border border-purple-400/30 transition-all ml-2">
+            <span>Upgrade</span>
+            <ChevronRight className="w-3.5 h-3.5" />
           </div>
         </div>
-
-        <div className="flex items-center gap-1 bg-gradient-to-r from-purple-700 to-indigo-600 hover:from-purple-600 hover:to-indigo-500 text-white px-3 py-1.5 rounded-xl text-xs font-bold shrink-0 shadow-md shadow-purple-950/50 border border-purple-400/30 transition-all ml-2">
-          <span>{subscription.isPremium ? 'Manage' : 'Upgrade'}</span>
-          <ChevronRight className="w-3.5 h-3.5" />
-        </div>
-      </div>
+      )}
 
       {/* Free-Tier Ad Status / Demo Bypass helper for fast evaluation */}
       {!subscription.isPremium && (
@@ -206,65 +202,6 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
           </button>
         </div>
       )}
-
-      {/* Hero Rank Status Card */}
-      <div className="bg-gradient-to-br from-slate-800/90 via-slate-800/60 to-slate-900/90 border border-slate-700/80 rounded-2xl p-4 shadow-xl relative overflow-hidden">
-        {/* Background glow */}
-        <div className="absolute -right-10 -top-10 w-36 h-36 bg-amber-500/10 rounded-full blur-2xl pointer-events-none"></div>
-
-        <div className="flex items-start justify-between relative z-10">
-          <div>
-            <div className="text-[11px] font-semibold text-slate-400 tracking-wider uppercase flex items-center gap-1.5">
-              <span>Govt Service Rank</span>
-              <span className="px-1.5 py-0.2 bg-amber-950/80 text-amber-300 border border-amber-800/60 rounded text-[9px] font-bold">
-                SEASON 2026
-              </span>
-            </div>
-            <h2 className="text-base font-extrabold text-amber-300 mt-0.5 flex items-center gap-1.5">
-              {player.tierTitle}
-            </h2>
-            <div 
-              onClick={() => {
-                if (onOpenProfile) {
-                  soundManager.playTap();
-                  onOpenProfile();
-                }
-              }}
-              className="text-xs text-slate-300 mt-1 cursor-pointer hover:text-white transition-colors flex items-center gap-1 group"
-              title="Click to switch your target post"
-            >
-              <span>Target:</span>
-              <span className="text-emerald-400 font-semibold group-hover:underline underline-offset-2 truncate max-w-[200px] sm:max-w-xs">
-                {player.targetExam}
-              </span>
-              <span className="text-[10px] text-slate-500 group-hover:text-amber-400">✏️</span>
-            </div>
-          </div>
-
-          <div className="text-right">
-            <div className="text-2xl font-black text-amber-400 font-mono tracking-tight">
-              {player.rankPoints} <span className="text-xs font-normal text-slate-400">LP</span>
-            </div>
-            <div className="text-[10px] text-slate-400 mt-0.5">
-              Win Rate: <span className="text-emerald-400 font-bold">{player.accuracyRate}%</span> ({player.matchesWon}W / {player.matchesPlayed}M)
-            </div>
-          </div>
-        </div>
-
-        {/* Tier Progress Bar */}
-        <div className="mt-3.5 space-y-1">
-          <div className="flex justify-between text-[11px] text-slate-400 font-medium">
-            <span>Promotion Progress</span>
-            <span className="text-amber-300 font-bold">{nextTierLP - currentLP} LP to Next Cadre</span>
-          </div>
-          <div className="w-full bg-slate-950/80 rounded-full h-2 overflow-hidden border border-slate-700/50">
-            <div
-              className="bg-gradient-to-r from-amber-500 via-orange-500 to-amber-300 h-full rounded-full transition-all duration-500 shadow-sm"
-              style={{ width: `${progressPercent}%` }}
-            ></div>
-          </div>
-        </div>
-      </div>
 
       {/* Target Exam Filter Pills */}
       <div className="space-y-1.5">
@@ -344,37 +281,41 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
       </div>
 
       {/* Main Action Buttons */}
-      <div className="space-y-2.5 pt-1">
-        {/* Primary Ranked 1v1 Battle Button */}
+      <div className="space-y-3 pt-1">
+        {/* Primary Ranked 1v1 Battle Button - Big, Bold, Eye-Catching */}
         <button
           onClick={() => {
             soundManager.playTap();
             onStartMatchmaking('1v1_ranked');
           }}
-          className="w-full bg-gradient-to-r from-amber-600 via-orange-500 to-amber-500 hover:from-amber-500 hover:to-orange-400 active:scale-[0.98] text-slate-950 font-black p-3.5 rounded-2xl shadow-lg shadow-orange-950/60 flex items-center justify-between gap-3 border border-amber-300/40 transition-all group"
+          className="w-full bg-gradient-to-r from-amber-500 via-orange-500 to-amber-500 hover:from-amber-400 hover:to-orange-400 active:scale-[0.98] text-slate-950 p-4 sm:p-5 rounded-2xl shadow-xl shadow-orange-950/70 flex items-center justify-between gap-3 border-2 border-amber-300/60 transition-all group relative overflow-hidden"
         >
-          <div className="flex items-center gap-3 min-w-0 flex-1">
-            <div className="w-11 h-11 rounded-xl bg-slate-950/20 flex items-center justify-center text-xl shadow-inner group-hover:rotate-12 transition-transform shrink-0">
+          {/* Subtle light shimmer sweep */}
+          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/15 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 pointer-events-none" />
+
+          <div className="flex items-center gap-3.5 min-w-0 flex-1 relative z-10">
+            <div className="w-13 h-13 rounded-2xl bg-slate-950/25 border border-slate-950/20 flex items-center justify-center text-2xl shadow-inner group-hover:scale-110 group-hover:rotate-6 transition-transform shrink-0">
               ⚔️
             </div>
             <div className="text-left min-w-0 flex-1">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs sm:text-sm font-extrabold tracking-wide uppercase text-slate-950 truncate">
-                  1v1 Vocab Online Duel
+                <span className="text-sm sm:text-base font-black tracking-wide uppercase text-slate-950 leading-tight">
+                  1V1 VOCAB ONLINE DUEL
                 </span>
-                <span className="text-[9px] bg-slate-950/30 text-amber-950 font-extrabold px-1.5 py-0.5 rounded-md border border-slate-950/20 whitespace-nowrap">
+                <span className="text-[10px] bg-slate-950/35 text-amber-100 font-extrabold px-2 py-0.5 rounded-md border border-slate-950/20 whitespace-nowrap shadow-sm">
                   20 Qs
                 </span>
               </div>
-              <div className="text-[11px] text-slate-900/85 font-semibold truncate mt-0.5">
-                Full 20-Round Battle • +30 LP on Victory
+              <div className="text-xs text-slate-950/85 font-bold mt-1">
+                Full 20-Round Battle • <span className="text-slate-950 font-black">+30 LP on Victory</span>
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-1 bg-slate-950/25 hover:bg-slate-950/35 px-3 py-1.5 rounded-xl text-slate-950 font-black text-xs shrink-0 shadow-sm border border-slate-950/15 ml-1">
+          {/* Aesthetic High-Contrast START Button */}
+          <div className="relative z-10 flex items-center gap-1.5 bg-gradient-to-b from-slate-950 to-slate-900 text-amber-300 hover:text-amber-200 border border-amber-400/40 hover:border-amber-300 px-4 py-2.5 rounded-xl font-black text-xs sm:text-sm tracking-wider uppercase shrink-0 shadow-lg shadow-slate-950/60 group-hover:scale-105 transition-all">
             <span>START</span>
-            <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+            <ChevronRight className="w-4 h-4 text-amber-400 group-hover:translate-x-1 transition-transform" />
           </div>
         </button>
 
@@ -419,6 +360,65 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
               <div className="text-[10px] text-indigo-300/80">20 High-repeat PYQs</div>
             </div>
           </button>
+        </div>
+      </div>
+
+      {/* Govt Service Rank & Promotion Progress Card (Positioned right above Daily Target) */}
+      <div className="bg-gradient-to-br from-slate-800/90 via-slate-800/60 to-slate-900/90 border border-slate-700/80 rounded-2xl p-4 shadow-xl relative overflow-hidden">
+        {/* Background glow */}
+        <div className="absolute -right-10 -top-10 w-36 h-36 bg-amber-500/10 rounded-full blur-2xl pointer-events-none"></div>
+
+        <div className="flex items-start justify-between relative z-10">
+          <div>
+            <div className="text-[11px] font-semibold text-slate-400 tracking-wider uppercase flex items-center gap-1.5">
+              <span>Govt Service Rank</span>
+              <span className="px-1.5 py-0.2 bg-amber-950/80 text-amber-300 border border-amber-800/60 rounded text-[9px] font-bold">
+                SEASON 2026
+              </span>
+            </div>
+            <h2 className="text-base font-extrabold text-amber-300 mt-0.5 flex items-center gap-1.5">
+              {player.tierTitle}
+            </h2>
+            <div 
+              onClick={() => {
+                if (onOpenProfile) {
+                  soundManager.playTap();
+                  onOpenProfile();
+                }
+              }}
+              className="text-xs text-slate-300 mt-1 cursor-pointer hover:text-white transition-colors flex items-center gap-1 group"
+              title="Click to switch your target post"
+            >
+              <span>Target:</span>
+              <span className="text-emerald-400 font-semibold group-hover:underline underline-offset-2 truncate max-w-[200px] sm:max-w-xs">
+                {player.targetExam}
+              </span>
+              <span className="text-[10px] text-slate-500 group-hover:text-amber-400">✏️</span>
+            </div>
+          </div>
+
+          <div className="text-right">
+            <div className="text-2xl font-black text-amber-400 font-mono tracking-tight">
+              {player.rankPoints} <span className="text-xs font-normal text-slate-400">LP</span>
+            </div>
+            <div className="text-[10px] text-slate-400 mt-0.5">
+              Win Rate: <span className="text-emerald-400 font-bold">{player.accuracyRate}%</span> ({player.matchesWon}W / {player.matchesPlayed}M)
+            </div>
+          </div>
+        </div>
+
+        {/* Tier Progress Bar */}
+        <div className="mt-3.5 space-y-1">
+          <div className="flex justify-between text-[11px] text-slate-400 font-medium">
+            <span>Promotion Progress</span>
+            <span className="text-amber-300 font-bold">{nextTierLP - currentLP} LP to Next Cadre</span>
+          </div>
+          <div className="w-full bg-slate-950/80 rounded-full h-2 overflow-hidden border border-slate-700/50">
+            <div
+              className="bg-gradient-to-r from-amber-500 via-orange-500 to-amber-300 h-full rounded-full transition-all duration-500 shadow-sm"
+              style={{ width: `${progressPercent}%` }}
+            ></div>
+          </div>
         </div>
       </div>
 
