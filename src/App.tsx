@@ -40,6 +40,9 @@ import { TopBar } from './components/TopBar';
 import { BottomNavBar, TabType } from './components/BottomNavBar';
 import { ArenaHome } from './components/ArenaHome';
 import { MatchmakingModal } from './components/MatchmakingModal';
+import { DuelModeSelectionModal } from './components/DuelModeSelectionModal';
+import { FriendRoomModal } from './components/FriendRoomModal';
+import { DuelRoomData } from './services/multiplayerService';
 import { LiveDuelArena } from './components/LiveDuelArena';
 import { MatchSummary } from './components/MatchSummary';
 import { MistakeVault } from './components/MistakeVault';
@@ -52,6 +55,7 @@ import { PremiumModal } from './components/PremiumModal';
 import { InterstitialAdModal } from './components/InterstitialAdModal';
 import { StreakModal } from './components/StreakModal';
 import { OnboardingTourModal } from './components/OnboardingTourModal';
+import { WifiOff } from 'lucide-react';
 
 const STORAGE_KEY_PLAYER = 'vocabclash_player_v5';
 const STORAGE_KEY_VAULT = 'vocabclash_vault_v2';
@@ -206,8 +210,38 @@ export default function App() {
   const [selectedExam, setSelectedExam] = useState<ExamType>('SSC_CGL');
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
 
+  // Online / Network state
+  const [isOnline, setIsOnline] = useState<boolean>(() => {
+    return typeof navigator !== 'undefined' ? navigator.onLine : true;
+  });
+
+  // Listen to network status changes
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+      // Immediately cancel any active matchmaking when offline
+      setIsMatchmaking(false);
+      setMatchedOpponent(null);
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
   // Matchmaking & Game state
   const [isMatchmaking, setIsMatchmaking] = useState<boolean>(false);
+  const [showDuelSelectionModal, setShowDuelSelectionModal] = useState<boolean>(false);
+  const [showFriendRoomModal, setShowFriendRoomModal] = useState<boolean>(false);
+  const [friendRoomInitialView, setFriendRoomInitialView] = useState<'create' | 'join'>('create');
+  const [activeDuelRoom, setActiveDuelRoom] = useState<DuelRoomData | null>(null);
+  const [userDuelRole, setUserDuelRole] = useState<'host' | 'guest'>('host');
   const [matchMode, setMatchMode] = useState<'1v1_ranked' | 'quick_duel' | 'daily_challenge'>('1v1_ranked');
   const [matchedOpponent, setMatchedOpponent] = useState<PlayerProfile | null>(null);
   const [matchState, setMatchState] = useState<MatchState | null>(null);
@@ -488,17 +522,95 @@ export default function App() {
     }
   };
 
-  // Start matchmaking flow
+  // Start 1v1 Vocab Duel (Opens Mode Selection: Random Online vs. Friend Room)
   const handleStartMatchmaking = (mode: '1v1_ranked' | 'quick_duel' | 'daily_challenge') => {
+    // If device is offline, block 1v1 battle matchmaking completely - no bot opponent creation
+    if (!navigator.onLine || !isOnline) {
+      soundManager.playWrong();
+      return;
+    }
     setMatchMode(mode);
-    const opp = generateMatchedOpponent(player.rankPoints, selectedExam);
-    setMatchedOpponent(opp);
+    setShowDuelSelectionModal(true);
+  };
+
+  // Start Random Match from Modal
+  const handleSelectRandomMatch = (mode: '1v1_ranked' | 'quick_duel' | 'daily_challenge') => {
+    setShowDuelSelectionModal(false);
+    setMatchMode(mode);
     setIsMatchmaking(true);
   };
 
+  // Start Friend Room from Modal
+  const handleOpenFriendRoom = (view: 'create' | 'join') => {
+    setShowDuelSelectionModal(false);
+    setFriendRoomInitialView(view);
+    setShowFriendRoomModal(true);
+  };
+
+  // Synchronized Start of Duel from either Random Match or Friend Room
+  const handleStartDuelWithRoom = (roomData: DuelRoomData, role: 'host' | 'guest') => {
+    if (!navigator.onLine || !isOnline) {
+      setIsMatchmaking(false);
+      setShowFriendRoomModal(false);
+      return;
+    }
+
+    setActiveDuelRoom(roomData);
+    setUserDuelRole(role);
+
+    const opp = role === 'host' ? roomData.guest! : roomData.host;
+    setMatchedOpponent(opp);
+
+    // Use synchronized questions generated in room
+    const questions = roomData.questions;
+
+    const newMatch: MatchState = {
+      matchId: roomData.roomCode,
+      mode: roomData.mode as any,
+      categoryFilter: roomData.category as any,
+      examFilter: roomData.exam as any,
+      opponent: opp,
+      questions,
+      currentQuestionIndex: 0,
+      playerScore: 0,
+      opponentScore: 0,
+      playerAnswers: [],
+      opponentAnswers: [],
+      status: 'in_round',
+      questionStartTime: Date.now(),
+      timeRemainingSec: 15,
+      comboStreak: 0,
+      opponentCombo: 0,
+      activeEmotes: [],
+      powerups: {
+        fiftyFiftyUsed: false,
+        freezeTimeUsed: false,
+        hintUsed: false,
+      },
+      eliminatedOptionIndices: [],
+      isTimeFrozen: false,
+      hintRevealed: false,
+    };
+
+    setMatchState(newMatch);
+    setIsMatchmaking(false);
+    setShowFriendRoomModal(false);
+    setShowDuelSelectionModal(false);
+    setIsMatchCompleted(false);
+  };
+
   // When matchmaking countdown finishes -> transition to Live Duel
-  const handleReadyToFight = () => {
-    if (!matchedOpponent) return;
+  const handleReadyToFight = (roomData?: DuelRoomData, role?: 'host' | 'guest') => {
+    if (roomData && role) {
+      handleStartDuelWithRoom(roomData, role);
+      return;
+    }
+
+    if (!navigator.onLine || !isOnline || !matchedOpponent) {
+      setIsMatchmaking(false);
+      setMatchedOpponent(null);
+      return;
+    }
 
     const roundCount = matchMode === 'quick_duel' ? 10 : 20;
     const questions = getFilteredQuestions(selectedCategory, selectedExam, roundCount);
@@ -724,6 +836,7 @@ export default function App() {
 
   const handleLeaveMatch = () => {
     soundManager.playTap();
+    setActiveDuelRoom(null);
     setMatchState(null);
     setIsMatchCompleted(false);
     setCurrentTab('arena');
@@ -834,6 +947,16 @@ export default function App() {
         }}
       />
 
+      {/* Global Offline Network Alert Banner */}
+      {!isOnline && (
+        <div className="bg-red-950/95 border-b-2 border-red-500/80 px-3.5 py-2.5 text-center text-red-100 flex items-center justify-center gap-2 shadow-lg shadow-red-950/50 shrink-0 z-30">
+          <WifiOff className="w-4 h-4 text-red-400 animate-pulse shrink-0" />
+          <span className="font-extrabold text-xs sm:text-sm tracking-wide">
+            arena connection failed: please connect to the internet to play 1v1 battles
+          </span>
+        </div>
+      )}
+
       {/* Main Dynamic View Content */}
       <main id="app-main-content" className="flex-1 min-h-0 relative overflow-y-auto flex flex-col">
         {matchState ? (
@@ -842,6 +965,8 @@ export default function App() {
             <LiveDuelArena
               player={player}
               matchState={matchState}
+              roomCode={activeDuelRoom?.roomCode}
+              role={userDuelRole}
               onAnswerQuestion={handleAnswerQuestion}
               onCompleteMatch={handleCompleteMatch}
               onSendEmote={handleSendEmote}
@@ -853,11 +978,13 @@ export default function App() {
               player={player}
               matchState={matchState}
               onPlayAgain={() => {
+                setActiveDuelRoom(null);
                 setMatchState(null);
                 setIsMatchCompleted(false);
                 handleStartMatchmaking(matchMode);
               }}
               onBackToLobby={() => {
+                setActiveDuelRoom(null);
                 setMatchState(null);
                 setIsMatchCompleted(false);
                 setCurrentTab('arena');
@@ -880,6 +1007,7 @@ export default function App() {
                 selectedCategory={selectedCategory}
                 selectedExam={selectedExam}
                 currentUser={currentUser}
+                isOnline={isOnline}
                 onSelectCategory={setSelectedCategory}
                 onSelectExam={setSelectedExam}
                 onStartMatchmaking={handleStartMatchmaking}
@@ -926,14 +1054,43 @@ export default function App() {
         )}
       </main>
 
-      {/* Matchmaking Radar Modal */}
-      {isMatchmaking && (
-        <MatchmakingModal
+      {/* 1v1 Mode Selection Modal (Random Online vs Play with Friends) */}
+      {showDuelSelectionModal && (
+        <DuelModeSelectionModal
           player={player}
-          opponent={matchedOpponent}
           mode={matchMode}
           category={selectedCategory}
           exam={selectedExam}
+          isOnline={isOnline}
+          onClose={() => setShowDuelSelectionModal(false)}
+          onSelectRandomMatch={handleSelectRandomMatch}
+          onSelectCreateRoom={() => handleOpenFriendRoom('create')}
+          onSelectJoinRoom={() => handleOpenFriendRoom('join')}
+        />
+      )}
+
+      {/* Friend Room Modal (Create 6-char Room Code / Join Room) */}
+      {showFriendRoomModal && (
+        <FriendRoomModal
+          initialView={friendRoomInitialView}
+          player={player}
+          exam={selectedExam}
+          category={selectedCategory}
+          mode={matchMode}
+          isOnline={isOnline}
+          onClose={() => setShowFriendRoomModal(false)}
+          onStartDuel={handleStartDuelWithRoom}
+        />
+      )}
+
+      {/* Matchmaking Radar Modal for Random Online Battles */}
+      {isMatchmaking && (
+        <MatchmakingModal
+          player={player}
+          mode={matchMode}
+          category={selectedCategory}
+          exam={selectedExam}
+          isOnline={isOnline}
           onCancel={() => setIsMatchmaking(false)}
           onReadyToFight={handleReadyToFight}
         />

@@ -10,6 +10,13 @@ import {
   simulateOpponentAnswer, 
   generateRandomOpponentEmote 
 } from '../services/matchmakingService';
+import {
+  listenToDuelRoom,
+  updatePlayerRoomProgress,
+  sendDuelRoomEmote,
+  cancelOrLeaveDuelRoom,
+  DuelRoomData
+} from '../services/multiplayerService';
 import { soundManager } from '../utils/audio';
 import { 
   Zap, 
@@ -25,12 +32,15 @@ import {
   ChevronRight,
   TrendingUp,
   LogOut,
-  AlertTriangle
+  AlertTriangle,
+  WifiOff
 } from 'lucide-react';
 
 interface LiveDuelArenaProps {
   player: PlayerProfile;
   matchState: MatchState;
+  roomCode?: string;
+  role?: 'host' | 'guest';
   onAnswerQuestion: (
     playerAnswer: PlayerAnswerRecord,
     opponentAnswer: PlayerAnswerRecord,
@@ -46,11 +56,61 @@ const ROUND_TIME_SEC = 15;
 export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
   player,
   matchState,
+  roomCode,
+  role,
   onAnswerQuestion,
   onCompleteMatch,
   onSendEmote,
   onLeaveMatch,
 }) => {
+  const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
+  const [opponentDisconnected, setOpponentDisconnected] = useState<boolean>(false);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // Listen to multiplayer room updates in real-time
+  useEffect(() => {
+    if (!roomCode || !role) return;
+
+    const unsub = listenToDuelRoom(
+      roomCode,
+      (updatedRoom) => {
+        if (updatedRoom.status === 'abandoned') {
+          setOpponentDisconnected(true);
+          return;
+        }
+
+        const oppEmote = role === 'host' ? updatedRoom.guestEmote : updatedRoom.hostEmote;
+        if (oppEmote && oppEmote.timestamp > (Date.now() - 3000)) {
+          triggerFloatingEmote('opponent', oppEmote.emoji, oppEmote.text);
+        }
+
+        const oppIndex = role === 'host' ? updatedRoom.guestCurrentIndex : updatedRoom.hostCurrentIndex;
+        if (oppIndex > matchState.currentQuestionIndex) {
+          setOpponentAnsweredState({
+            answered: true,
+            isCorrect: true,
+            points: 100,
+          });
+        }
+      },
+      (err) => {
+        console.warn('Live duel room error:', err);
+      }
+    );
+
+    return () => unsub();
+  }, [roomCode, role, matchState.currentQuestionIndex]);
+
   const currentQIndex = matchState.currentQuestionIndex;
   const currentQuestion = matchState.questions[currentQIndex];
 
@@ -203,6 +263,17 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
       scoreGained: oppScoreGained,
     };
 
+    // If active multiplayer room, sync progress to Firestore
+    if (roomCode && role) {
+      updatePlayerRoomProgress(roomCode, role, {
+        score: Math.max(0, matchState.playerScore + playerScoreGained),
+        currentIndex: currentQIndex + 1,
+        combo: newPlayerCombo,
+        finished: currentQIndex + 1 >= matchState.questions.length,
+        answerRecord: playerRecord,
+      }).catch(err => console.warn('Update player progress error:', err));
+    }
+
     // Auto advance to next question or end match after short delay
     setTimeout(() => {
       onAnswerQuestion(playerRecord, opponentRecord, {
@@ -263,6 +334,9 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
     soundManager.playTap();
     triggerFloatingEmote('player', emoji);
     onSendEmote(emoji);
+    if (roomCode && role) {
+      sendDuelRoomEmote(roomCode, role, emoji).catch(err => console.warn('Send room emote error:', err));
+    }
     setShowEmotePicker(false);
   };
 
@@ -283,6 +357,43 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
 
   return (
     <div className="flex-1 flex flex-col justify-between p-3.5 space-y-3 pb-5 relative min-h-full">
+      {/* Opponent Disconnected / Left Notice */}
+      {opponentDisconnected && (
+        <div className="bg-amber-950/95 border-2 border-amber-500/90 rounded-2xl p-3.5 shadow-2xl flex items-center justify-between gap-3 text-amber-100 z-50 animate-bounce">
+          <div className="flex items-center gap-2.5">
+            <span className="text-xl">🏆</span>
+            <div>
+              <div className="font-black text-xs sm:text-sm">Opponent Left the Match!</div>
+              <div className="text-[11px] text-amber-300/90">Victory awarded to you. Tap to claim result.</div>
+            </div>
+          </div>
+          <button
+            onClick={onCompleteMatch}
+            className="px-3.5 py-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black rounded-xl text-xs shrink-0 shadow-lg"
+          >
+            Claim Victory
+          </button>
+        </div>
+      )}
+
+      {/* Offline Alert Banner in Live Duel */}
+      {!isOnline && (
+        <div className="bg-red-950/95 border-2 border-red-500/90 rounded-2xl p-3.5 shadow-2xl flex items-center justify-between gap-3 text-red-100 z-50">
+          <div className="flex items-center gap-2.5">
+            <WifiOff className="w-5 h-5 text-red-400 animate-pulse shrink-0" />
+            <span className="font-black text-xs sm:text-sm">
+              arena connection failed: please connect to the internet to play 1v1 battles
+            </span>
+          </div>
+          <button
+            onClick={onLeaveMatch}
+            className="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl text-xs shrink-0"
+          >
+            Leave Match
+          </button>
+        </div>
+      )}
+
       {/* Floating Reaction Emotes */}
       <div className="absolute inset-0 pointer-events-none z-40 overflow-hidden">
         {floatingEmotes.map(emote => (
