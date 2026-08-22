@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { PlayerProfile, ExamType, QuestionCategory } from '../types';
 import { soundManager } from '../utils/audio';
-import { Shield, Flame, Swords, X, Globe, Radio, WifiOff } from 'lucide-react';
+import { Shield, Flame, Swords, X, Globe, Radio } from 'lucide-react';
 
 interface MatchmakingModalProps {
   player: PlayerProfile;
@@ -25,50 +25,20 @@ export const MatchmakingModal: React.FC<MatchmakingModalProps> = ({
   const [searchStep, setSearchStep] = useState<number>(0);
   const [countdown, setCountdown] = useState<number | null>(null);
 
-  // Monitor offline state
   useEffect(() => {
-    if (!navigator.onLine) {
-      onCancel();
-      return;
-    }
-    const handleOffline = () => {
-      onCancel();
-    };
-    window.addEventListener('offline', handleOffline);
-    return () => window.removeEventListener('offline', handleOffline);
-  }, [onCancel]);
-
-  useEffect(() => {
-    if (!navigator.onLine) {
-      onCancel();
-      return;
-    }
-
     // Step 0: Connecting
     const t1 = setTimeout(() => {
-      if (!navigator.onLine) {
-        onCancel();
-        return;
-      }
       setSearchStep(1); // Searching ELO bracket
     }, 900);
 
     // Step 2: Opponent found
     const t2 = setTimeout(() => {
-      if (!navigator.onLine) {
-        onCancel();
-        return;
-      }
       setSearchStep(2);
       soundManager.playMatchFound();
     }, 2200);
 
     // Step 3: Countdown
     const t3 = setTimeout(() => {
-      if (!navigator.onLine) {
-        onCancel();
-        return;
-      }
       setCountdown(3);
     }, 3200);
 
@@ -77,7 +47,7 @@ export const MatchmakingModal: React.FC<MatchmakingModalProps> = ({
       clearTimeout(t2);
       clearTimeout(t3);
     };
-  }, [onCancel]);
+  }, []);
 
   useEffect(() => {
     if (countdown === null) return;
