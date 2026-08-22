@@ -1,16 +1,59 @@
 {
   "name": "VocabClash - Govt Exam English Arena",
   "short_name": "VocabClash",
-  "description": "Head-to-head real-time competitive English vocabulary arena for SSC CGL, CHSL, CPO, MTS & Railway exams.",
+  "description": "Head-to-head real-time competitive English vocabulary battle arena for SSC CGL, CHSL, CPO, MTS & Railway exams.",
   "start_url": "/",
+  "id": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#0f172a",
   "theme_color": "#0f172a",
+  "orientation": "portrait-primary",
+  "categories": ["education", "games"],
+  "lang": "en",
   "icons": [
     {
-      "src": "https://firebasestorage.googleapis.com/v0/b/tactile-world-jq6d2.firebasestorage.app/o/WhatsApp%20Image%202026-08-20%20at%2020.49.29.jpeg?alt=media&token=9f2a6019-fcc3-437f-8a31-29248bd200b8",
-      "sizes": "192x192 512x512",
-      "type": "image/jpeg"
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/favicon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/screenshot-mobile.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "VocabClash 1v1 Arena Mobile View"
+    },
+    {
+      "src": "/screenshot-wide.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "VocabClash 1v1 Arena Desktop View"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Play 1v1 Arena",
+      "short_name": "Play",
+      "description": "Instant 1v1 Vocab Clash",
+      "url": "/",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
     }
   ]
 }
