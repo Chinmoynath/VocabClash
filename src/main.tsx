@@ -31,35 +31,12 @@ if (typeof window !== 'undefined') {
   });
 }
 
-// Register Service Worker for PWA, Google Play TWA, Periodic Sync & Background Sync
+// Register Service Worker for PWA / Google Play TWA
 if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
-  window.addEventListener('load', async () => {
-    try {
-      const registration = await navigator.serviceWorker.register('/sw.js');
-      
-      // Register Periodic Background Sync if supported (e.g. Chrome / Android TWA)
-      if ('periodicSync' in registration) {
-        try {
-          const status = await (navigator as any).permissions?.query({ name: 'periodic-background-sync' });
-          if (status?.state === 'granted') {
-            await (registration as any).periodicSync.register('daily-vocab-sync', {
-              minInterval: 24 * 60 * 60 * 1000 // 24 hours
-            });
-          }
-        } catch (e) {
-          // Non-blocking fallback
-        }
-      }
-
-      // Background Sync on online recovery
-      window.addEventListener('online', () => {
-        if ('sync' in registration) {
-          (registration as any).sync.register('sync-vocab-scores').catch(() => {});
-        }
-      });
-    } catch (err) {
-      console.warn('Service worker registration notice:', err);
-    }
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((err) => {
+      console.warn('Service worker registration non-blocking notice:', err);
+    });
   });
 }
 

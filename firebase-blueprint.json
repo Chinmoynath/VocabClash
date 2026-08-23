@@ -16,45 +16,12 @@
         "updatedAt": { "type": "number", "description": "Epoch timestamp of last update" }
       },
       "required": ["uid", "updatedAt"]
-    },
-    "DuelRoom": {
-      "title": "DuelRoom",
-      "description": "Real-time 1v1 multiplayer room for random matches and custom friend codes",
-      "type": "object",
-      "properties": {
-        "roomCode": { "type": "string", "description": "6-character unique room code", "maxLength": 16 },
-        "mode": { "type": "string", "description": "Match mode (1v1_ranked, quick_duel, friend_duel)", "maxLength": 32 },
-        "exam": { "type": "string", "description": "Target exam filter", "maxLength": 32 },
-        "category": { "type": "string", "description": "Question category filter", "maxLength": 32 },
-        "isPublic": { "type": "boolean", "description": "Whether room is open to random matchmaking" },
-        "host": { "type": "object", "description": "Host player profile" },
-        "guest": { "type": "object", "description": "Guest player profile" },
-        "questions": { "type": "array", "description": "Synchronized question set for the duel" },
-        "status": { "type": "string", "description": "Room status: waiting, starting, in_round, finished, abandoned", "maxLength": 32 },
-        "hostScore": { "type": "number", "description": "Host player live score" },
-        "guestScore": { "type": "number", "description": "Guest player live score" },
-        "hostCurrentIndex": { "type": "number", "description": "Host player current question index" },
-        "guestCurrentIndex": { "type": "number", "description": "Guest player current question index" },
-        "hostCombo": { "type": "number", "description": "Host player current combo" },
-        "guestCombo": { "type": "number", "description": "Guest player current combo" },
-        "hostEmote": { "type": "object", "description": "Host player last sent emote" },
-        "guestEmote": { "type": "object", "description": "Guest player last sent emote" },
-        "hostFinished": { "type": "boolean", "description": "Host finished flag" },
-        "guestFinished": { "type": "boolean", "description": "Guest finished flag" },
-        "createdAt": { "type": "number", "description": "Creation timestamp in ms" },
-        "updatedAt": { "type": "number", "description": "Last update timestamp in ms" }
-      },
-      "required": ["roomCode", "host", "status", "createdAt"]
     }
   },
   "firestore": {
     "/users/{userId}": {
       "schema": "UserProfile",
       "description": "Private user profile and synchronization state"
-    },
-    "/duel_rooms/{roomCode}": {
-      "schema": "DuelRoom",
-      "description": "Real-time 1v1 duel rooms for friend codes and random matchmaking"
     }
   }
 }

@@ -1,14 +1,8 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // User profile access
     match /users/{userId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
-    }
-
-    // Real-time 1v1 duel rooms for friend rooms and online matchmaking
-    match /duel_rooms/{roomCode} {
-      allow read, write: if true;
     }
   }
 }

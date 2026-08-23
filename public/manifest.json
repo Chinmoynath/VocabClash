@@ -16,25 +16,13 @@
       "src": "/icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "/icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "maskable"
+      "purpose": "any maskable"
     },
     {
       "src": "/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "/icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "maskable"
+      "purpose": "any maskable"
     },
     {
       "src": "/favicon.png",
@@ -53,7 +41,7 @@
     },
     {
       "src": "/screenshot-wide.png",
-      "sizes": "1024x512",
+      "sizes": "512x512",
       "type": "image/png",
       "form_factor": "wide",
       "label": "VocabClash 1v1 Arena Desktop View"

@@ -20,7 +20,7 @@ import { PlayerProfile, QuestionCategory, ExamType, UserSubscription, DailyStrea
 import { soundManager } from '../utils/audio';
 import { getSecondsUntilNextAd } from '../utils/adManager';
 import { User as FirebaseUser } from 'firebase/auth';
-import { Cloud, LogIn, WifiOff } from 'lucide-react';
+import { Cloud, LogIn } from 'lucide-react';
 import { AdSenseUnit } from './AdSenseUnit';
 import { ADSENSE_BANNER_SLOT } from '../services/adSenseService';
 import { DailyTargetCard } from './DailyTargetCard';
@@ -33,7 +33,6 @@ interface ArenaHomeProps {
   selectedCategory: QuestionCategory | 'mixed';
   selectedExam: ExamType;
   currentUser?: FirebaseUser | null;
-  isOnline?: boolean;
   onSelectCategory: (cat: QuestionCategory | 'mixed') => void;
   onSelectExam: (exam: ExamType) => void;
   onStartMatchmaking: (mode: '1v1_ranked' | 'quick_duel' | 'daily_challenge') => void;
@@ -53,7 +52,6 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
   selectedCategory,
   selectedExam,
   currentUser,
-  isOnline = true,
   onSelectCategory,
   onSelectExam,
   onStartMatchmaking,
@@ -107,37 +105,17 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
 
   return (
     <div className="p-3.5 space-y-3 pb-3">
-      {/* Offline Status Banner */}
-      {!isOnline && (
-        <div className="bg-red-950/90 border-2 border-red-500/80 rounded-2xl p-3.5 text-center shadow-lg shadow-red-950/60 flex items-center justify-center gap-2.5 text-red-200">
-          <WifiOff className="w-5 h-5 text-red-400 animate-pulse shrink-0" />
-          <span className="font-extrabold text-xs sm:text-sm tracking-wide">
-            arena connection failed: please connect to the internet to play 1v1 battles
-          </span>
-        </div>
-      )}
-
       {/* Real-time Matchmaking status ticker banner */}
-      {isOnline ? (
-        <div className="bg-emerald-950/40 border border-emerald-800/40 rounded-xl px-3 py-1.5 flex items-center justify-between text-xs text-emerald-300">
-          <div className="flex items-center gap-2">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-            </span>
-            <span className="font-semibold text-emerald-200">Instant 1v1 Matchmaking</span>
-          </div>
-          <span className="text-[11px] text-emerald-400/80 font-mono">Avg Queue: 2.1s</span>
+      <div className="bg-emerald-950/40 border border-emerald-800/40 rounded-xl px-3 py-1.5 flex items-center justify-between text-xs text-emerald-300">
+        <div className="flex items-center gap-2">
+          <span className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+          </span>
+          <span className="font-semibold text-emerald-200">Instant 1v1 Matchmaking</span>
         </div>
-      ) : (
-        <div className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 flex items-center justify-between text-xs text-slate-400">
-          <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-red-500"></span>
-            <span className="font-semibold text-slate-300">1v1 Arena Disconnected</span>
-          </div>
-          <span className="text-[11px] text-amber-400 font-medium">Practice Drills Available</span>
-        </div>
-      )}
+        <span className="text-[11px] text-emerald-400/80 font-mono">Avg Queue: 2.1s</span>
+      </div>
 
       {/* Guest Sign-In Banner if not signed in */}
       {!currentUser && onOpenProfile ? (
@@ -310,49 +288,34 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
             soundManager.playTap();
             onStartMatchmaking('1v1_ranked');
           }}
-          disabled={!isOnline}
-          className={`w-full ${
-            isOnline
-              ? 'bg-gradient-to-r from-amber-500 via-orange-500 to-amber-500 hover:from-amber-400 hover:to-orange-400 active:scale-[0.98] text-slate-950 border-amber-300/60 shadow-orange-950/70 cursor-pointer'
-              : 'bg-slate-900 border-red-500/40 text-slate-400 shadow-none cursor-not-allowed opacity-90'
-          } p-4 sm:p-5 rounded-2xl shadow-xl flex items-center justify-between gap-3 border-2 transition-all group relative overflow-hidden`}
+          className="w-full bg-gradient-to-r from-amber-500 via-orange-500 to-amber-500 hover:from-amber-400 hover:to-orange-400 active:scale-[0.98] text-slate-950 p-4 sm:p-5 rounded-2xl shadow-xl shadow-orange-950/70 flex items-center justify-between gap-3 border-2 border-amber-300/60 transition-all group relative overflow-hidden"
         >
           {/* Subtle light shimmer sweep */}
-          {isOnline && (
-            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/15 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 pointer-events-none" />
-          )}
+          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/15 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 pointer-events-none" />
 
           <div className="flex items-center gap-3.5 min-w-0 flex-1 relative z-10">
-            <div className={`w-13 h-13 rounded-2xl ${isOnline ? 'bg-slate-950/25 border-slate-950/20' : 'bg-red-500/10 border-red-500/20'} border flex items-center justify-center text-2xl shadow-inner ${isOnline ? 'group-hover:scale-110 group-hover:rotate-6' : ''} transition-transform shrink-0`}>
-              {isOnline ? '⚔️' : '📡'}
+            <div className="w-13 h-13 rounded-2xl bg-slate-950/25 border border-slate-950/20 flex items-center justify-center text-2xl shadow-inner group-hover:scale-110 group-hover:rotate-6 transition-transform shrink-0">
+              ⚔️
             </div>
             <div className="text-left min-w-0 flex-1">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className={`text-sm sm:text-base font-black tracking-wide uppercase ${isOnline ? 'text-slate-950' : 'text-slate-200'} leading-tight`}>
+                <span className="text-sm sm:text-base font-black tracking-wide uppercase text-slate-950 leading-tight">
                   1V1 VOCAB ONLINE DUEL
                 </span>
-                <span className={`text-[10px] ${isOnline ? 'bg-slate-950/35 text-amber-100 border-slate-950/20' : 'bg-red-500/20 text-red-300 border-red-500/30'} font-extrabold px-2 py-0.5 rounded-md border whitespace-nowrap shadow-sm`}>
-                  {isOnline ? '20 Qs' : 'Offline'}
+                <span className="text-[10px] bg-slate-950/35 text-amber-100 font-extrabold px-2 py-0.5 rounded-md border border-slate-950/20 whitespace-nowrap shadow-sm">
+                  20 Qs
                 </span>
               </div>
-              <div className={`text-xs ${isOnline ? 'text-slate-950/85 font-bold' : 'text-red-300/80 font-medium'} mt-1`}>
-                {isOnline ? (
-                  <>Full 20-Round Battle • <span className="text-slate-950 font-black">+30 LP on Victory</span></>
-                ) : (
-                  'Connect to internet to start 1v1 matchmaking'
-                )}
+              <div className="text-xs text-slate-950/85 font-bold mt-1">
+                Full 20-Round Battle • <span className="text-slate-950 font-black">+30 LP on Victory</span>
               </div>
             </div>
           </div>
 
           {/* Aesthetic High-Contrast START Button */}
-          <div className={`relative z-10 flex items-center gap-1.5 ${
-            isOnline
-              ? 'bg-gradient-to-b from-slate-950 to-slate-900 text-amber-300 hover:text-amber-200 border-amber-400/40 hover:border-amber-300 group-hover:scale-105 shadow-slate-950/60'
-              : 'bg-slate-800 text-slate-500 border-slate-700 shadow-none'
-          } border px-4 py-2.5 rounded-xl font-black text-xs sm:text-sm tracking-wider uppercase shrink-0 shadow-lg transition-all`}>
-            <span>{isOnline ? 'START' : 'OFFLINE'}</span>
-            {isOnline && <ChevronRight className="w-4 h-4 text-amber-400 group-hover:translate-x-1 transition-transform" />}
+          <div className="relative z-10 flex items-center gap-1.5 bg-gradient-to-b from-slate-950 to-slate-900 text-amber-300 hover:text-amber-200 border border-amber-400/40 hover:border-amber-300 px-4 py-2.5 rounded-xl font-black text-xs sm:text-sm tracking-wider uppercase shrink-0 shadow-lg shadow-slate-950/60 group-hover:scale-105 transition-all">
+            <span>START</span>
+            <ChevronRight className="w-4 h-4 text-amber-400 group-hover:translate-x-1 transition-transform" />
           </div>
         </button>
 
@@ -364,22 +327,17 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
               soundManager.playTap();
               onStartMatchmaking('quick_duel');
             }}
-            disabled={!isOnline}
-            className={`border p-3 rounded-xl text-left transition-all flex flex-col justify-between ${
-              isOnline 
-                ? 'bg-slate-800/90 hover:bg-slate-750 active:scale-[0.97] border-slate-700 cursor-pointer'
-                : 'bg-slate-900/60 border-slate-800 text-slate-500 cursor-not-allowed opacity-75'
-            }`}
+            className="bg-slate-800/90 hover:bg-slate-750 active:scale-[0.97] border border-slate-700 p-3 rounded-xl text-left transition-all flex flex-col justify-between"
           >
             <div className="flex items-center justify-between w-full">
-              <span className="text-lg">{isOnline ? '⚡' : '📡'}</span>
+              <span className="text-lg">⚡</span>
               <span className="text-[10px] bg-slate-700 text-slate-300 font-mono px-1.5 py-0.5 rounded font-bold">
-                {isOnline ? '10 Rounds' : 'Offline'}
+                10 Rounds
               </span>
             </div>
             <div className="mt-2">
-              <div className={`font-bold text-xs ${isOnline ? 'text-slate-100' : 'text-slate-400'}`}>Speed Blitz</div>
-              <div className="text-[10px] text-slate-400">{isOnline ? 'Fast 10-Round Duel' : 'Requires Internet'}</div>
+              <div className="font-bold text-xs text-slate-100">Speed Blitz</div>
+              <div className="text-[10px] text-slate-400">Fast 10-Round Duel</div>
             </div>
           </button>
 
@@ -389,22 +347,17 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
               soundManager.playTap();
               onStartMatchmaking('daily_challenge');
             }}
-            disabled={!isOnline}
-            className={`border p-3 rounded-xl text-left transition-all flex flex-col justify-between ${
-              isOnline 
-                ? 'bg-gradient-to-br from-indigo-950/60 to-purple-950/60 hover:opacity-95 active:scale-[0.97] border-indigo-700/60 cursor-pointer'
-                : 'bg-slate-900/60 border-slate-800 text-slate-500 cursor-not-allowed opacity-75'
-            }`}
+            className="bg-gradient-to-br from-indigo-950/60 to-purple-950/60 hover:opacity-95 active:scale-[0.97] border border-indigo-700/60 p-3 rounded-xl text-left transition-all flex flex-col justify-between"
           >
             <div className="flex items-center justify-between w-full">
-              <span className="text-lg">{isOnline ? '🔥' : '📡'}</span>
-              <span className={`text-[10px] ${isOnline ? 'bg-indigo-900/90 text-indigo-200 border-indigo-600/50' : 'bg-slate-800 text-slate-400 border-slate-700'} font-bold px-1.5 py-0.5 rounded border`}>
-                {isOnline ? '20 Qs • +100 Bonus' : 'Offline'}
+              <span className="text-lg">🔥</span>
+              <span className="text-[10px] bg-indigo-900/90 text-indigo-200 font-bold px-1.5 py-0.5 rounded border border-indigo-600/50">
+                20 Qs • +100 Bonus
               </span>
             </div>
             <div className="mt-2">
-              <div className={`font-bold text-xs ${isOnline ? 'text-indigo-100' : 'text-slate-400'}`}>Daily PYQ Sprint</div>
-              <div className="text-[10px] text-slate-400">{isOnline ? '20 High-repeat PYQs' : 'Requires Internet'}</div>
+              <div className="font-bold text-xs text-indigo-100">Daily PYQ Sprint</div>
+              <div className="text-[10px] text-indigo-300/80">20 High-repeat PYQs</div>
             </div>
           </button>
         </div>
