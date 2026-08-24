@@ -266,6 +266,25 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
     setShowEmotePicker(false);
   };
 
+  // Keyboard hotkeys for fast desktop gameplay (1, 2, 3, 4 or A, B, C, D)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (isAnswered || !currentQuestion) return;
+      if (e.key === '1' || e.key === 'a' || e.key === 'A') {
+        handleSelectOption(0);
+      } else if (e.key === '2' || e.key === 'b' || e.key === 'B') {
+        handleSelectOption(1);
+      } else if (e.key === '3' || e.key === 'c' || e.key === 'C') {
+        handleSelectOption(2);
+      } else if (e.key === '4' || e.key === 'd' || e.key === 'D') {
+        handleSelectOption(3);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isAnswered, currentQuestion]);
+
   if (!currentQuestion) {
     return (
       <div className="flex-1 flex items-center justify-center p-4">
@@ -282,7 +301,7 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
   const isTimerCritical = timeRemaining <= 3;
 
   return (
-    <div className="flex-1 flex flex-col justify-between p-3.5 space-y-3 pb-5 relative min-h-full">
+    <div className="flex-1 flex flex-col justify-between p-3.5 sm:p-5 lg:p-6 space-y-3 pb-5 relative min-h-full max-w-4xl mx-auto w-full">
       {/* Floating Reaction Emotes */}
       <div className="absolute inset-0 pointer-events-none z-40 overflow-hidden">
         {floatingEmotes.map(emote => (
@@ -457,21 +476,21 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
         </div>
 
         {/* 4 Answer Option Buttons */}
-        <div className="grid grid-cols-1 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
           {currentQuestion.options.map((option, idx) => {
             const isEliminated = eliminatedOptions.includes(idx);
             const isChosen = selectedOption === idx;
             const isCorrectOption = idx === currentQuestion.correctIndex;
 
-            let buttonStyle = 'bg-slate-800/90 border-slate-700/80 text-slate-200 hover:bg-slate-750 active:scale-[0.99]';
+            let buttonStyle = 'bg-slate-800/90 border-slate-700/80 text-slate-200 hover:bg-slate-750 active:scale-[0.99] cursor-pointer';
             let iconElement = (
-              <span className="w-5 h-5 rounded-md bg-slate-900 border border-slate-700 text-[11px] font-mono font-bold text-slate-400 flex items-center justify-center shrink-0">
+              <span className="w-6 h-6 rounded-md bg-slate-900 border border-slate-700 text-[11px] font-mono font-bold text-slate-400 flex items-center justify-center shrink-0">
                 {String.fromCharCode(65 + idx)}
               </span>
             );
 
             if (isEliminated) {
-              buttonStyle = 'bg-slate-900/40 border-slate-800/40 text-slate-600 line-through opacity-40 pointer-events-none';
+              buttonStyle = 'bg-slate-900/40 border-slate-800/40 text-slate-600 line-through opacity-40 pointer-events-none cursor-default';
             } else if (isAnswered) {
               if (isCorrectOption) {
                 buttonStyle = 'bg-emerald-900/80 border-emerald-500 text-emerald-100 shadow-md shadow-emerald-950 font-bold ring-1 ring-emerald-400';
@@ -487,10 +506,13 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
                 key={idx}
                 disabled={isAnswered || isEliminated}
                 onClick={() => handleSelectOption(idx)}
-                className={`w-full p-3 rounded-xl border text-left flex items-center gap-3 transition-all duration-150 relative ${buttonStyle}`}
+                className={`w-full p-3 sm:p-3.5 rounded-xl border text-left flex items-center gap-3 transition-all duration-150 relative ${buttonStyle}`}
               >
                 {iconElement}
-                <span className="text-xs font-semibold flex-1 leading-snug">{option}</span>
+                <span className="text-xs sm:text-sm font-semibold flex-1 leading-snug">{option}</span>
+                <span className="hidden md:inline-flex text-[10px] font-mono text-slate-500 bg-slate-900/60 px-1.5 py-0.5 rounded border border-slate-800 shrink-0">
+                  {idx + 1}
+                </span>
               </button>
             );
           })}

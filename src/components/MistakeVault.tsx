@@ -85,7 +85,7 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
   const currentCard = filteredWords[currentFlashcardIndex];
 
   return (
-    <div className="p-3.5 space-y-3 pb-3">
+    <div className="p-3.5 sm:p-5 lg:p-6 space-y-4 pb-8 max-w-6xl mx-auto w-full">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -386,7 +386,7 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
         </div>
       ) : (
         /* LIST VIEW */
-        <div className="space-y-2.5">
+        <div className="space-y-3">
           {filteredWords.length === 0 ? (
             <div className="bg-slate-850/60 border border-slate-800 rounded-3xl p-8 text-center space-y-4 shadow-sm">
               <div className="w-14 h-14 rounded-2xl bg-slate-800/80 border border-slate-700 flex items-center justify-center mx-auto text-slate-400">
@@ -416,14 +416,15 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
               </div>
             </div>
           ) : (
-            filteredWords.map(item => {
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5">
+            {filteredWords.map(item => {
               const userSaved = isItemSavedByMe(item);
               const mistake = isItemMistake(item);
 
               return (
                 <div
                   key={item.question.id}
-                  className="bg-slate-850 border border-slate-750/90 rounded-2xl p-3.5 space-y-2.5 shadow-sm hover:border-slate-700 transition-all"
+                  className="bg-slate-850 border border-slate-750/90 rounded-2xl p-3.5 space-y-2.5 shadow-sm hover:border-slate-700 transition-all flex flex-col justify-between"
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div>
@@ -531,7 +532,8 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
                   </div>
                 </div>
               );
-            })
+            })}
+            </div>
           )}
         </div>
       )}

@@ -139,7 +139,7 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ player, isPrem
   ];
 
   return (
-    <div className="p-3.5 space-y-3 pb-3">
+    <div className="p-3.5 sm:p-5 lg:p-6 space-y-4 pb-8 max-w-5xl mx-auto w-full">
       {/* Top Standings Banner */}
       <div className="bg-slate-850/80 border border-slate-800 rounded-2xl p-3.5 space-y-2.5">
         <div className="flex items-center justify-between">
@@ -413,19 +413,19 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ player, isPrem
         </div>
       ) : (
         /* Cadres / Promotion Tiers Guide */
-        <div className="space-y-2.5">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
           {cadres.map((cadre, i) => (
             <div
               key={i}
-              className="bg-slate-850/80 border border-slate-800 rounded-2xl p-3.5 space-y-1.5"
+              className="bg-slate-850/80 border border-slate-800 rounded-2xl p-3.5 space-y-2 flex flex-col justify-between"
             >
-              <div className="flex items-center justify-between">
-                <div className="font-extrabold text-xs text-amber-300">{cadre.title}</div>
-                <span className="text-[10px] font-mono bg-slate-800 text-amber-400 px-2 py-0.5 rounded-full border border-slate-700 font-bold">
+              <div className="flex items-center justify-between gap-2">
+                <div className="font-extrabold text-xs sm:text-sm text-amber-300">{cadre.title}</div>
+                <span className="text-[10px] font-mono bg-slate-800 text-amber-400 px-2 py-0.5 rounded-full border border-slate-700 font-bold shrink-0">
                   {cadre.lpRange}
                 </span>
               </div>
-              <p className="text-[11px] text-slate-300">{cadre.desc}</p>
+              <p className="text-xs text-slate-300 leading-relaxed">{cadre.desc}</p>
             </div>
           ))}
         </div>

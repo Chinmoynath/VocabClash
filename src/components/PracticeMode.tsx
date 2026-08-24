@@ -85,6 +85,33 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     }
   }, [currentQ]);
 
+  // Desktop keyboard controls (1-4 for options, Space/Enter for Next question)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (showReportModal || showSupportModal) return;
+
+      if (!isAnswered && currentQ) {
+        if (e.key === '1' || e.key === 'a' || e.key === 'A') {
+          handleSelectOption(0);
+        } else if (e.key === '2' || e.key === 'b' || e.key === 'B') {
+          handleSelectOption(1);
+        } else if (e.key === '3' || e.key === 'c' || e.key === 'C') {
+          handleSelectOption(2);
+        } else if (e.key === '4' || e.key === 'd' || e.key === 'D') {
+          handleSelectOption(3);
+        }
+      } else if (isAnswered) {
+        if (e.key === ' ' || e.key === 'Enter' || e.key === 'n' || e.key === 'N' || e.key === 'ArrowRight') {
+          e.preventDefault();
+          handleNextQuestion();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isAnswered, currentQ, showReportModal, showSupportModal]);
+
   const showSaveConfirmation = (message: string) => {
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
     setSaveToast(message);
@@ -175,7 +202,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     : [];
 
   return (
-    <div className="p-3.5 space-y-3 pb-3">
+    <div className="p-3.5 sm:p-5 lg:p-6 space-y-4 pb-8 max-w-4xl mx-auto w-full">
       {/* Toast Notification */}
       {saveToast && (
         <div className="fixed top-14 left-1/2 -translate-x-1/2 z-50 bg-amber-500 text-slate-950 font-black px-4 py-2 rounded-full shadow-2xl text-xs flex items-center gap-2 border border-amber-300 animate-bounce">
@@ -326,12 +353,12 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
           </div>
 
           {/* 4 Options */}
-          <div className="grid grid-cols-1 gap-2.5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             {currentQ.options.map((option, idx) => {
               const isSelected = selectedOption === idx;
               const isCorrect = idx === currentQ.correctIndex;
 
-              let style = 'bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-750 active:scale-[0.99]';
+              let style = 'bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-750 active:scale-[0.99] cursor-pointer';
               if (isAnswered) {
                 if (isCorrect) {
                   style = 'bg-emerald-950 border-emerald-500 text-emerald-100 font-bold';
@@ -345,17 +372,22 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
                   key={idx}
                   disabled={isAnswered}
                   onClick={() => handleSelectOption(idx)}
-                  className={`w-full p-3.5 rounded-xl border text-left flex items-center justify-between text-xs font-semibold transition-all shadow-sm ${style}`}
+                  className={`w-full p-3.5 rounded-xl border text-left flex items-center justify-between text-xs sm:text-sm font-semibold transition-all shadow-sm ${style}`}
                 >
-                  <div className="flex items-center gap-2.5">
-                    <span className="w-5 h-5 rounded-md bg-slate-900 border border-slate-700 text-[10px] font-mono flex items-center justify-center font-bold">
+                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                    <span className="w-6 h-6 rounded-md bg-slate-900 border border-slate-700 text-[10px] font-mono flex items-center justify-center font-bold shrink-0">
                       {String.fromCharCode(65 + idx)}
                     </span>
-                    <span>{option}</span>
+                    <span className="truncate">{option}</span>
                   </div>
 
-                  {isAnswered && isCorrect && <Check className="w-4 h-4 text-emerald-400" />}
-                  {isAnswered && isSelected && !isCorrect && <X className="w-4 h-4 text-rose-400" />}
+                  <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                    <span className="hidden md:inline-flex text-[10px] font-mono text-slate-500 bg-slate-900/80 px-1.5 py-0.5 rounded border border-slate-800">
+                      {idx + 1}
+                    </span>
+                    {isAnswered && isCorrect && <Check className="w-4 h-4 text-emerald-400" />}
+                    {isAnswered && isSelected && !isCorrect && <X className="w-4 h-4 text-rose-400" />}
+                  </div>
                 </button>
               );
             })}
@@ -363,7 +395,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
 
           {!isAnswered && (
             <div className="text-center py-1.5 text-[11px] text-slate-400/80 font-medium">
-              💡 Tap an option to check answer & reveal Hindi meaning + 4-option breakdown
+              💡 Select an option (or press <span className="text-sky-300 font-mono font-bold">1, 2, 3, 4</span> on keyboard) to check answer & reveal breakdown
             </div>
           )}
 

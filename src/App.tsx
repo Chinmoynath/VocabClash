@@ -37,6 +37,7 @@ import {
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { AndroidDeviceShell } from './components/AndroidDeviceShell';
 import { TopBar } from './components/TopBar';
+import { DesktopSidebar } from './components/DesktopSidebar';
 import { BottomNavBar, TabType } from './components/BottomNavBar';
 import { ArenaHome } from './components/ArenaHome';
 import { MatchmakingModal } from './components/MatchmakingModal';
@@ -809,33 +810,69 @@ export default function App() {
 
   return (
     <AndroidDeviceShell>
-      {/* Android Top App Bar */}
-      <TopBar
-        player={player}
-        subscription={subscription}
-        dailyStreak={streak}
-        soundEnabled={soundEnabled}
-        onToggleSound={handleToggleSound}
-        onOpenProfile={() => {
-          soundManager.playTap();
-          setShowProfileModal(true);
-        }}
-        onOpenPremium={() => {
-          soundManager.playTap();
-          setShowPremiumModal(true);
-        }}
-        onOpenStreak={() => {
-          soundManager.playTap();
-          setShowStreakModal(true);
-        }}
-        onOpenTour={() => {
-          soundManager.playTap();
-          setShowTourModal(true);
-        }}
-      />
+      {/* Desktop Navigation Sidebar (Visible only on md+ screens when not in live match) */}
+      {!matchState && (
+        <DesktopSidebar
+          currentTab={currentTab}
+          onSelectTab={(tab) => {
+            if (currentTab === 'practice' && tab !== 'practice') {
+              triggerAdIfDue();
+            }
+            setCurrentTab(tab);
+          }}
+          player={player}
+          subscription={subscription}
+          dailyStreak={streak}
+          currentUser={currentUser}
+          mistakeCount={savedWords.length}
+          onOpenProfile={() => {
+            soundManager.playTap();
+            setShowProfileModal(true);
+          }}
+          onOpenPremium={() => {
+            soundManager.playTap();
+            setShowPremiumModal(true);
+          }}
+          onOpenStreak={() => {
+            soundManager.playTap();
+            setShowStreakModal(true);
+          }}
+          onOpenTour={() => {
+            soundManager.playTap();
+            setShowTourModal(true);
+          }}
+        />
+      )}
 
-      {/* Main Dynamic View Content */}
-      <main id="app-main-content" className="flex-1 min-h-0 relative overflow-y-auto flex flex-col">
+      {/* Main App Content Viewport */}
+      <div className="flex-1 flex flex-col min-h-0 h-full overflow-hidden relative w-full">
+        {/* Top App Bar */}
+        <TopBar
+          player={player}
+          subscription={subscription}
+          dailyStreak={streak}
+          soundEnabled={soundEnabled}
+          onToggleSound={handleToggleSound}
+          onOpenProfile={() => {
+            soundManager.playTap();
+            setShowProfileModal(true);
+          }}
+          onOpenPremium={() => {
+            soundManager.playTap();
+            setShowPremiumModal(true);
+          }}
+          onOpenStreak={() => {
+            soundManager.playTap();
+            setShowStreakModal(true);
+          }}
+          onOpenTour={() => {
+            soundManager.playTap();
+            setShowTourModal(true);
+          }}
+        />
+
+        {/* Main Dynamic View Content */}
+        <main id="app-main-content" className="flex-1 min-h-0 relative overflow-y-auto flex flex-col no-scrollbar">
         {matchState ? (
           !isMatchCompleted ? (
             /* Live 1v1 Battle Arena Screen */
@@ -1028,7 +1065,7 @@ export default function App() {
         />
       )}
 
-      {/* Android Bottom Navigation Bar (Hidden during active match) */}
+      {/* Android Bottom Navigation Bar (Hidden during active match and on desktop screens) */}
       {!matchState && (
         <BottomNavBar
           currentTab={currentTab}
@@ -1042,6 +1079,7 @@ export default function App() {
           mistakeCount={savedWords.length}
         />
       )}
+      </div>
     </AndroidDeviceShell>
   );
 }

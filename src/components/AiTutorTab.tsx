@@ -85,22 +85,22 @@ export const AiTutorTab: React.FC = () => {
   };
 
   return (
-    <div className="p-3.5 space-y-3 pb-3">
+    <div className="p-3.5 sm:p-5 lg:p-6 space-y-4 pb-8 max-w-5xl mx-auto w-full">
       {/* Header Banner */}
-      <div className="bg-gradient-to-r from-purple-950/80 via-slate-900 to-indigo-950/80 border border-purple-800/40 rounded-2xl p-4 shadow-lg flex items-center justify-between">
+      <div className="bg-gradient-to-r from-purple-950/80 via-slate-900 to-indigo-950/80 border border-purple-800/40 rounded-2xl p-4 sm:p-5 shadow-lg flex items-center justify-between">
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <span className="p-1.5 rounded-lg bg-purple-600/30 text-purple-400 border border-purple-500/40">
               <Brain className="w-5 h-5 text-purple-400" />
             </span>
-            <h2 className="text-base font-extrabold text-slate-100 flex items-center gap-1.5">
+            <h2 className="text-base sm:text-lg font-extrabold text-slate-100 flex items-center gap-1.5">
               AI Vocab Mentor
               <span className="text-[10px] font-mono bg-purple-500/20 text-purple-300 border border-purple-400/30 px-2 py-0.5 rounded-full font-bold">
                 Gemini 3.7 Flash
               </span>
             </h2>
           </div>
-          <p className="text-xs text-slate-400">
+          <p className="text-xs sm:text-sm text-slate-400">
             Instant Hinglish root word mnemonics, repeat trends & exam traps.
           </p>
         </div>
@@ -115,12 +115,12 @@ export const AiTutorTab: React.FC = () => {
             placeholder="Type any word (e.g., Obsequious, Ephemeral)..."
             value={searchInput}
             onChange={e => setSearchInput(e.target.value)}
-            className="w-full bg-slate-850 border border-slate-700 rounded-xl pl-9 pr-3 py-2.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-purple-400 shadow-inner"
+            className="w-full bg-slate-850 border border-slate-700 rounded-xl pl-9 pr-3 py-2.5 text-xs sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-purple-400 shadow-inner"
           />
         </div>
         <button
           type="submit"
-          className="bg-purple-600 hover:bg-purple-500 active:scale-95 text-white font-extrabold px-4 py-2.5 rounded-xl text-xs flex items-center gap-1 shadow-md shadow-purple-950 transition-all shrink-0"
+          className="bg-purple-600 hover:bg-purple-500 active:scale-95 text-white font-extrabold px-4 sm:px-6 py-2.5 rounded-xl text-xs sm:text-sm flex items-center gap-1 shadow-md shadow-purple-950 transition-all shrink-0 cursor-pointer"
         >
           <span>Explain</span>
           <ChevronRight className="w-3.5 h-3.5" />
@@ -129,7 +129,7 @@ export const AiTutorTab: React.FC = () => {
 
       {/* Quick PYQ Chips */}
       <div className="space-y-1.5">
-        <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400">
+        <div className="flex items-center gap-1.5 text-[11px] sm:text-xs font-bold text-slate-400">
           <TrendingUp className="w-3.5 h-3.5 text-amber-400" />
           <span>High-Frequency SSC / Banking Exam Words:</span>
         </div>
@@ -138,7 +138,7 @@ export const AiTutorTab: React.FC = () => {
             <button
               key={idx}
               onClick={() => handleSelectWord(item.word, item.category)}
-              className={`px-2.5 py-1 rounded-lg text-xs font-semibold border flex items-center gap-1.5 transition-all ${
+              className={`px-2.5 py-1 rounded-lg text-xs font-semibold border flex items-center gap-1.5 transition-all cursor-pointer ${
                 activeWord === item.word
                   ? 'bg-purple-600 text-white border-purple-400 shadow-sm'
                   : 'bg-slate-800/80 hover:bg-slate-750 text-slate-300 border-slate-700'
@@ -154,11 +154,11 @@ export const AiTutorTab: React.FC = () => {
       </div>
 
       {/* Word Focus Card */}
-      <div className="bg-gradient-to-r from-purple-950/70 via-slate-900 to-slate-900 border border-purple-600/40 rounded-2xl p-4 text-center shadow-lg relative overflow-hidden">
+      <div className="bg-gradient-to-r from-purple-950/70 via-slate-900 to-slate-900 border border-purple-600/40 rounded-2xl p-4 sm:p-6 text-center shadow-lg relative overflow-hidden">
         <div className="text-[10px] uppercase font-mono font-bold text-purple-300 bg-purple-900/60 px-2.5 py-0.5 rounded-full border border-purple-500/40 inline-block mb-1">
           {activeCategory}
         </div>
-        <h1 className="text-2xl md:text-3xl font-black text-amber-300 tracking-wide break-words">
+        <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black text-amber-300 tracking-wide break-words">
           "{activeWord}"
         </h1>
       </div>
@@ -172,55 +172,59 @@ export const AiTutorTab: React.FC = () => {
           </div>
         </div>
       ) : analysis ? (
-        <div className="space-y-3 text-xs">
-          {/* 1. Mnemonic Memory Hook */}
-          <div className="bg-slate-850 border border-amber-500/40 rounded-2xl p-4 space-y-1.5 shadow-sm">
-            <div className="flex items-center gap-2 font-bold text-amber-400 text-sm">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 text-xs">
+          {/* 1. Mnemonic Memory Hook (Full width on desktop) */}
+          <div className="md:col-span-2 bg-slate-850 border border-amber-500/40 rounded-2xl p-4 sm:p-5 space-y-2 shadow-sm">
+            <div className="flex items-center gap-2 font-bold text-amber-400 text-sm sm:text-base">
               <Lightbulb className="w-4 h-4 text-amber-400" />
               <span>Govt Exam Mnemonic Hook (Desi Trick)</span>
             </div>
-            <p className="text-slate-200 leading-relaxed font-medium bg-slate-900/90 p-3 rounded-xl border border-slate-750 text-xs md:text-sm">
+            <p className="text-slate-200 leading-relaxed font-medium bg-slate-900/90 p-3 sm:p-4 rounded-xl border border-slate-750 text-xs sm:text-sm">
               {analysis.mnemonicHook}
             </p>
           </div>
 
           {/* 2. Root Word Etymology */}
-          <div className="bg-slate-850 border border-slate-750 rounded-2xl p-4 space-y-1.5 shadow-sm">
-            <div className="flex items-center gap-2 font-bold text-sky-400">
-              <BookOpen className="w-4 h-4 text-sky-400" />
-              <span>Root Word & Etymology Breakdown</span>
+          <div className="bg-slate-850 border border-slate-750 rounded-2xl p-4 space-y-2 shadow-sm flex flex-col justify-between">
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2 font-bold text-sky-400 text-sm">
+                <BookOpen className="w-4 h-4 text-sky-400" />
+                <span>Root Word & Etymology Breakdown</span>
+              </div>
+              <p className="text-slate-300 leading-relaxed bg-slate-900/60 p-3 rounded-xl border border-slate-800 text-xs sm:text-sm">
+                {analysis.rootEtymology}
+              </p>
             </div>
-            <p className="text-slate-300 leading-relaxed bg-slate-900/60 p-3 rounded-xl border border-slate-800">
-              {analysis.rootEtymology}
-            </p>
           </div>
 
           {/* 3. Govt Exam Trap Tip */}
-          <div className="bg-slate-850 border border-slate-750 rounded-2xl p-4 space-y-1.5 shadow-sm">
-            <div className="flex items-center gap-2 font-bold text-rose-400">
-              <AlertTriangle className="w-4 h-4 text-rose-400" />
-              <span>Exam Trap & Examiner Tricks</span>
+          <div className="bg-slate-850 border border-slate-750 rounded-2xl p-4 space-y-2 shadow-sm flex flex-col justify-between">
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2 font-bold text-rose-400 text-sm">
+                <AlertTriangle className="w-4 h-4 text-rose-400" />
+                <span>Exam Trap & Examiner Tricks</span>
+              </div>
+              <p className="text-slate-300 leading-relaxed bg-slate-900/60 p-3 rounded-xl border border-slate-800 text-xs sm:text-sm">
+                {analysis.examTrapTip}
+              </p>
             </div>
-            <p className="text-slate-300 leading-relaxed bg-slate-900/60 p-3 rounded-xl border border-slate-800">
-              {analysis.examTrapTip}
-            </p>
           </div>
 
           {/* 4. Sentence Example */}
-          <div className="bg-slate-850 border border-slate-750 rounded-2xl p-4 space-y-1.5 shadow-sm">
-            <div className="flex items-center gap-2 font-bold text-emerald-400">
+          <div className="md:col-span-2 bg-slate-850 border border-slate-750 rounded-2xl p-4 space-y-2 shadow-sm">
+            <div className="flex items-center gap-2 font-bold text-emerald-400 text-sm">
               <CheckCircle className="w-4 h-4 text-emerald-400" />
               <span>Real Exam Sentence Usage</span>
             </div>
-            <p className="text-slate-300 italic bg-slate-900/60 p-3 rounded-xl border border-slate-800">
+            <p className="text-slate-300 italic bg-slate-900/60 p-3 rounded-xl border border-slate-800 text-xs sm:text-sm">
               "{analysis.sampleUsage}"
             </p>
           </div>
 
           {/* 5. Related Words */}
           {analysis.relatedWords && analysis.relatedWords.length > 0 && (
-            <div className="bg-slate-850 border border-slate-750 rounded-2xl p-4 space-y-2 shadow-sm">
-              <div className="flex items-center gap-1.5 font-bold text-slate-300 text-xs">
+            <div className="md:col-span-2 bg-slate-850 border border-slate-750 rounded-2xl p-4 space-y-2.5 shadow-sm">
+              <div className="flex items-center gap-1.5 font-bold text-slate-300 text-xs sm:text-sm">
                 <GraduationCap className="w-4 h-4 text-purple-400" />
                 <span>Related Vocabulary to Master:</span>
               </div>
@@ -229,7 +233,7 @@ export const AiTutorTab: React.FC = () => {
                   <button
                     key={i}
                     onClick={() => handleSelectWord(rw, activeCategory)}
-                    className="bg-slate-800 hover:bg-purple-600 hover:text-white border border-slate-700 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-200 transition-colors"
+                    className="bg-slate-850 hover:bg-purple-600 hover:text-white border border-slate-700 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-200 transition-colors cursor-pointer"
                   >
                     {rw}
                   </button>
