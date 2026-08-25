@@ -73,6 +73,8 @@ export interface PlayerAnswerRecord {
 
 export interface MatchState {
   matchId: string;
+  isRealPlayer?: boolean;
+  realRoomId?: string;
   mode: '1v1_ranked' | 'quick_duel' | 'daily_challenge' | 'exam_sprint';
   categoryFilter: QuestionCategory | 'mixed';
   examFilter: ExamType;
@@ -102,6 +104,15 @@ export interface MatchState {
   eliminatedOptionIndices: number[];
   isTimeFrozen: boolean;
   hintRevealed: boolean;
+  finalResult?: {
+    winnerId: string;
+    loserId: string;
+    player1FinalScore: number;
+    player2FinalScore: number;
+    player1LPChange: number;
+    player2LPChange: number;
+    finalised: boolean;
+  };
 }
 
 export interface SavedWord {

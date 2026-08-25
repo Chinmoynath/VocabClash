@@ -20,6 +20,9 @@ import { AdSenseUnit } from './AdSenseUnit';
 import { ADSENSE_BANNER_SLOT } from '../services/adSenseService';
 import { ReportQuestionModal } from './ReportQuestionModal';
 
+import { User as FirebaseUser } from 'firebase/auth';
+import { AuthCard } from './AuthCard';
+
 interface MatchSummaryProps {
   player: PlayerProfile;
   matchState: MatchState;
@@ -29,6 +32,8 @@ interface MatchSummaryProps {
   onOpenAiDeepDive: (question: Question) => void;
   bookmarkedIds: string[];
   isPremium?: boolean;
+  currentUser?: FirebaseUser | null;
+  onUserChange?: (user: FirebaseUser | null) => void;
 }
 
 export const MatchSummary: React.FC<MatchSummaryProps> = ({
@@ -40,13 +45,21 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
   onOpenAiDeepDive,
   bookmarkedIds,
   isPremium = false,
+  currentUser = null,
+  onUserChange,
 }) => {
   const [reportingQuestion, setReportingQuestion] = useState<Question | null>(null);
-  const isWinner = matchState.playerScore > matchState.opponentScore;
-  const isDraw = matchState.playerScore === matchState.opponentScore;
+  const [showSignupCard, setShowSignupCard] = useState<boolean>(!currentUser);
+  
+  const isWinner = matchState.finalResult 
+    ? (matchState.finalResult.winnerId === player.id || (matchState.finalResult.winnerId !== 'draw' && matchState.playerScore > matchState.opponentScore))
+    : matchState.playerScore > matchState.opponentScore;
+  const isDraw = matchState.finalResult
+    ? (matchState.finalResult.winnerId === 'draw' || matchState.playerScore === matchState.opponentScore)
+    : matchState.playerScore === matchState.opponentScore;
 
-  // LP calculation
-  const lpChange = isWinner ? 30 + (matchState.comboStreak > 2 ? 5 : 0) : isDraw ? 5 : -15;
+  // Authoritative LP calculation
+  const lpChange = isWinner ? 30 : isDraw ? 5 : -15;
 
   useEffect(() => {
     if (isWinner) {
@@ -107,6 +120,58 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Post-Match Sign-Up / Save Progress Conversion Card (Shown if user is not logged in) */}
+      {!currentUser && showSignupCard && (
+        <div className="bg-gradient-to-r from-purple-950/90 via-slate-900 to-indigo-950/90 border-2 border-purple-500/60 rounded-3xl p-4 sm:p-5 shadow-2xl relative overflow-hidden animate-fadeIn">
+          {/* Dismiss Cross Button */}
+          <button
+            onClick={() => {
+              soundManager.playTap();
+              setShowSignupCard(false);
+            }}
+            className="absolute top-3 right-3 p-1.5 rounded-full bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-slate-200 border border-slate-700/60 transition-all cursor-pointer z-10"
+            title="Dismiss for now"
+            aria-label="Close signup banner"
+          >
+            <X className="w-4 h-4" />
+          </button>
+
+          <div className="flex items-start gap-3 mb-3">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-purple-500 to-indigo-600 flex items-center justify-center text-xl shadow-lg shrink-0">
+              ☁️
+            </div>
+            <div className="pr-6">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] uppercase font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-400/40 px-2 py-0.5 rounded-full">
+                  Save Your Score
+                </span>
+                <span className="text-[10px] text-emerald-400 font-bold font-mono">
+                  +{matchState.playerScore} Pts
+                </span>
+              </div>
+              <h3 className="text-sm sm:text-base font-extrabold text-white mt-1 leading-tight">
+                Don't lose your match LP & streak!
+              </h3>
+              <p className="text-xs text-slate-300 mt-0.5 leading-relaxed">
+                Create a free account with 1-Tap Google or Email to save your rank on the All-India Leaderboard.
+              </p>
+            </div>
+          </div>
+
+          {/* Embedded Auth Card with Google 1-Tap and Email Signup */}
+          <div className="mt-2 bg-slate-950/70 p-3 sm:p-4 rounded-2xl border border-purple-800/40">
+            <AuthCard
+              currentUser={currentUser}
+              onUserChange={user => {
+                if (onUserChange) onUserChange(user);
+                setShowSignupCard(false);
+              }}
+              onSuccessClose={() => setShowSignupCard(false)}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Action Buttons */}
       <div className="grid grid-cols-2 gap-2">

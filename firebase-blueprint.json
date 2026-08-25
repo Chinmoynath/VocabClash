@@ -16,12 +16,68 @@
         "updatedAt": { "type": "number", "description": "Epoch timestamp of last update" }
       },
       "required": ["uid", "updatedAt"]
+    },
+    "MatchQueueTicket": {
+      "title": "MatchQueueTicket",
+      "description": "Real-time 1v1 matchmaking queue ticket with active state transitions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Ticket ID (ticket_{userId})" },
+        "userId": { "type": "string", "description": "Player user ID" },
+        "playerName": { "type": "string", "description": "Player name" },
+        "avatar": { "type": "string", "description": "Player avatar emoji" },
+        "rankPoints": { "type": "number", "description": "Player LP rating" },
+        "targetExam": { "type": "string", "description": "Target exam" },
+        "category": { "type": "string", "description": "Selected question category" },
+        "exam": { "type": "string", "description": "Selected exam filter" },
+        "roundCount": { "type": "number", "description": "Number of questions" },
+        "status": { "type": "string", "description": "searching, matched, cancelled, or expired" },
+        "matchedRoomId": { "type": "string", "description": "ID of created match room" },
+        "matchedOpponent": { "type": "object", "description": "Opponent player profile" },
+        "questions": { "type": "array", "description": "Shared synchronized question set" },
+        "createdAt": { "type": "number", "description": "Creation timestamp in ms" },
+        "expiresAt": { "type": "number", "description": "Expiration timestamp in ms" }
+      },
+      "required": ["id", "userId", "status", "createdAt"]
+    },
+    "LiveDuelRoom": {
+      "title": "LiveDuelRoom",
+      "description": "Real-time synchronized 1v1 match document shared by both players",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Room ID" },
+        "roomId": { "type": "string", "description": "Unique match ID" },
+        "mode": { "type": "string", "description": "1v1_ranked or quick_duel" },
+        "category": { "type": "string", "description": "Category" },
+        "exam": { "type": "string", "description": "Exam" },
+        "roundCount": { "type": "number", "description": "Rounds" },
+        "player1": { "type": "object", "description": "Host player profile" },
+        "player2": { "type": "object", "description": "Challenger player profile" },
+        "questions": { "type": "array", "description": "Shared synchronized question array" },
+        "status": { "type": "string", "description": "waiting, in_progress, or completed" },
+        "currentQIndex": { "type": "number", "description": "Current active question index" },
+        "p1Score": { "type": "number", "description": "Player 1 score" },
+        "p2Score": { "type": "number", "description": "Player 2 score" },
+        "p1Combo": { "type": "number", "description": "Player 1 combo streak" },
+        "p2Combo": { "type": "number", "description": "Player 2 combo streak" },
+        "createdAt": { "type": "number", "description": "Timestamp created" },
+        "updatedAt": { "type": "number", "description": "Timestamp updated" }
+      },
+      "required": ["id", "roomId", "player1", "player2", "status", "createdAt"]
     }
   },
   "firestore": {
     "/users/{userId}": {
       "schema": "UserProfile",
       "description": "Private user profile and synchronization state"
+    },
+    "/match_queue/{ticketId}": {
+      "schema": "MatchQueueTicket",
+      "description": "Real-time 1v1 matchmaking queue tickets with onSnapshot subscriptions and atomic transaction matching"
+    },
+    "/live_rooms/{roomId}": {
+      "schema": "LiveDuelRoom",
+      "description": "Shared synchronized 1v1 live duel rooms"
     }
   }
 }

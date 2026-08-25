@@ -258,9 +258,9 @@ export const OnboardingTourModal: React.FC<OnboardingTourModalProps> = ({
             <button
               id="btn-onboarding-start-learning"
               onClick={handleStart}
-              className="w-full py-3 px-5 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-400 to-orange-500 text-slate-950 font-black text-sm sm:text-base flex items-center justify-center gap-2 shadow-lg shadow-amber-500/25 hover:brightness-105 active:scale-[0.98] transition-all cursor-pointer"
+              className="w-full py-3.5 px-5 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-400 to-orange-500 text-slate-950 font-black text-sm sm:text-base flex items-center justify-center gap-2 shadow-lg shadow-amber-500/25 hover:brightness-105 active:scale-[0.98] transition-all cursor-pointer"
             >
-              <span>Start Learning</span>
+              <span>Play First Duel (10 Qs)</span>
               <ChevronRight className="w-4 h-4 text-slate-950 stroke-[3]" />
             </button>
 

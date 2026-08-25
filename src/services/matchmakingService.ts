@@ -10,6 +10,10 @@ export function getFilteredQuestions(
   return questionBankEngine.getUniqueQuestionsForMatch(category, exam, count);
 }
 
+export function getFirstMatchQuestions(exam: ExamType = 'SSC_CGL'): Question[] {
+  return questionBankEngine.getFirstMatchQuestions(exam);
+}
+
 export function getNextDrillQuestion(
   category: QuestionCategory | 'mixed',
   exam: ExamType,

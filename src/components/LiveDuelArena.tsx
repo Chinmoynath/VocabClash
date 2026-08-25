@@ -10,22 +10,27 @@ import {
   simulateOpponentAnswer, 
   generateRandomOpponentEmote 
 } from '../services/matchmakingService';
+import { 
+  subscribeToLiveRoom, 
+  submitPlayerAnswerToLiveRoom, 
+  sendLiveRoomEmote, 
+  forceFinalizeLiveRoom,
+  LiveDuelRoom,
+  LiveRoomFinalResult 
+} from '../services/realtimeMatchmaking';
 import { soundManager } from '../utils/audio';
 import { 
   Zap, 
   Clock, 
   HelpCircle, 
   Flame, 
-  Shield, 
   Check, 
   X, 
-  Sparkles, 
   Smile, 
-  Info,
-  ChevronRight,
-  TrendingUp,
-  LogOut,
-  AlertTriangle
+  LogOut, 
+  AlertTriangle,
+  Loader2,
+  Radio
 } from 'lucide-react';
 
 interface LiveDuelArenaProps {
@@ -36,7 +41,7 @@ interface LiveDuelArenaProps {
     opponentAnswer: PlayerAnswerRecord,
     updatedScores: { playerScore: number; opponentScore: number; combo: number; opponentCombo: number }
   ) => void;
-  onCompleteMatch: () => void;
+  onCompleteMatch: (authoritativeResult?: LiveRoomFinalResult) => void;
   onSendEmote: (emoji: string) => void;
   onLeaveMatch: () => void;
 }
@@ -54,9 +59,25 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
   const currentQIndex = matchState.currentQuestionIndex;
   const currentQuestion = matchState.questions[currentQIndex];
 
+  const isRealMatch = Boolean(matchState.isRealPlayer && (matchState.realRoomId || matchState.matchId));
+  const roomId = matchState.realRoomId || matchState.matchId;
+  const myPlayerId = player.id || 'player';
+  const oppPlayerId = matchState.opponent.id;
+
   const [timeRemaining, setTimeRemaining] = useState<number>(ROUND_TIME_SEC);
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
   const [isAnswered, setIsAnswered] = useState<boolean>(false);
+  const [isWaitingForOpponent, setIsWaitingForOpponent] = useState<boolean>(false);
+
+  // Authoritative live state from Firestore (for real-player matches)
+  const [liveRoom, setLiveRoom] = useState<LiveDuelRoom | null>(null);
+
+  // Real-time scores for display
+  const [displayPlayerScore, setDisplayPlayerScore] = useState<number>(matchState.playerScore);
+  const [displayOpponentScore, setDisplayOpponentScore] = useState<number>(matchState.opponentScore);
+  const [displayPlayerCombo, setDisplayPlayerCombo] = useState<number>(matchState.comboStreak);
+  const [displayOpponentCombo, setDisplayOpponentCombo] = useState<number>(matchState.opponentCombo);
+
   const [opponentAnsweredState, setOpponentAnsweredState] = useState<{
     answered: boolean;
     isCorrect: boolean;
@@ -79,6 +100,65 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const opponentTimerRef = useRef<NodeJS.Timeout | null>(null);
   const opponentAnswerResultRef = useRef<{ selectedIndex: number; timeTakenMs: number; isCorrect: boolean } | null>(null);
+  const processedEmoteTimestampsRef = useRef<Set<number>>(new Set());
+  const hasCompletedRef = useRef<boolean>(false);
+
+  // 1. REAL-PLAYER REAL-TIME SUBSCRIPTION
+  useEffect(() => {
+    if (!isRealMatch || !roomId) return;
+
+    const unsubscribe = subscribeToLiveRoom(roomId, (roomData) => {
+      setLiveRoom(roomData);
+
+      // Extract authoritative scores
+      if (roomData.scores) {
+        const authPlayerScore = roomData.scores[myPlayerId] ?? displayPlayerScore;
+        const authOpponentScore = roomData.scores[oppPlayerId] ?? displayOpponentScore;
+        setDisplayPlayerScore(authPlayerScore);
+        setDisplayOpponentScore(authOpponentScore);
+      }
+
+      if (roomData.combos) {
+        const authPlayerCombo = roomData.combos[myPlayerId] ?? displayPlayerCombo;
+        const authOpponentCombo = roomData.combos[oppPlayerId] ?? displayOpponentCombo;
+        setDisplayPlayerCombo(authPlayerCombo);
+        setDisplayOpponentCombo(authOpponentCombo);
+      }
+
+      // Check opponent answer for current question
+      if (roomData.answers && roomData.answers[oppPlayerId]) {
+        const oppAnswers = roomData.answers[oppPlayerId];
+        const currentQAnswer = oppAnswers[currentQIndex];
+        if (currentQAnswer && !opponentAnsweredState.answered) {
+          setOpponentAnsweredState({
+            answered: true,
+            isCorrect: currentQAnswer.isCorrect,
+            points: currentQAnswer.scoreGained,
+          });
+        }
+      }
+
+      // Sync active emotes from opponent
+      if (roomData.activeEmotes && roomData.activeEmotes.length > 0) {
+        roomData.activeEmotes.forEach(emote => {
+          if (emote.senderId === oppPlayerId && !processedEmoteTimestampsRef.current.has(emote.timestamp)) {
+            processedEmoteTimestampsRef.current.add(emote.timestamp);
+            triggerFloatingEmote('opponent', emote.emoji, emote.text);
+          }
+        });
+      }
+
+      // Check for match completion
+      if (roomData.finalResult && roomData.finalResult.finalised && !hasCompletedRef.current) {
+        hasCompletedRef.current = true;
+        onCompleteMatch(roomData.finalResult);
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [isRealMatch, roomId, myPlayerId, oppPlayerId, currentQIndex, onCompleteMatch]);
 
   // Reset for each new question
   useEffect(() => {
@@ -91,8 +171,8 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
     setOpponentAnsweredState({ answered: false, isCorrect: false, points: 0 });
     questionStartTimeRef.current = Date.now();
 
-    // Prepare opponent simulated answer
-    if (currentQuestion) {
+    // Prepare opponent simulated answer ONLY IF IT'S A BOT MATCH
+    if (!isRealMatch && currentQuestion) {
       const oppResult = simulateOpponentAnswer(
         currentQuestion,
         matchState.opponent.accuracyRate,
@@ -125,11 +205,11 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
     return () => {
       if (opponentTimerRef.current) clearTimeout(opponentTimerRef.current);
     };
-  }, [currentQIndex, currentQuestion]);
+  }, [currentQIndex, currentQuestion, isRealMatch]);
 
   // Main countdown timer
   useEffect(() => {
-    if (isAnswered) return;
+    if (isAnswered || isWaitingForOpponent) return;
 
     timerRef.current = setInterval(() => {
       setTimeRemaining(prev => {
@@ -149,15 +229,33 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [isAnswered, isTimeFrozen, currentQIndex]);
+  }, [isAnswered, isTimeFrozen, currentQIndex, isWaitingForOpponent]);
+
+  // Fallback safety timeout if waiting for opponent on last question
+  useEffect(() => {
+    if (!isWaitingForOpponent || !isRealMatch || !roomId) return;
+
+    const safetyTimer = setTimeout(() => {
+      if (!hasCompletedRef.current) {
+        forceFinalizeLiveRoom(roomId).then(finalizedRoom => {
+          if (finalizedRoom?.finalResult && !hasCompletedRef.current) {
+            hasCompletedRef.current = true;
+            onCompleteMatch(finalizedRoom.finalResult);
+          }
+        });
+      }
+    }, 12000);
+
+    return () => clearTimeout(safetyTimer);
+  }, [isWaitingForOpponent, isRealMatch, roomId, onCompleteMatch]);
 
   const handleTimeExpired = () => {
     if (isAnswered) return;
     handleSelectOption(-1); // Timed out (unanswered)
   };
 
-  const handleSelectOption = (index: number) => {
-    if (isAnswered) return;
+  const handleSelectOption = async (index: number) => {
+    if (isAnswered || isWaitingForOpponent) return;
     setIsAnswered(true);
     setSelectedOption(index);
 
@@ -170,22 +268,14 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
       soundManager.playWrong();
     }
 
-    const newPlayerCombo = isCorrect ? matchState.comboStreak + 1 : 0;
+    const newPlayerCombo = isCorrect ? displayPlayerCombo + 1 : 0;
     const playerScoreGained = calculateScore(isCorrect, timeRemaining, ROUND_TIME_SEC, newPlayerCombo);
+    const newPlayerScore = Math.max(0, displayPlayerScore + playerScoreGained);
 
-    // Opponent answer resolving
-    const oppResult = opponentAnswerResultRef.current || {
-      selectedIndex: currentQuestion.correctIndex,
-      timeTakenMs: 3000,
-      isCorrect: true,
-    };
-    const newOppCombo = oppResult.isCorrect ? matchState.opponentCombo + 1 : 0;
-    const oppScoreGained = calculateScore(
-      oppResult.isCorrect,
-      ROUND_TIME_SEC - oppResult.timeTakenMs / 1000,
-      ROUND_TIME_SEC,
-      newOppCombo
-    );
+    setDisplayPlayerScore(newPlayerScore);
+    setDisplayPlayerCombo(newPlayerCombo);
+
+    const isLastQuestion = currentQIndex + 1 >= matchState.questions.length;
 
     const playerRecord: PlayerAnswerRecord = {
       questionId: currentQuestion.id,
@@ -195,27 +285,81 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
       scoreGained: playerScoreGained,
     };
 
-    const opponentRecord: PlayerAnswerRecord = {
-      questionId: currentQuestion.id,
-      selectedIndex: oppResult.selectedIndex,
-      timeTakenMs: oppResult.timeTakenMs,
-      isCorrect: oppResult.isCorrect,
-      scoreGained: oppScoreGained,
-    };
-
-    // Auto advance to next question or end match after short delay
-    setTimeout(() => {
-      onAnswerQuestion(playerRecord, opponentRecord, {
-        playerScore: Math.max(0, matchState.playerScore + playerScoreGained),
-        opponentScore: Math.max(0, matchState.opponentScore + oppScoreGained),
-        combo: newPlayerCombo,
-        opponentCombo: newOppCombo,
+    if (isRealMatch && roomId) {
+      // 1. SUBMIT ANSWER ATOMICALLY TO FIRESTORE LIVE ROOM
+      submitPlayerAnswerToLiveRoom(roomId, myPlayerId, playerRecord, isLastQuestion).then(updatedRoom => {
+        if (updatedRoom?.finalResult && updatedRoom.finalResult.finalised && !hasCompletedRef.current) {
+          hasCompletedRef.current = true;
+          setTimeout(() => {
+            onCompleteMatch(updatedRoom.finalResult);
+          }, 1200);
+        }
       });
 
-      if (currentQIndex + 1 >= matchState.questions.length) {
-        onCompleteMatch();
-      }
-    }, 1600);
+      // Advance after short delay
+      setTimeout(() => {
+        if (isLastQuestion) {
+          if (liveRoom?.finalResult && liveRoom.finalResult.finalised && !hasCompletedRef.current) {
+            hasCompletedRef.current = true;
+            onCompleteMatch(liveRoom.finalResult);
+          } else {
+            setIsWaitingForOpponent(true);
+          }
+        } else {
+          // Dummy opp record for intermediate local state before sync
+          const tempOppRecord: PlayerAnswerRecord = {
+            questionId: currentQuestion.id,
+            selectedIndex: -1,
+            timeTakenMs: 0,
+            isCorrect: false,
+            scoreGained: 0,
+          };
+          onAnswerQuestion(playerRecord, tempOppRecord, {
+            playerScore: newPlayerScore,
+            opponentScore: displayOpponentScore,
+            combo: newPlayerCombo,
+            opponentCombo: displayOpponentCombo,
+          });
+        }
+      }, 1500);
+
+    } else {
+      // 2. BOT MATCH FLOW
+      const oppResult = opponentAnswerResultRef.current || {
+        selectedIndex: currentQuestion.correctIndex,
+        timeTakenMs: 3000,
+        isCorrect: true,
+      };
+      const newOppCombo = oppResult.isCorrect ? matchState.opponentCombo + 1 : 0;
+      const oppScoreGained = calculateScore(
+        oppResult.isCorrect,
+        ROUND_TIME_SEC - oppResult.timeTakenMs / 1000,
+        ROUND_TIME_SEC,
+        newOppCombo
+      );
+      const newOppScore = Math.max(0, matchState.opponentScore + oppScoreGained);
+
+      const opponentRecord: PlayerAnswerRecord = {
+        questionId: currentQuestion.id,
+        selectedIndex: oppResult.selectedIndex,
+        timeTakenMs: oppResult.timeTakenMs,
+        isCorrect: oppResult.isCorrect,
+        scoreGained: oppScoreGained,
+      };
+
+      setTimeout(() => {
+        onAnswerQuestion(playerRecord, opponentRecord, {
+          playerScore: newPlayerScore,
+          opponentScore: newOppScore,
+          combo: newPlayerCombo,
+          opponentCombo: newOppCombo,
+        });
+
+        if (isLastQuestion) {
+          onCompleteMatch();
+        }
+      }, 1500);
+    }
   };
 
   // Powerup: 50-50
@@ -262,6 +406,9 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
   const handleSendEmote = (emoji: string) => {
     soundManager.playTap();
     triggerFloatingEmote('player', emoji);
+    if (isRealMatch && roomId) {
+      sendLiveRoomEmote(roomId, myPlayerId, emoji);
+    }
     onSendEmote(emoji);
     setShowEmotePicker(false);
   };
@@ -269,7 +416,7 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
   // Keyboard hotkeys for fast desktop gameplay (1, 2, 3, 4 or A, B, C, D)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (isAnswered || !currentQuestion) return;
+      if (isAnswered || !currentQuestion || isWaitingForOpponent) return;
       if (e.key === '1' || e.key === 'a' || e.key === 'A') {
         handleSelectOption(0);
       } else if (e.key === '2' || e.key === 'b' || e.key === 'B') {
@@ -283,7 +430,7 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isAnswered, currentQuestion]);
+  }, [isAnswered, currentQuestion, isWaitingForOpponent]);
 
   if (!currentQuestion) {
     return (
@@ -319,6 +466,29 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
         ))}
       </div>
 
+      {/* Waiting for Opponent Finalize Overlay */}
+      {isWaitingForOpponent && (
+        <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 max-w-sm w-full text-center space-y-4 shadow-2xl">
+            <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 mx-auto">
+              <Loader2 className="w-7 h-7 animate-spin" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-base font-extrabold text-slate-100">
+                You Finished All Rounds!
+              </h3>
+              <p className="text-xs text-slate-400">
+                Waiting for <span className="text-orange-400 font-bold">{matchState.opponent.name}</span> to complete the final question...
+              </p>
+            </div>
+            <div className="p-3 bg-slate-950/60 rounded-2xl border border-slate-800 flex items-center justify-between text-xs font-mono">
+              <span className="text-slate-400">Your Final Score:</span>
+              <span className="text-amber-400 font-bold text-sm">{displayPlayerScore}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* TOP: Split Live Score Arena Header & Leave Match Option */}
       <div className="space-y-2 shrink-0">
         {/* Round number, Leave Match Button & Exam tag */}
@@ -344,6 +514,13 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
                 {currentQuestion.category}
               </span>
             </div>
+
+            {isRealMatch && (
+              <div className="hidden sm:flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-950/80 border border-emerald-500/50 text-emerald-400 text-[10px] font-bold">
+                <Radio className="w-3 h-3 animate-pulse" />
+                <span>Live 1v1</span>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-1 bg-amber-950/80 border border-amber-700/60 text-amber-300 px-2.5 py-1 rounded-full text-[11px] font-bold">
@@ -362,12 +539,12 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
               <div className="text-[11px] font-bold text-slate-200 truncate">{player.name}</div>
               <div className="flex items-center gap-1">
                 <span className="text-sm font-black text-amber-400 font-mono">
-                  {matchState.playerScore}
+                  {displayPlayerScore}
                 </span>
-                {matchState.comboStreak > 1 && (
+                {displayPlayerCombo > 1 && (
                   <span className="text-[9px] bg-orange-600/90 text-white font-bold px-1 rounded flex items-center">
                     <Flame className="w-2.5 h-2.5 mr-0.5 fill-white" />
-                    {matchState.comboStreak}x
+                    {displayPlayerCombo}x
                   </span>
                 )}
               </div>
@@ -416,7 +593,7 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
               </div>
               <div className="flex items-center justify-end gap-1">
                 <span className="text-sm font-black text-orange-400 font-mono">
-                  {matchState.opponentScore}
+                  {displayOpponentScore}
                 </span>
                 {opponentAnsweredState.answered && (
                   <span
@@ -504,7 +681,7 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
             return (
               <button
                 key={idx}
-                disabled={isAnswered || isEliminated}
+                disabled={isAnswered || isEliminated || isWaitingForOpponent}
                 onClick={() => handleSelectOption(idx)}
                 className={`w-full p-3 sm:p-3.5 rounded-xl border text-left flex items-center gap-3 transition-all duration-150 relative ${buttonStyle}`}
               >
@@ -525,7 +702,7 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
         <div className="flex items-center justify-between gap-2">
           {/* 50-50 Lifeline */}
           <button
-            disabled={matchState.powerups.fiftyFiftyUsed || isAnswered}
+            disabled={matchState.powerups.fiftyFiftyUsed || isAnswered || isWaitingForOpponent}
             onClick={handleUseFiftyFifty}
             className={`flex-1 py-2 px-2 rounded-xl border text-xs font-bold flex items-center justify-center gap-1 transition-all ${
               matchState.powerups.fiftyFiftyUsed
@@ -539,7 +716,7 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
 
           {/* Time Freeze Lifeline */}
           <button
-            disabled={matchState.powerups.freezeTimeUsed || isAnswered}
+            disabled={matchState.powerups.freezeTimeUsed || isTimeFrozen || isAnswered || isWaitingForOpponent}
             onClick={handleUseFreezeTime}
             className={`flex-1 py-2 px-2 rounded-xl border text-xs font-bold flex items-center justify-center gap-1 transition-all ${
               matchState.powerups.freezeTimeUsed
@@ -553,7 +730,7 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
 
           {/* Hindi Clue Lifeline */}
           <button
-            disabled={matchState.powerups.hintUsed || isAnswered}
+            disabled={matchState.powerups.hintUsed || showHindiHint || isAnswered || isWaitingForOpponent}
             onClick={handleUseHint}
             className={`flex-1 py-2 px-2 rounded-xl border text-xs font-bold flex items-center justify-center gap-1 transition-all ${
               matchState.powerups.hintUsed
@@ -567,6 +744,7 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
 
           {/* Live Emote / Taunt Launcher */}
           <button
+            disabled={isWaitingForOpponent}
             onClick={() => {
               soundManager.playTap();
               setShowEmotePicker(prev => !prev);
@@ -656,4 +834,3 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
     </div>
   );
 };
-

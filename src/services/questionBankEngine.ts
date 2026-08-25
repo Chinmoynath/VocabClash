@@ -189,6 +189,277 @@ export class QuestionBankEngine {
     this.initialized = true;
   }
 
+  /**
+   * FIRST MATCH ONBOARDING QUESTION POOL (10 Questions):
+   * - Curated specifically for new visitors / first match onboarding
+   * - 7-8 Easy high-yield PYQs (70-80%) to build confidence & dopamine
+   * - 2-3 Medium high-frequency PYQs (20-30%) to provide genuine exam feel
+   * - Covers Synonyms, Antonyms, One-Word Substitutions, and Idioms
+   */
+  public getFirstMatchQuestions(exam: ExamType = 'SSC_CGL'): Question[] {
+    this.init();
+    
+    // Curated high-dopamine, high-frequency PYQ definitions
+    const easyWordsPool: Question[] = [
+      // Easy Synonyms
+      {
+        id: 'first-syn-1',
+        category: 'synonyms',
+        wordOrPhrase: 'DILIGENT',
+        instruction: 'Select the most appropriate SYNONYM of the given word:',
+        options: ['Hardworking', 'Lazy', 'Careless', 'Passive'],
+        correctIndex: 0,
+        meaning: 'Having or showing care and conscientiousness in one\'s work or duties.',
+        hindiMeaning: 'परिश्रमी / मेहनती (Synonym: कर्मठ)',
+        exampleSentence: 'A diligent aspirant studies with full focus every day.',
+        mnemonic: 'Diligent = "Dilli ke agent" (Delhi agents work very hard).',
+        rootWordInfo: 'Latin "diligere" (to value, select, love).',
+        examHistory: ['SSC CGL 2024', 'SSC CHSL 2023', 'RRB NTPC 2022'],
+        repeatCount: 18,
+        importanceLevel: 'ultra-high',
+        difficulty: 'easy',
+      },
+      {
+        id: 'first-syn-2',
+        category: 'synonyms',
+        wordOrPhrase: 'LUCID',
+        instruction: 'Select the most appropriate SYNONYM of the given word:',
+        options: ['Confusing', 'Clear', 'Obscure', 'Vague'],
+        correctIndex: 1,
+        meaning: 'Expressed clearly; easy to understand.',
+        hindiMeaning: 'स्पष्ट / समझने में आसान (Synonym: सुबोध)',
+        exampleSentence: 'The teacher gave a lucid explanation of the grammar rule.',
+        mnemonic: 'Lucid = "Liquid clear" like pure transparent water.',
+        rootWordInfo: 'Latin "lux / lucere" (light) → Lucent, Translucent, Lucid.',
+        examHistory: ['SSC CGL 2023', 'SSC MTS 2022', 'RRB Group D 2022'],
+        repeatCount: 15,
+        importanceLevel: 'ultra-high',
+        difficulty: 'easy',
+      },
+      {
+        id: 'first-syn-3',
+        category: 'synonyms',
+        wordOrPhrase: 'IMPECCABLE',
+        instruction: 'Select the most appropriate SYNONYM of the given word:',
+        options: ['Flawed', 'Faultless', 'Corrupt', 'Defective'],
+        correctIndex: 1,
+        meaning: 'In accordance with the highest standards of propriety; faultless.',
+        hindiMeaning: 'त्रुटिहीन / निष्कलंक (Synonym: निर्दोष)',
+        exampleSentence: 'The topper maintained an impeccable accuracy record.',
+        mnemonic: 'Impeccable = "Im (Not) + Pecca (Mistake / Fault)".',
+        rootWordInfo: 'Latin "im-" (not) + "peccare" (to sin/err).',
+        examHistory: ['SSC CGL 2023', 'SSC CHSL 2020', 'RRB NTPC 2022'],
+        repeatCount: 14,
+        importanceLevel: 'ultra-high',
+        difficulty: 'easy',
+      },
+      // Easy Antonyms
+      {
+        id: 'first-ant-1',
+        category: 'antonyms',
+        wordOrPhrase: 'METICULOUS',
+        instruction: 'Select the most appropriate ANTONYM of the given word:',
+        options: ['Careful', 'Painstaking', 'Careless', 'Scrupulous'],
+        correctIndex: 2,
+        meaning: 'Showing great attention to detail; very careful and precise.',
+        hindiMeaning: 'अति सावधान / सूक्ष्म (Antonym: लापरवाह)',
+        exampleSentence: 'An officer must be meticulous with file verification, not careless.',
+        mnemonic: 'Meticulous = "Mat-I-Clue-Miss" (I will not miss any clue because I am very careful).',
+        rootWordInfo: 'From Latin "metus" (fear/caution).',
+        examHistory: ['SSC CGL Tier-1 2024', 'SSC CHSL 2021', 'IBPS PO 2022'],
+        repeatCount: 15,
+        importanceLevel: 'ultra-high',
+        difficulty: 'easy',
+      },
+      {
+        id: 'first-ant-2',
+        category: 'antonyms',
+        wordOrPhrase: 'NADIR',
+        instruction: 'Select the most appropriate ANTONYM of the given word:',
+        options: ['Bottom', 'Zenith', 'Base', 'Depression'],
+        correctIndex: 1,
+        meaning: 'The lowest point in the fortunes of a person or organization.',
+        hindiMeaning: 'पतन / निम्नतम स्तर (Antonym: शीर्ष / चरम सीमा)',
+        exampleSentence: 'He reached the nadir of his career, but rose to the zenith of success.',
+        mnemonic: 'Nadir (lowest point) opposite to Zenith (highest peak).',
+        rootWordInfo: 'From Arabic "nazir" (opposite, lower point).',
+        examHistory: ['SSC CGL 2021', 'SSC CHSL 2023', 'RRB Group D 2022'],
+        repeatCount: 12,
+        importanceLevel: 'ultra-high',
+        difficulty: 'easy',
+      },
+      {
+        id: 'first-ant-3',
+        category: 'antonyms',
+        wordOrPhrase: 'SPURIOUS',
+        instruction: 'Select the most appropriate ANTONYM of the given word:',
+        options: ['Fake', 'Counterfeit', 'Authentic', 'Bogus'],
+        correctIndex: 2,
+        meaning: 'Not being what it purports to be; false or fake.',
+        hindiMeaning: 'नकली / अप्रमाणिक (Antonym: असली / प्रामाणिक)',
+        exampleSentence: 'Avoid spurious claims and rely only on authentic sources.',
+        mnemonic: 'Spurious = "Spur (Pure nahi hai)" → Fake/Nakli.',
+        rootWordInfo: 'From Latin "spurius" (false, illegitimate).',
+        examHistory: ['SSC CGL Tier-2 2023', 'SSC CPO 2022', 'CDS 2023'],
+        repeatCount: 16,
+        importanceLevel: 'ultra-high',
+        difficulty: 'easy',
+      },
+      // Easy One-Word Substitution
+      {
+        id: 'first-ows-1',
+        category: 'ows',
+        wordOrPhrase: 'A person who loves or collects books',
+        instruction: 'Choose the correct ONE WORD for the given group of words:',
+        options: ['Bibliophile', 'Philanthropist', 'Polyglot', 'Misogynist'],
+        correctIndex: 0,
+        meaning: 'A person who collects or has a great love of books.',
+        hindiMeaning: 'पुस्तकों का प्रेमी / पुस्तक संग्रहकर्ता',
+        exampleSentence: 'Being a true bibliophile, his entire room is filled with classic novels.',
+        mnemonic: 'Biblio (Book) + Phile (Love) = Book Lover.',
+        rootWordInfo: 'Greek "biblion" (book) + "philos" (loving).',
+        examHistory: ['SSC CGL 2024', 'SSC CHSL 2022', 'RRB NTPC 2021'],
+        repeatCount: 19,
+        importanceLevel: 'ultra-high',
+        difficulty: 'easy',
+      },
+      {
+        id: 'first-ows-2',
+        category: 'ows',
+        wordOrPhrase: 'One who knows everything',
+        instruction: 'Choose the correct ONE WORD for the given group of words:',
+        options: ['Omnipotent', 'Omnipresent', 'Omniscient', 'Omnivorous'],
+        correctIndex: 2,
+        meaning: 'Knowing everything; having infinite knowledge.',
+        hindiMeaning: 'सर्वज्ञ / सब कुछ जानने वाला',
+        exampleSentence: 'Only the Almighty is considered omniscient.',
+        mnemonic: 'Omni (All) + Scient (Science/Knowledge) = All-knowing.',
+        rootWordInfo: 'Latin "omnis" (all) + "scire" (to know).',
+        examHistory: ['SSC CGL 2023', 'SSC MTS 2022', 'SSC CPO 2020'],
+        repeatCount: 17,
+        importanceLevel: 'ultra-high',
+        difficulty: 'easy',
+      },
+      // Easy Idioms
+      {
+        id: 'first-idm-1',
+        category: 'idioms',
+        wordOrPhrase: 'Once in a blue moon',
+        instruction: 'Select the most appropriate meaning of the given IDIOM:',
+        options: ['Very frequently', 'Very rarely', 'On a full moon night', 'Never ever'],
+        correctIndex: 1,
+        meaning: 'Very rarely; almost never.',
+        hindiMeaning: 'ईद का चांद होना / कभी-कभार होना',
+        exampleSentence: 'He lives in Canada, so we only meet once in a blue moon.',
+        mnemonic: 'A blue moon happens very rarely in astronomy.',
+        rootWordInfo: 'Traditional astronomical idiom for a rare second full moon.',
+        examHistory: ['SSC CGL 2024', 'SSC CHSL 2023', 'RRB NTPC 2022'],
+        repeatCount: 22,
+        importanceLevel: 'ultra-high',
+        difficulty: 'easy',
+      },
+      {
+        id: 'first-idm-2',
+        category: 'idioms',
+        wordOrPhrase: 'A piece of cake',
+        instruction: 'Select the most appropriate meaning of the given IDIOM:',
+        options: ['A delicious treat', 'Very difficult task', 'Something very easy to do', 'A birthday celebration'],
+        correctIndex: 2,
+        meaning: 'Something that is very easy to do.',
+        hindiMeaning: 'बहुत ही आसान काम / बच्चों का खेल',
+        exampleSentence: 'After thorough revision, the English section felt like a piece of cake.',
+        mnemonic: 'Eating a cake is super easy and delightful.',
+        rootWordInfo: '1930s colloquial origin for effortless accomplishments.',
+        examHistory: ['SSC MTS 2023', 'SSC CHSL 2021', 'RRB Group D 2022'],
+        repeatCount: 18,
+        importanceLevel: 'ultra-high',
+        difficulty: 'easy',
+      }
+    ];
+
+    // Medium pool for the 20-30% questions
+    const mediumWordsPool: Question[] = [
+      {
+        id: 'first-med-1',
+        category: 'synonyms',
+        wordOrPhrase: 'FASTIDIOUS',
+        instruction: 'Select the most appropriate SYNONYM of the given word:',
+        options: ['Carefree', 'Fussy / Hard to please', 'Negligent', 'Flexible'],
+        correctIndex: 1,
+        meaning: 'Very attentive to and concerned about accuracy and detail; hard to please.',
+        hindiMeaning: 'तुनकमिज़ाज / जिसको खुश करना मुश्किल हो',
+        exampleSentence: 'The auditor was fastidious about the accounts, checking every single detail.',
+        mnemonic: 'Fastidious = "Fast + Tidy" (wants everything super clean & perfect).',
+        rootWordInfo: 'Latin "fastidium" (loathing, squeamishness).',
+        examHistory: ['SSC CGL Tier-1 2023', 'SSC CHSL 2022', 'RRB NTPC 2022'],
+        repeatCount: 17,
+        importanceLevel: 'ultra-high',
+        difficulty: 'medium',
+      },
+      {
+        id: 'first-med-2',
+        category: 'antonyms',
+        wordOrPhrase: 'EPHEMERAL',
+        instruction: 'Select the most appropriate ANTONYM of the given word:',
+        options: ['Transient', 'Eternal / Everlasting', 'Fleeting', 'Momentary'],
+        correctIndex: 1,
+        meaning: 'Lasting for a very short time.',
+        hindiMeaning: 'क्षणिक / अल्पकालिक (Antonym: शाश्वत / अमर)',
+        exampleSentence: 'Fame in modern media is often ephemeral, whereas true knowledge is eternal.',
+        mnemonic: 'Ephemeral sounds like "Funeral" which reminds us life is short.',
+        rootWordInfo: 'Greek "ephemeros" (lasting only a day).',
+        examHistory: ['SSC CGL Tier-2 2022', 'SSC MTS 2021', 'CDS 2023'],
+        repeatCount: 14,
+        importanceLevel: 'ultra-high',
+        difficulty: 'medium',
+      },
+      {
+        id: 'first-med-3',
+        category: 'idioms',
+        wordOrPhrase: 'Bite the bullet',
+        instruction: 'Select the most appropriate meaning of the given IDIOM:',
+        options: ['To fight bravely in war', 'To face a difficult situation with courage', 'To get injured accidentally', 'To waste precious time'],
+        correctIndex: 1,
+        meaning: 'To face a difficult or unpleasant situation with courage and fortitude.',
+        hindiMeaning: 'कठिन परिस्थिति का हिम्मत से सामना करना',
+        exampleSentence: 'He had to bite the bullet and put in 10 hours of daily study.',
+        mnemonic: 'Soldiers used to bite on a lead bullet during surgery to endure pain.',
+        rootWordInfo: 'Military origin before anesthesia.',
+        examHistory: ['SSC CGL 2023', 'SSC CPO 2022', 'IBPS PO 2021'],
+        repeatCount: 15,
+        importanceLevel: 'ultra-high',
+        difficulty: 'medium',
+      },
+      {
+        id: 'first-med-4',
+        category: 'ows',
+        wordOrPhrase: 'One who is indifferent to pleasure or pain',
+        instruction: 'Choose the correct ONE WORD for the given group of words:',
+        options: ['Stoic', 'Epicurean', 'Cynic', 'Hedonist'],
+        correctIndex: 0,
+        meaning: 'A person who can endure pain or hardship without showing feelings or complaining.',
+        hindiMeaning: 'उदासीन / सुख-दुख में समान रहने वाला',
+        exampleSentence: 'He remained a true stoic, unaffected by success or failure.',
+        mnemonic: 'Stoic = "Stone like" in pleasure and pain.',
+        rootWordInfo: 'From Greek philosophy of Stoicism (Zeno of Citium).',
+        examHistory: ['SSC CGL 2023', 'SSC CHSL 2021', 'CDS 2022'],
+        repeatCount: 16,
+        importanceLevel: 'ultra-high',
+        difficulty: 'medium',
+      }
+    ];
+
+    // Pick 7-8 Easy questions (75%)
+    const shuffledEasy = this.shuffle(easyWordsPool).slice(0, 7);
+    // Pick 2-3 Medium questions (25%)
+    const shuffledMed = this.shuffle(mediumWordsPool).slice(0, 3);
+
+    // Merge and shuffle them so it's a smooth natural flow (Easy, Easy, Medium, Easy, etc.)
+    const final10 = this.shuffle([...shuffledEasy, ...shuffledMed]).slice(0, 10);
+    recordBatchQuestionsSeen(final10.map(q => q.wordOrPhrase));
+    return final10;
+  }
+
   public getCategoryCount(category: QuestionCategory | 'mixed'): number {
     this.init();
     if (category === 'synonyms') return this.synonymsPool.length;

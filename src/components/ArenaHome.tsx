@@ -208,7 +208,7 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
             <button
               onClick={() => {
                 soundManager.playTap();
-                onStartMatchmaking('1v1_ranked');
+                onStartMatchmaking(player.matchesPlayed === 0 ? 'quick_duel' : '1v1_ranked');
               }}
               className="w-full bg-gradient-to-r from-amber-500 via-orange-500 to-amber-500 hover:from-amber-400 hover:to-orange-400 active:scale-[0.98] text-slate-950 p-4 sm:p-5 rounded-2xl shadow-xl shadow-orange-950/70 flex items-center justify-between gap-3 border-2 border-amber-300/60 transition-all group relative overflow-hidden cursor-pointer"
             >
@@ -222,14 +222,16 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
                 <div className="text-left min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm sm:text-base lg:text-lg font-black tracking-wide uppercase text-slate-950 leading-tight">
-                      1V1 VOCAB ONLINE DUEL
+                      {player.matchesPlayed === 0 ? 'PLAY FIRST DUEL' : '1V1 VOCAB ONLINE DUEL'}
                     </span>
                     <span className="text-[10px] bg-slate-950/35 text-amber-100 font-extrabold px-2 py-0.5 rounded-md border border-slate-950/20 whitespace-nowrap shadow-sm">
-                      20 Qs
+                      {player.matchesPlayed === 0 ? '10 Qs (Intro Match)' : '20 Qs'}
                     </span>
                   </div>
                   <div className="text-xs text-slate-950/85 font-bold mt-1">
-                    Full 20-Round Battle • <span className="text-slate-950 font-black">+30 LP on Victory</span>
+                    {player.matchesPlayed === 0
+                      ? '10 Quick PYQ Rounds • High Win Probability • +30 LP'
+                      : 'Full 20-Round Battle • +30 LP on Victory'}
                   </div>
                 </div>
               </div>

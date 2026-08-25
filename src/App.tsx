@@ -12,10 +12,12 @@ import {
 } from './types';
 import { 
   getFilteredQuestions, 
+  getFirstMatchQuestions,
   generateMatchedOpponent, 
   getTierFromLP, 
   getTierTitle 
 } from './services/matchmakingService';
+import { LiveRoomFinalResult } from './services/realtimeMatchmaking';
 import { soundManager } from './utils/audio';
 import { isAdDue, resetAdTimerForTest } from './utils/adManager';
 import { extractCleanUserName, formatNameFromEmail } from './utils/nameHelper';
@@ -498,18 +500,34 @@ export default function App() {
   };
 
   // When matchmaking countdown finishes -> transition to Live Duel
-  const handleReadyToFight = () => {
-    if (!matchedOpponent) return;
+  const handleReadyToFight = (
+    finalOpponent: PlayerProfile, 
+    isRealPlayer: boolean = false, 
+    matchedQuestions?: Question[], 
+    sharedRoomId?: string
+  ) => {
+    const opp = finalOpponent || matchedOpponent;
+    if (!opp) return;
 
-    const roundCount = matchMode === 'quick_duel' ? 10 : 20;
-    const questions = getFilteredQuestions(selectedCategory, selectedExam, roundCount);
+    const isFirstTimeMatch = player.matchesPlayed === 0 || matchMode === 'quick_duel';
+    const roundCount = isFirstTimeMatch ? 10 : (matchMode === 'quick_duel' ? 10 : 20);
+    
+    // For first-time players / quick start: Curate 10 questions (70-80% easy, 20-30% medium)
+    // Or use the synchronized question list generated and locked during the atomic match transaction
+    const questions = matchedQuestions && matchedQuestions.length > 0 
+      ? matchedQuestions 
+      : (isFirstTimeMatch && selectedCategory === 'mixed'
+          ? getFirstMatchQuestions(selectedExam)
+          : getFilteredQuestions(selectedCategory, selectedExam, roundCount));
 
     const newMatch: MatchState = {
-      matchId: `match-${Date.now()}`,
+      matchId: sharedRoomId || `match-${Date.now()}`,
+      isRealPlayer,
+      realRoomId: sharedRoomId,
       mode: matchMode,
       categoryFilter: selectedCategory,
       examFilter: selectedExam,
-      opponent: matchedOpponent,
+      opponent: opp,
       questions,
       currentQuestionIndex: 0,
       playerScore: 0,
@@ -532,6 +550,7 @@ export default function App() {
       hintRevealed: false,
     };
 
+    setMatchedOpponent(opp);
     setMatchState(newMatch);
     setIsMatchmaking(false);
     setIsMatchCompleted(false);
@@ -606,13 +625,51 @@ export default function App() {
   };
 
   // Called when all rounds of the duel complete (Never during rounds)
-  const handleCompleteMatch = () => {
+  const handleCompleteMatch = (authoritativeResult?: LiveRoomFinalResult) => {
     if (!matchState) return;
-    setIsMatchCompleted(true);
 
-    const isWinner = matchState.playerScore > matchState.opponentScore;
-    const isDraw = matchState.playerScore === matchState.opponentScore;
-    const lpDelta = isWinner ? 30 + (matchState.comboStreak > 2 ? 5 : 0) : isDraw ? 5 : -15;
+    let isWinner = false;
+    let isDraw = false;
+    let lpDelta = 0;
+    let finalPlayerScore = matchState.playerScore;
+    let finalOpponentScore = matchState.opponentScore;
+
+    if (authoritativeResult && authoritativeResult.finalised) {
+      // Authoritative synchronized scores directly from Firestore Live Room
+      if (authoritativeResult.winnerId === 'draw') {
+        isDraw = true;
+        isWinner = false;
+        lpDelta = 5;
+      } else if (authoritativeResult.winnerId === player.id) {
+        isWinner = true;
+        isDraw = false;
+        lpDelta = 30;
+      } else {
+        isWinner = false;
+        isDraw = false;
+        lpDelta = -15;
+      }
+
+      // Synchronize exact final scores
+      if (authoritativeResult.player1FinalScore !== undefined && authoritativeResult.player2FinalScore !== undefined) {
+        if (isWinner) {
+          finalPlayerScore = Math.max(authoritativeResult.player1FinalScore, authoritativeResult.player2FinalScore);
+          finalOpponentScore = Math.min(authoritativeResult.player1FinalScore, authoritativeResult.player2FinalScore);
+        } else if (isDraw) {
+          finalPlayerScore = authoritativeResult.player1FinalScore;
+          finalOpponentScore = authoritativeResult.player2FinalScore;
+        } else {
+          finalPlayerScore = Math.min(authoritativeResult.player1FinalScore, authoritativeResult.player2FinalScore);
+          finalOpponentScore = Math.max(authoritativeResult.player1FinalScore, authoritativeResult.player2FinalScore);
+        }
+      }
+    } else {
+      // Bot / Offline match
+      isWinner = matchState.playerScore > matchState.opponentScore;
+      isDraw = matchState.playerScore === matchState.opponentScore;
+      lpDelta = isWinner ? 30 + (matchState.comboStreak > 2 ? 5 : 0) : isDraw ? 5 : -15;
+    }
+
     const newLP = Math.max(100, player.rankPoints + lpDelta);
     const newTier = getTierFromLP(newLP);
     const newTierTitle = getTierTitle(newTier);
@@ -636,6 +693,15 @@ export default function App() {
     };
 
     setPlayer(updatedPlayer);
+
+    setMatchState(prev => prev ? {
+      ...prev,
+      playerScore: finalPlayerScore,
+      opponentScore: finalOpponentScore,
+      finalResult: authoritativeResult,
+    } : null);
+
+    setIsMatchCompleted(true);
 
     // Immediately persist match results to Firestore if user is signed in
     if (currentUser) {
@@ -904,6 +970,8 @@ export default function App() {
               onOpenAiDeepDive={handleOpenAiTutor}
               bookmarkedIds={bookmarkedIds}
               isPremium={subscription.isPremium}
+              currentUser={currentUser}
+              onUserChange={user => setCurrentUser(user)}
             />
           )
         ) : (
@@ -967,7 +1035,7 @@ export default function App() {
       {isMatchmaking && (
         <MatchmakingModal
           player={player}
-          opponent={matchedOpponent}
+          initialBotOpponent={matchedOpponent || generateMatchedOpponent(player.rankPoints, selectedExam)}
           mode={matchMode}
           category={selectedCategory}
           exam={selectedExam}
