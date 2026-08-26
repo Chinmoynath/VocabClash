@@ -23,13 +23,16 @@ import {
   Layers,
   ChevronRight,
   BookOpen,
-  Eye
+  Eye,
+  Share2
 } from 'lucide-react';
 import { MatchState, PlayerProfile, Question } from '../types';
 import { soundManager } from '../utils/audio';
 import { AdSenseUnit } from './AdSenseUnit';
 import { ADSENSE_BANNER_SLOT } from '../services/adSenseService';
 import { ReportQuestionModal } from './ReportQuestionModal';
+import { ShareBattleResultModal } from './ShareBattleResultModal';
+import { BattleShareData } from '../utils/shareCardGenerator';
 
 import { User as FirebaseUser } from 'firebase/auth';
 import { AuthCard } from './AuthCard';
@@ -61,6 +64,7 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
 }) => {
   const [reportingQuestion, setReportingQuestion] = useState<Question | null>(null);
   const [showSignupCard, setShowSignupCard] = useState<boolean>(!currentUser);
+  const [showShareModal, setShowShareModal] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'summary' | 'solutions'>('summary');
   const [filterType, setFilterType] = useState<'all' | 'mistakes' | 'correct'>('all');
   
@@ -95,6 +99,23 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
   });
 
   const accuracyPct = totalQuestions > 0 ? Math.round((correctCount / totalQuestions) * 100) : 0;
+
+  // Authoritative share data package
+  const shareData: BattleShareData = {
+    playerName: player.name || 'Govt Aspirant',
+    playerAvatar: player.avatar,
+    playerScore: matchState.playerScore,
+    playerLpChange,
+    opponentName: matchState.opponent.name || 'Opponent',
+    opponentAvatar: matchState.opponent.avatar,
+    opponentScore: matchState.opponentScore,
+    isWinner,
+    isDraw,
+    exam: matchState.examFilter,
+    category: matchState.categoryFilter,
+    accuracyPct,
+    totalQuestions,
+  };
 
   useEffect(() => {
     if (isWinner) {
@@ -183,13 +204,32 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
                     <div className="font-extrabold text-sm sm:text-base text-slate-100 truncate">{player.name}</div>
                     <div className="text-[11px] text-amber-400/90 font-medium truncate">{player.title || 'Govt Job Aspirant'}</div>
                   </div>
-                  <div className="bg-slate-950/80 border border-slate-800 rounded-xl py-2 px-4 w-full">
+                  <div className="bg-slate-950/80 border border-slate-800 rounded-xl py-2 px-4 w-full relative group/score">
                     <div className="text-2xl sm:text-3xl font-black text-amber-400 font-mono tracking-tight">
                       {matchState.playerScore}
                     </div>
                     <div className={`text-xs font-bold font-mono mt-0.5 ${playerLpChange >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                       {playerLpChange >= 0 ? `+${playerLpChange} LP` : `${playerLpChange} LP`}
                     </div>
+
+                    {/* Aesthetic Share2 icon button in top-right of points/score area */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        soundManager.playTap();
+                        setShowShareModal(true);
+                      }}
+                      aria-label="Share result"
+                      title="Share result"
+                      className="absolute top-2 right-2 w-8 h-8 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg bg-slate-900/90 hover:bg-slate-800 text-slate-400 hover:text-amber-400 border border-slate-700/60 hover:border-amber-500/40 transition-all active:scale-90 cursor-pointer shadow-sm group/btn z-10"
+                    >
+                      <Share2 className="w-3.5 h-3.5 group-hover/btn:scale-110 transition-transform" />
+                      {/* Desktop Tooltip */}
+                      <span className="hidden sm:group-hover/btn:block absolute -top-8 right-0 bg-slate-900 text-white text-[10px] font-bold px-2 py-0.5 rounded shadow-lg border border-slate-700 whitespace-nowrap pointer-events-none z-30">
+                        Share result
+                      </span>
+                    </button>
                   </div>
                 </div>
 
@@ -735,6 +775,14 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
           question={reportingQuestion}
           userName={player.name}
           onClose={() => setReportingQuestion(null)}
+        />
+      )}
+
+      {/* Share Battle Result Modal */}
+      {showShareModal && (
+        <ShareBattleResultModal
+          data={shareData}
+          onClose={() => setShowShareModal(false)}
         />
       )}
     </div>
