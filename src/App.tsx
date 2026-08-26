@@ -908,7 +908,7 @@ export default function App() {
       )}
 
       {/* Main App Content Viewport */}
-      <div className="flex-1 flex flex-col min-h-0 overflow-hidden relative w-full">
+      <div className="flex-1 flex flex-col h-full min-h-0 overflow-hidden relative w-full">
         {/* Top App Bar */}
         <TopBar
           player={player}
@@ -1018,6 +1018,8 @@ export default function App() {
                 onRemoveWord={handleRemoveSavedWord}
                 onToggleUserSaved={handleToggleUserSaved}
                 onOpenAiTutor={handleOpenAiTutor}
+                onGoToArena={() => setCurrentTab('arena')}
+                onGoToPractice={() => setCurrentTab('practice')}
               />
             )}
 

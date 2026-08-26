@@ -14,7 +14,11 @@ import {
   Flame,
   Layers,
   AlertCircle,
-  Flag
+  Flag,
+  Swords,
+  Target,
+  ArrowRight,
+  Brain
 } from 'lucide-react';
 import { ReportQuestionModal } from './ReportQuestionModal';
 
@@ -23,6 +27,8 @@ interface MistakeVaultProps {
   onRemoveWord: (questionId: string, scope?: 'all' | 'saved_by_me' | 'mistakes') => void;
   onToggleUserSaved?: (questionId: string, question?: Question) => void;
   onOpenAiTutor: (question: Question) => void;
+  onGoToArena?: () => void;
+  onGoToPractice?: () => void;
 }
 
 export const MistakeVault: React.FC<MistakeVaultProps> = ({
@@ -30,6 +36,8 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
   onRemoveWord,
   onToggleUserSaved,
   onOpenAiTutor,
+  onGoToArena,
+  onGoToPractice,
 }) => {
   const [activeView, setActiveView] = useState<'list' | 'flashcards'>('list');
   const [filterOrigin, setFilterOrigin] = useState<'all' | 'saved_by_me' | 'mistakes'>('all');
@@ -383,37 +391,74 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
         /* LIST VIEW */
         <div className="flex-1 min-h-0 flex flex-col space-y-3">
           {filteredWords.length === 0 ? (
-            <div className="flex-1 min-h-[260px] sm:min-h-[320px] bg-slate-850/60 border border-slate-800 rounded-3xl p-6 sm:p-10 text-center space-y-3 sm:space-y-4 flex flex-col items-center justify-center shadow-lg my-1 sm:my-2">
-              <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl sm:rounded-3xl bg-slate-800/90 border border-slate-700 flex items-center justify-center mx-auto text-slate-400 shadow-inner">
-                {filterOrigin === 'saved_by_me' ? (
-                  <BookmarkCheck className="w-7 h-7 sm:w-8 sm:h-8 text-amber-400" />
-                ) : filterOrigin === 'mistakes' ? (
-                  <Flame className="w-7 h-7 sm:w-8 sm:h-8 text-rose-400" />
-                ) : (
-                  <Layers className="w-7 h-7 sm:w-8 sm:h-8 text-sky-400" />
-                )}
-              </div>
-              <div className="space-y-1.5 max-w-sm mx-auto">
-                <div className="font-extrabold text-sm sm:text-base text-slate-100">
-                  {filterOrigin === 'saved_by_me'
-                    ? searchQuery ? 'No Saved items matched your search' : 'No Items Saved by You Yet'
-                    : filterOrigin === 'mistakes'
-                    ? searchQuery ? 'No Mistakes matched your search' : 'No Match Mistakes Recorded'
-                    : searchQuery ? 'No items matched your search' : 'Your Vault is Ready for Revision'}
+            <div className="flex-1 min-h-[300px] sm:min-h-[360px] bg-gradient-to-b from-slate-900/90 to-slate-950/95 border border-slate-800/80 rounded-3xl p-5 sm:p-8 text-center space-y-4 flex flex-col items-center justify-center shadow-xl my-1">
+              <div className="relative">
+                <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-3xl bg-slate-800/90 border border-slate-700/80 flex items-center justify-center mx-auto shadow-xl ring-4 ring-slate-800/30">
+                  {filterOrigin === 'saved_by_me' ? (
+                    <BookmarkCheck className="w-8 h-8 sm:w-10 sm:h-10 text-amber-400" />
+                  ) : filterOrigin === 'mistakes' ? (
+                    <Flame className="w-8 h-8 sm:w-10 sm:h-10 text-rose-400" />
+                  ) : (
+                    <Layers className="w-8 h-8 sm:w-10 sm:h-10 text-sky-400" />
+                  )}
                 </div>
-                <p className="text-xs sm:text-sm text-slate-400 leading-relaxed">
+                <div className="absolute -bottom-1 -right-1 bg-indigo-600 rounded-full p-1 border-2 border-slate-950 shadow-md">
+                  <Brain className="w-3.5 h-3.5 text-white" />
+                </div>
+              </div>
+
+              <div className="space-y-1.5 max-w-md mx-auto">
+                <div className="font-black text-base sm:text-lg text-slate-100 tracking-tight">
                   {filterOrigin === 'saved_by_me'
-                    ? 'Click the ⭐️ Save button on any question during Practice or 1v1 Duels to save items here independently.'
+                    ? searchQuery ? 'No Saved items match your search' : 'No Items Saved Yet'
                     : filterOrigin === 'mistakes'
-                    ? 'When you answer a question incorrectly in a 1v1 duel or practice drill, it will automatically be logged here.'
-                    : 'Your vault holds both your explicitly saved questions and your match mistakes for spaced repetition.'}
+                    ? searchQuery ? 'No Mistakes match your search' : 'Mistake Log is Clear!'
+                    : searchQuery ? 'No PYQ items matched your filter' : 'Your Revision Vault is Ready'}
+                </div>
+                <p className="text-xs sm:text-sm text-slate-400 leading-relaxed max-w-sm mx-auto">
+                  {filterOrigin === 'saved_by_me'
+                    ? 'Tap the ⭐ Star icon during any 1v1 battle or practice session to bookmark difficult words for instant revision.'
+                    : filterOrigin === 'mistakes'
+                    ? 'Questions answered incorrectly during live battles automatically sync here for smart spaced repetition drills.'
+                    : 'Track your bookmarked questions and battle mistakes. Review them with flashcards, mnemonics, and AI explanations.'}
                 </p>
               </div>
 
-              <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-2">
-                <div className="text-xs text-amber-300 bg-amber-950/60 border border-amber-800/60 px-3.5 py-1.5 rounded-xl font-medium shadow-md">
-                  💡 Tip: Play a 1v1 Duel or Practice PYQs to study
-                </div>
+              {/* Action Jump Buttons */}
+              <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-2.5 w-full max-w-xs sm:max-w-md">
+                {onGoToArena && (
+                  <button
+                    onClick={() => {
+                      soundManager.playTap();
+                      onGoToArena();
+                    }}
+                    className="w-full sm:w-auto flex-1 bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-black px-4 py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 active:scale-95 transition-all"
+                  >
+                    <Swords className="w-4 h-4 shrink-0" />
+                    <span>Play 1v1 Duel</span>
+                    <ArrowRight className="w-3.5 h-3.5 shrink-0" />
+                  </button>
+                )}
+
+                {onGoToPractice && (
+                  <button
+                    onClick={() => {
+                      soundManager.playTap();
+                      onGoToPractice();
+                    }}
+                    className="w-full sm:w-auto flex-1 bg-slate-800 hover:bg-slate-700 text-sky-300 border border-slate-700 font-bold px-4 py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 shadow-md active:scale-95 transition-all"
+                  >
+                    <Target className="w-4 h-4 shrink-0 text-sky-400" />
+                    <span>Practice PYQs</span>
+                    <ArrowRight className="w-3.5 h-3.5 shrink-0" />
+                  </button>
+                )}
+              </div>
+
+              {/* Smart Spaced Repetition Indicator */}
+              <div className="inline-flex items-center gap-2 text-[11px] text-amber-300 bg-amber-950/40 border border-amber-800/40 px-3.5 py-1.5 rounded-full font-medium shadow-inner mt-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                <span>Active Spaced Repetition Enabled • 24,000+ Exam Pool</span>
               </div>
             </div>
           ) : (
