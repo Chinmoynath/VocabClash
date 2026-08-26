@@ -4,15 +4,26 @@ import {
   Award, 
   Flame, 
   ArrowRight, 
+  ArrowLeft,
   Bookmark, 
+  BookmarkCheck,
   Sparkles, 
   RotateCcw, 
   Check, 
   X, 
-  ChevronDown,
-  Shield,
-  HelpCircle,
-  Flag
+  Shield, 
+  HelpCircle, 
+  Flag,
+  Target,
+  Zap,
+  Filter,
+  CheckCircle2,
+  XCircle,
+  Brain,
+  Layers,
+  ChevronRight,
+  BookOpen,
+  Eye
 } from 'lucide-react';
 import { MatchState, PlayerProfile, Question } from '../types';
 import { soundManager } from '../utils/audio';
@@ -50,6 +61,8 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
 }) => {
   const [reportingQuestion, setReportingQuestion] = useState<Question | null>(null);
   const [showSignupCard, setShowSignupCard] = useState<boolean>(!currentUser);
+  const [activeTab, setActiveTab] = useState<'summary' | 'solutions'>('summary');
+  const [filterType, setFilterType] = useState<'all' | 'mistakes' | 'correct'>('all');
   
   const isWinner = matchState.finalResult 
     ? (matchState.finalResult.winnerId === player.id || (matchState.finalResult.winnerId !== 'draw' && matchState.playerScore > matchState.opponentScore))
@@ -59,7 +72,29 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
     : matchState.playerScore === matchState.opponentScore;
 
   // Authoritative LP calculation
-  const lpChange = isWinner ? 30 : isDraw ? 5 : -15;
+  const playerLpChange = isWinner ? 30 : isDraw ? 5 : -15;
+  const opponentLpChange = isWinner ? -15 : isDraw ? 5 : 30;
+
+  // Match statistics calculations
+  const totalQuestions = matchState.questions.length;
+  let correctCount = 0;
+  let mistakeCount = 0;
+  let maxCombo = 0;
+  let currentCombo = 0;
+
+  matchState.questions.forEach((_, idx) => {
+    const pAns = matchState.playerAnswers[idx];
+    if (pAns?.isCorrect) {
+      correctCount++;
+      currentCombo++;
+      if (currentCombo > maxCombo) maxCombo = currentCombo;
+    } else {
+      mistakeCount++;
+      currentCombo = 0;
+    }
+  });
+
+  const accuracyPct = totalQuestions > 0 ? Math.round((correctCount / totalQuestions) * 100) : 0;
 
   useEffect(() => {
     if (isWinner) {
@@ -69,248 +104,629 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
     }
   }, [isWinner]);
 
+  // Filter questions based on user selection
+  const filteredQuestions = matchState.questions.map((q, idx) => {
+    const pAns = matchState.playerAnswers[idx];
+    return {
+      question: q,
+      originalIndex: idx,
+      playerAnswer: pAns,
+      isCorrect: pAns?.isCorrect ?? false,
+      selectedOptionIndex: pAns?.selectedOption ?? -1,
+    };
+  }).filter(item => {
+    if (filterType === 'mistakes') return !item.isCorrect;
+    if (filterType === 'correct') return item.isCorrect;
+    return true;
+  });
+
   return (
-    <div className="flex-1 p-4 space-y-4 overflow-y-auto pb-8">
-      {/* Victory/Defeat Banner */}
-      <div
-        className={`p-5 rounded-3xl border text-center shadow-xl relative overflow-hidden ${
-          isWinner
-            ? 'bg-gradient-to-b from-amber-950/70 via-slate-900 to-slate-950 border-amber-500/80'
-            : isDraw
-            ? 'bg-gradient-to-b from-slate-800 via-slate-900 to-slate-950 border-slate-700'
-            : 'bg-gradient-to-b from-rose-950/70 via-slate-900 to-slate-950 border-rose-600/80'
-        }`}
-      >
-        <div className="text-4xl mb-2 animate-bounce">
-          {isWinner ? '🏆' : isDraw ? '🤝' : '💔'}
-        </div>
+    <div className="flex-1 min-h-0 w-full overflow-y-auto px-3 sm:px-6 py-4 sm:py-6 bg-slate-950/40">
+      <div className="max-w-3xl lg:max-w-4xl mx-auto space-y-5 sm:space-y-6 pb-12">
 
-        <h2
-          className={`text-2xl font-black uppercase tracking-wider ${
-            isWinner ? 'text-amber-400' : isDraw ? 'text-slate-200' : 'text-rose-400'
-          }`}
-        >
-          {isWinner ? 'VICTORY!' : isDraw ? 'DRAW MATCH' : 'DEFEAT'}
-        </h2>
-
-        <p className="text-xs text-slate-400 mt-0.5">
-          {isWinner
-            ? 'Splendid Performance! Promoted higher in Govt Cadre.'
-            : isDraw
-            ? 'Well fought! Both aspirants scored equally.'
-            : 'Close fight! Review mistakes below to boost accuracy.'}
-        </p>
-
-        {/* Scoreboard Badge */}
-        <div className="grid grid-cols-2 gap-3 mt-4 bg-slate-950/80 p-3 rounded-2xl border border-slate-800">
-          <div className="text-center">
-            <div className="text-[10px] text-slate-400 font-bold uppercase">{player.name} (You)</div>
-            <div className="text-2xl font-black text-amber-400 font-mono">{matchState.playerScore}</div>
-            <div className="text-[10px] text-emerald-400 font-semibold font-mono">
-              {lpChange >= 0 ? `+${lpChange}` : lpChange} LP
-            </div>
-          </div>
-
-          <div className="text-center border-l border-slate-800">
-            <div className="text-[10px] text-slate-400 font-bold uppercase">{matchState.opponent.name}</div>
-            <div className="text-2xl font-black text-orange-400 font-mono">{matchState.opponentScore}</div>
-            <div className="text-[10px] text-slate-400 font-semibold font-mono">
-              {matchState.opponent.tierTitle.split(' ')[0]}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Post-Match Sign-Up / Save Progress Conversion Card (Shown if user is not logged in) */}
-      {!currentUser && showSignupCard && (
-        <div className="bg-gradient-to-r from-purple-950/90 via-slate-900 to-indigo-950/90 border-2 border-purple-500/60 rounded-3xl p-4 sm:p-5 shadow-2xl relative overflow-hidden animate-fadeIn">
-          {/* Dismiss Cross Button */}
-          <button
-            onClick={() => {
-              soundManager.playTap();
-              setShowSignupCard(false);
-            }}
-            className="absolute top-3 right-3 p-1.5 rounded-full bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-slate-200 border border-slate-700/60 transition-all cursor-pointer z-10"
-            title="Dismiss for now"
-            aria-label="Close signup banner"
-          >
-            <X className="w-4 h-4" />
-          </button>
-
-          <div className="flex items-start gap-3 mb-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-purple-500 to-indigo-600 flex items-center justify-center text-xl shadow-lg shrink-0">
-              ☁️
-            </div>
-            <div className="pr-6">
-              <div className="flex items-center gap-1.5">
-                <span className="text-[10px] uppercase font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-400/40 px-2 py-0.5 rounded-full">
-                  Save Your Score
-                </span>
-                <span className="text-[10px] text-emerald-400 font-bold font-mono">
-                  +{matchState.playerScore} Pts
-                </span>
-              </div>
-              <h3 className="text-sm sm:text-base font-extrabold text-white mt-1 leading-tight">
-                Don't lose your match LP & streak!
-              </h3>
-              <p className="text-xs text-slate-300 mt-0.5 leading-relaxed">
-                Create a free account with 1-Tap Google or Email to save your rank on the All-India Leaderboard.
-              </p>
-            </div>
-          </div>
-
-          {/* Embedded Auth Card with Google 1-Tap and Email Signup */}
-          <div className="mt-2 bg-slate-950/70 p-3 sm:p-4 rounded-2xl border border-purple-800/40">
-            <AuthCard
-              currentUser={currentUser}
-              onUserChange={user => {
-                if (onUserChange) onUserChange(user);
-                setShowSignupCard(false);
-              }}
-              onSuccessClose={() => setShowSignupCard(false)}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Action Buttons */}
-      <div className="grid grid-cols-2 gap-2">
-        <button
-          onClick={() => {
-            soundManager.playTap();
-            onPlayAgain();
-          }}
-          className="bg-amber-500 hover:bg-amber-400 active:scale-[0.98] text-slate-950 font-black p-3 rounded-xl shadow-lg flex items-center justify-center gap-1.5 text-xs transition-all"
-        >
-          <RotateCcw className="w-4 h-4" />
-          <span>NEXT MATCH</span>
-        </button>
-
-        <button
-          onClick={() => {
-            soundManager.playTap();
-            onBackToLobby();
-          }}
-          className="bg-slate-800 hover:bg-slate-750 active:scale-[0.98] text-slate-200 font-bold p-3 rounded-xl border border-slate-700 flex items-center justify-center gap-1.5 text-xs transition-all"
-        >
-          <span>LOBBY</span>
-          <ArrowRight className="w-4 h-4" />
-        </button>
-      </div>
-
-      {/* AdSense / AdMob Banner Slot (Free users only) */}
-      {!isPremium && (
-        <div className="py-1">
-          <AdSenseUnit slotId={ADSENSE_BANNER_SLOT} format="horizontal" isPremium={isPremium} />
-        </div>
-      )}
-
-      {/* Question-by-Question Detailed Review */}
-      <div className="space-y-2.5 pt-2">
-        <div className="flex items-center justify-between text-xs text-slate-300 font-bold px-1">
-          <span>Match Question Analysis ({matchState.questions.length} Items):</span>
-          <span className="text-[11px] text-amber-400">Save to Mistake Vault</span>
-        </div>
-
-        <div className="space-y-3">
-          {matchState.questions.map((q, idx) => {
-            const pAns = matchState.playerAnswers[idx];
-            const isPlayerCorrect = pAns?.isCorrect ?? false;
-            const isBookmarked = bookmarkedIds.includes(q.id);
-
-            return (
+        {activeTab === 'summary' ? (
+          /* ========================================================
+             VIEW 1: MATCH SUMMARY OVERVIEW (FOCUSED & COMPACT)
+             ======================================================== */
+          <div className="space-y-5 sm:space-y-6 animate-fadeIn">
+            {/* HERO RESULT CARD (Centered, Boxed, Non-Flat) */}
+            <div
+              className={`rounded-3xl border p-5 sm:p-7 shadow-2xl relative overflow-hidden text-center transition-all ${
+                isWinner
+                  ? 'bg-gradient-to-b from-amber-950/60 via-slate-900/90 to-slate-950 border-amber-500/60 shadow-amber-950/30'
+                  : isDraw
+                  ? 'bg-gradient-to-b from-slate-850 via-slate-900/90 to-slate-950 border-slate-700 shadow-slate-950/50'
+                  : 'bg-gradient-to-b from-rose-950/60 via-slate-900/90 to-slate-950 border-rose-600/60 shadow-rose-950/30'
+              }`}
+            >
+              {/* Ambient Glow Aura */}
               <div
-                key={q.id}
-                className="bg-slate-850 border border-slate-750 rounded-2xl p-3.5 space-y-2.5 shadow-md"
-              >
-                {/* Header */}
-                <div className="flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-1.5">
-                    <span
-                      className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                        isPlayerCorrect ? 'bg-emerald-900 text-emerald-300' : 'bg-rose-900 text-rose-300'
-                      }`}
-                    >
-                      {isPlayerCorrect ? '✓' : '✗'}
-                    </span>
-                    <span className="font-bold text-slate-200">Q{idx + 1}. {q.wordOrPhrase}</span>
+                className={`absolute top-0 left-1/2 -translate-x-1/2 w-72 sm:w-96 h-40 rounded-full blur-3xl opacity-30 pointer-events-none ${
+                  isWinner ? 'bg-amber-400' : isDraw ? 'bg-sky-400' : 'bg-rose-500'
+                }`}
+              />
+
+              {/* Outcome Emblem & Title */}
+              <div className="relative z-10 space-y-1.5 sm:space-y-2">
+                <div className="inline-flex p-3 sm:p-3.5 rounded-2xl bg-slate-900/80 border border-slate-700/80 shadow-lg text-3xl sm:text-4xl">
+                  {isWinner ? '🏆' : isDraw ? '🤝' : '💔'}
+                </div>
+
+                <h1
+                  className={`text-2xl sm:text-3xl font-black uppercase tracking-wider ${
+                    isWinner ? 'text-amber-400 drop-shadow-[0_2px_10px_rgba(251,191,36,0.3)]' : isDraw ? 'text-slate-100' : 'text-rose-400 drop-shadow-[0_2px_10px_rgba(244,63,94,0.3)]'
+                  }`}
+                >
+                  {isWinner ? 'VICTORY!' : isDraw ? 'DRAW MATCH' : 'DEFEAT'}
+                </h1>
+
+                <p className="text-xs sm:text-sm text-slate-300 max-w-md mx-auto leading-relaxed">
+                  {isWinner
+                    ? 'Splendid Performance! Promoted higher in Govt Exam Leaderboard.'
+                    : isDraw
+                    ? 'Well fought match! Both aspirants demonstrated strong vocabulary.'
+                    : 'Close fight! Review mistakes and mnemonics to master these PYQs.'}
+                </p>
+              </div>
+
+              {/* HEAD-TO-HEAD DUEL BOX (Focused, Boxed, Non-Flat Layout) */}
+              <div className="relative z-10 mt-5 sm:mt-6 grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 max-w-xl mx-auto items-stretch">
+                {/* Player Box */}
+                <div className="bg-slate-900/90 border-2 border-amber-500/60 rounded-2xl p-4 sm:p-5 flex flex-col items-center justify-between text-center relative shadow-lg">
+                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-amber-500 text-slate-950 text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full shadow">
+                    YOU
                   </div>
-
-                  <div className="flex items-center gap-1">
-                    {/* Report Button */}
-                    <button
-                      onClick={() => {
-                        soundManager.playTap();
-                        setReportingQuestion(q);
-                      }}
-                      className="p-1.5 rounded-lg border border-slate-700 bg-slate-800 hover:bg-rose-950/40 hover:border-rose-700/60 text-slate-400 hover:text-rose-300 text-xs transition-colors"
-                      title="Report discrepancy in question (support@vocabclash.in)"
-                    >
-                      <Flag className="w-3.5 h-3.5 text-rose-400" />
-                    </button>
-
-                    {/* Bookmark Button */}
-                    <button
-                      onClick={() => {
-                        soundManager.playTap();
-                        onBookmarkQuestion(q);
-                      }}
-                      className={`p-1.5 rounded-lg border text-xs transition-colors ${
-                        isBookmarked
-                          ? 'bg-amber-950 border-amber-600 text-amber-400'
-                          : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'
-                      }`}
-                      title="Save to Mistake Vault"
-                    >
-                      <Bookmark className="w-3.5 h-3.5 fill-current" />
-                    </button>
-
-                    {/* Ask AI Button */}
-                    <button
-                      onClick={() => {
-                        soundManager.playTap();
-                        onOpenAiDeepDive(q);
-                      }}
-                      className="p-1.5 rounded-lg bg-purple-950/80 hover:bg-purple-900 border border-purple-700/60 text-purple-300 text-xs flex items-center gap-1"
-                      title="AI Root Word & Mnemonic Analysis"
-                    >
-                      <Sparkles className="w-3.5 h-3.5" />
-                      <span className="text-[10px] font-bold">AI Tutor</span>
-                    </button>
+                  <div className="w-14 h-14 rounded-2xl bg-amber-500/20 border-2 border-amber-400/80 flex items-center justify-center text-2xl shadow-inner mt-1 mb-2">
+                    {player.avatar}
+                  </div>
+                  <div className="min-w-0 w-full mb-2">
+                    <div className="font-extrabold text-sm sm:text-base text-slate-100 truncate">{player.name}</div>
+                    <div className="text-[11px] text-amber-400/90 font-medium truncate">{player.title || 'Govt Job Aspirant'}</div>
+                  </div>
+                  <div className="bg-slate-950/80 border border-slate-800 rounded-xl py-2 px-4 w-full">
+                    <div className="text-2xl sm:text-3xl font-black text-amber-400 font-mono tracking-tight">
+                      {matchState.playerScore}
+                    </div>
+                    <div className={`text-xs font-bold font-mono mt-0.5 ${playerLpChange >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {playerLpChange >= 0 ? `+${playerLpChange} LP` : `${playerLpChange} LP`}
+                    </div>
                   </div>
                 </div>
 
-                {/* Correct Answer & Hindi Meaning */}
-                <div className="bg-slate-900/90 rounded-xl p-2.5 border border-slate-800 text-xs space-y-1">
-                  <div className="flex items-start gap-1">
-                    <span className="text-emerald-400 font-bold shrink-0">Correct Answer:</span>
-                    <span className="text-slate-100 font-semibold">{q.options[q.correctIndex]}</span>
+                {/* Opponent Box */}
+                <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-5 flex flex-col items-center justify-between text-center relative shadow-lg">
+                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-slate-800 text-slate-300 border border-slate-700 text-[10px] font-bold uppercase px-2.5 py-0.5 rounded-full shadow">
+                    OPPONENT
                   </div>
-
-                  <div className="text-[11px] text-amber-300/90">
-                    <span className="font-semibold text-amber-400">हिन्दी अर्थ: </span>
-                    {q.hindiMeaning}
+                  <div className="w-14 h-14 rounded-2xl bg-orange-500/20 border-2 border-orange-400/80 flex items-center justify-center text-2xl shadow-inner mt-1 mb-2">
+                    {matchState.opponent.avatar}
                   </div>
-
-                  <div className="text-[11px] text-slate-300 bg-slate-950/60 p-2 rounded-lg mt-1">
-                    <span className="font-semibold text-sky-400">💡 Memory Hook: </span>
-                    {q.mnemonic}
+                  <div className="min-w-0 w-full mb-2">
+                    <div className="font-extrabold text-sm sm:text-base text-slate-100 truncate">{matchState.opponent.name}</div>
+                    <div className="text-[11px] text-orange-400/90 font-medium truncate">{matchState.opponent.tierTitle}</div>
                   </div>
-                </div>
-
-                {/* Exam Occurrences */}
-                <div className="flex items-center gap-1.5 flex-wrap text-[10px] text-slate-400">
-                  <span className="font-bold text-amber-400/90">Asked In:</span>
-                  {q.examHistory.map((ex, i) => (
-                    <span key={i} className="bg-slate-800 px-1.5 py-0.5 rounded text-slate-300">
-                      {ex}
-                    </span>
-                  ))}
+                  <div className="bg-slate-950/80 border border-slate-800 rounded-xl py-2 px-4 w-full">
+                    <div className="text-2xl sm:text-3xl font-black text-orange-400 font-mono tracking-tight">
+                      {matchState.opponentScore}
+                    </div>
+                    <div className={`text-xs font-bold font-mono mt-0.5 ${opponentLpChange >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {opponentLpChange >= 0 ? `+${opponentLpChange} LP` : `${opponentLpChange} LP`}
+                    </div>
+                  </div>
                 </div>
               </div>
-            );
-          })}
-        </div>
+
+              {/* MATCH METRICS SQUARE TILES (Focused 3-Square Grid with Solution Trigger) */}
+              <div className="relative z-10 mt-4 sm:mt-5 grid grid-cols-3 gap-2 sm:gap-3 max-w-xl mx-auto">
+                <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-2.5 sm:p-3 text-center">
+                  <div className="text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-center gap-1">
+                    <Target className="w-3 h-3 text-sky-400" />
+                    <span>Accuracy</span>
+                  </div>
+                  <div className="text-base sm:text-lg font-black text-sky-300 font-mono mt-1">
+                    {accuracyPct}%
+                  </div>
+                  <div className="text-[10px] text-slate-400">
+                    {correctCount}/{totalQuestions} Correct
+                  </div>
+                </div>
+
+                <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-2.5 sm:p-3 text-center">
+                  <div className="text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-center gap-1">
+                    <Zap className="w-3 h-3 text-amber-400" />
+                    <span>Max Streak</span>
+                  </div>
+                  <div className="text-base sm:text-lg font-black text-amber-400 font-mono mt-1">
+                    {maxCombo}x
+                  </div>
+                  <div className="text-[10px] text-slate-400">
+                    Combo Multiplier
+                  </div>
+                </div>
+
+                {/* Solution Launcher Tile */}
+                <button
+                  onClick={() => {
+                    soundManager.playTap();
+                    setActiveTab('solutions');
+                  }}
+                  className="bg-gradient-to-br from-indigo-950/90 to-purple-950/90 hover:from-indigo-900/90 hover:to-purple-900/90 border border-indigo-500/50 hover:border-indigo-400 rounded-xl p-2.5 sm:p-3 text-center transition-all active:scale-95 group cursor-pointer shadow-md"
+                >
+                  <div className="text-[10px] sm:text-[11px] font-bold text-indigo-300 uppercase tracking-wider flex items-center justify-center gap-1">
+                    <Brain className="w-3 h-3 text-indigo-400 group-hover:scale-110 transition-transform" />
+                    <span>Solutions</span>
+                  </div>
+                  <div className="text-sm sm:text-base font-black text-white mt-1 flex items-center justify-center gap-1">
+                    <span>{totalQuestions} PYQs</span>
+                    <ChevronRight className="w-3.5 h-3.5 text-amber-400 group-hover:translate-x-0.5 transition-transform" />
+                  </div>
+                  <div className="text-[10px] text-amber-300 font-semibold">
+                    {mistakeCount} Mistakes
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* BIG PROMINENT "VIEW SOLUTIONS" HERO BUTTON */}
+            <div className="max-w-xl mx-auto">
+              <button
+                onClick={() => {
+                  soundManager.playTap();
+                  setActiveTab('solutions');
+                }}
+                className="w-full bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-600 hover:from-indigo-500 hover:to-purple-500 text-white font-black p-3.5 sm:p-4 rounded-2xl shadow-xl shadow-indigo-900/30 border border-indigo-400/40 flex items-center justify-between px-5 transition-all active:scale-[0.98] cursor-pointer group"
+              >
+                <div className="flex items-center gap-3 text-left">
+                  <div className="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center text-lg shadow-inner">
+                    📖
+                  </div>
+                  <div>
+                    <div className="text-sm sm:text-base font-black tracking-wide flex items-center gap-2">
+                      <span>SEE MATCH SOLUTIONS & MNEMONICS</span>
+                      <span className="text-[10px] bg-amber-400 text-slate-950 font-bold px-2 py-0.5 rounded-full uppercase">
+                        {mistakeCount} to revise
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-indigo-200 font-medium">
+                      Inspect all questions, Hindi meanings, root-words & memory hooks
+                    </div>
+                  </div>
+                </div>
+                <ChevronRight className="w-5 h-5 text-amber-300 group-hover:translate-x-1 transition-transform shrink-0" />
+              </button>
+            </div>
+
+            {/* PRIMARY ACTION BUTTONS (Play Next Match & Lobby) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl mx-auto">
+              <button
+                onClick={() => {
+                  soundManager.playTap();
+                  onPlayAgain();
+                }}
+                className="bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-black p-3.5 sm:p-4 rounded-2xl shadow-xl shadow-amber-500/20 flex items-center justify-center gap-2 text-sm transition-all active:scale-[0.98] cursor-pointer"
+              >
+                <RotateCcw className="w-4 h-4" />
+                <span>PLAY NEXT MATCH</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  soundManager.playTap();
+                  onBackToLobby();
+                }}
+                className="bg-slate-900 hover:bg-slate-800 text-slate-200 font-extrabold p-3.5 sm:p-4 rounded-2xl border border-slate-700 flex items-center justify-center gap-2 text-sm transition-all active:scale-[0.98] cursor-pointer shadow-md"
+              >
+                <span>RETURN TO LOBBY</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* POST-MATCH SIGNUP/SAVE CARD (If guest) */}
+            {!currentUser && showSignupCard && (
+              <div className="bg-gradient-to-r from-purple-950/90 via-slate-900 to-indigo-950/90 border-2 border-purple-500/60 rounded-3xl p-5 sm:p-6 shadow-2xl relative overflow-hidden animate-fadeIn max-w-xl mx-auto">
+                <button
+                  onClick={() => {
+                    soundManager.playTap();
+                    setShowSignupCard(false);
+                  }}
+                  className="absolute top-3.5 right-3.5 p-1.5 rounded-full bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-slate-200 border border-slate-700/60 transition-all cursor-pointer z-10"
+                  title="Dismiss for now"
+                  aria-label="Close signup banner"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+
+                <div className="flex items-start gap-3.5 mb-3">
+                  <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-purple-500 to-indigo-600 flex items-center justify-center text-xl shadow-lg shrink-0">
+                    ☁️
+                  </div>
+                  <div className="pr-6">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] uppercase font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-400/40 px-2 py-0.5 rounded-full">
+                        Save Match Progress
+                      </span>
+                      <span className="text-[10px] text-emerald-400 font-bold font-mono">
+                        +{matchState.playerScore} Pts
+                      </span>
+                    </div>
+                    <h3 className="text-base font-black text-white mt-1 leading-tight">
+                      Don't lose your match LP & All-India Rank!
+                    </h3>
+                    <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                      Sign in with 1-Tap Google or Email to save this match result to your profile and unlock the leaderboard.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-3 bg-slate-950/80 p-3 sm:p-4 rounded-2xl border border-purple-800/40">
+                  <AuthCard
+                    currentUser={currentUser}
+                    onUserChange={user => {
+                      if (onUserChange) onUserChange(user);
+                      setShowSignupCard(false);
+                    }}
+                    onSuccessClose={() => setShowSignupCard(false)}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* AdSense Unit */}
+            {!isPremium && (
+              <div className="py-1 max-w-xl mx-auto">
+                <AdSenseUnit slotId={ADSENSE_BANNER_SLOT} format="horizontal" isPremium={isPremium} />
+              </div>
+            )}
+          </div>
+        ) : (
+          /* ========================================================
+             VIEW 2: DEDICATED SOLUTION & MNEMONICS PAGE
+             ======================================================== */
+          <div className="space-y-4 animate-fadeIn">
+            {/* Top Navigation & Fast Action Header */}
+            <div className="bg-slate-900/95 border border-slate-800 rounded-3xl p-4 sm:p-5 shadow-2xl backdrop-blur-md sticky top-0 z-20 space-y-3">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => {
+                      soundManager.playTap();
+                      setActiveTab('summary');
+                    }}
+                    className="p-2 sm:px-3 sm:py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-extrabold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95"
+                  >
+                    <ArrowLeft className="w-4 h-4" />
+                    <span>Back to Result</span>
+                  </button>
+
+                  <div>
+                    <h2 className="text-base sm:text-lg font-black text-slate-100 flex items-center gap-2">
+                      <Brain className="w-5 h-5 text-amber-400" />
+                      <span>Match Solutions ({totalQuestions} PYQs)</span>
+                    </h2>
+                    <p className="text-xs text-slate-400">
+                      Score: <span className="text-amber-400 font-bold">{matchState.playerScore}</span> vs{' '}
+                      <span className="text-orange-400 font-bold">{matchState.opponentScore}</span> • Accuracy:{' '}
+                      <span className="text-emerald-400 font-bold">{accuracyPct}%</span>
+                    </p>
+                  </div>
+                </div>
+
+                {/* Quick Match Triggers right in the header */}
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <button
+                    onClick={() => {
+                      soundManager.playTap();
+                      onPlayAgain();
+                    }}
+                    className="flex-1 sm:flex-initial bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 text-slate-950 font-black px-3.5 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-md active:scale-95 cursor-pointer"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Play Next</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      soundManager.playTap();
+                      onBackToLobby();
+                    }}
+                    className="flex-1 sm:flex-initial bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer"
+                  >
+                    <span>Lobby</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Filter Tabs Bar */}
+              <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 justify-start overflow-x-auto no-scrollbar">
+                <button
+                  onClick={() => {
+                    soundManager.playTap();
+                    setFilterType('all');
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all flex items-center gap-1.5 shrink-0 ${
+                    filterType === 'all'
+                      ? 'bg-slate-800 text-amber-400 shadow-sm border border-slate-700'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <span>All ({totalQuestions})</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    soundManager.playTap();
+                    setFilterType('mistakes');
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all flex items-center gap-1.5 shrink-0 ${
+                    filterType === 'mistakes'
+                      ? 'bg-rose-950/80 text-rose-300 border border-rose-700/60 shadow-sm'
+                      : 'text-slate-400 hover:text-rose-300'
+                  }`}
+                >
+                  <XCircle className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Mistakes ({mistakeCount})</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    soundManager.playTap();
+                    setFilterType('correct');
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all flex items-center gap-1.5 shrink-0 ${
+                    filterType === 'correct'
+                      ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 shadow-sm'
+                      : 'text-slate-400 hover:text-emerald-300'
+                  }`}
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Correct ({correctCount})</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Questions List: Centered Cards with rich visual breakdown */}
+            <div className="space-y-4">
+              {filteredQuestions.length === 0 ? (
+                <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-10 text-center space-y-3 shadow-xl">
+                  <div className="w-14 h-14 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center mx-auto text-2xl">
+                    🎉
+                  </div>
+                  <div className="font-extrabold text-base text-slate-200">No questions match this filter</div>
+                  <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                    {filterType === 'mistakes'
+                      ? 'Great job! You had zero mistakes in this category.'
+                      : 'Switch filters to inspect the other questions from this match.'}
+                  </p>
+                  <button
+                    onClick={() => setFilterType('all')}
+                    className="bg-slate-800 hover:bg-slate-700 text-amber-400 px-4 py-2 rounded-xl text-xs font-bold border border-slate-700 cursor-pointer"
+                  >
+                    View All Questions
+                  </button>
+                </div>
+              ) : (
+                filteredQuestions.map(({ question: q, originalIndex: idx, isCorrect, selectedOptionIndex }) => {
+                  const isBookmarked = bookmarkedIds.includes(q.id);
+
+                  return (
+                    <div
+                      key={q.id}
+                      className={`rounded-2xl border p-4 sm:p-5 space-y-3.5 shadow-lg transition-all ${
+                        isCorrect
+                          ? 'bg-slate-900/90 border-slate-800 hover:border-emerald-500/40'
+                          : 'bg-gradient-to-br from-slate-900 via-slate-900 to-rose-950/30 border-rose-900/40 hover:border-rose-600/60'
+                      }`}
+                    >
+                      {/* Header row */}
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {/* Outcome badge */}
+                          <div
+                            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-black ${
+                              isCorrect
+                                ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800/60'
+                                : 'bg-rose-950/80 text-rose-300 border border-rose-800/60'
+                            }`}
+                          >
+                            {isCorrect ? (
+                              <>
+                                <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                <span>Q{idx + 1} • Correct</span>
+                              </>
+                            ) : (
+                              <>
+                                <X className="w-3.5 h-3.5 text-rose-400" />
+                                <span>Q{idx + 1} • Missed</span>
+                              </>
+                            )}
+                          </div>
+
+                          {/* Category Badge */}
+                          <span className="text-[11px] font-mono uppercase bg-slate-800 text-amber-400 px-2.5 py-0.5 rounded-md border border-slate-700 font-bold">
+                            {q.category}
+                          </span>
+
+                          {/* Repeat Frequency */}
+                          <span className="text-[10px] font-bold bg-amber-950/60 text-amber-300 border border-amber-700/50 px-2 py-0.5 rounded-md">
+                            🔥 {q.repeatCount}x in SSC
+                          </span>
+                        </div>
+
+                        {/* Action Buttons: Star/Save, AI Tutor, Report */}
+                        <div className="flex items-center gap-1.5">
+                          {/* Bookmark/Star to Vault */}
+                          <button
+                            onClick={() => {
+                              soundManager.playTap();
+                              onBookmarkQuestion(q);
+                            }}
+                            className={`p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                              isBookmarked
+                                ? 'bg-amber-950 border-amber-600 text-amber-300'
+                                : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300'
+                            }`}
+                            title={isBookmarked ? 'Saved in Vault' : 'Save to Mistake Vault'}
+                          >
+                            {isBookmarked ? (
+                              <BookmarkCheck className="w-3.5 h-3.5 text-amber-400" />
+                            ) : (
+                              <Bookmark className="w-3.5 h-3.5 text-slate-400" />
+                            )}
+                            <span className="hidden sm:inline text-[11px]">
+                              {isBookmarked ? 'Saved' : 'Save'}
+                            </span>
+                          </button>
+
+                          {/* Ask AI Deep Dive */}
+                          <button
+                            onClick={() => {
+                              soundManager.playTap();
+                              onOpenAiDeepDive(q);
+                            }}
+                            className="px-2.5 py-1.5 rounded-xl bg-purple-950/80 hover:bg-purple-900 border border-purple-700/60 text-purple-300 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                            title="AI Root Word & Mnemonic Breakdown"
+                          >
+                            <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                            <span className="text-[11px]">AI Tutor</span>
+                          </button>
+
+                          {/* Report Question */}
+                          <button
+                            onClick={() => {
+                              soundManager.playTap();
+                              setReportingQuestion(q);
+                            }}
+                            className="p-1.5 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-rose-950/40 hover:border-rose-700/60 text-slate-400 hover:text-rose-300 transition-all cursor-pointer"
+                            title="Report discrepancy in question"
+                          >
+                            <Flag className="w-3.5 h-3.5 text-slate-400" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Question Statement Box */}
+                      <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 sm:p-4 space-y-1">
+                        <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                          {q.instruction || 'Select the most appropriate option:'}
+                        </div>
+                        <h3 className="text-base sm:text-lg font-black text-amber-300 tracking-wide">
+                          "{q.wordOrPhrase}"
+                        </h3>
+                      </div>
+
+                      {/* 4 Options Grid (Clearly shows what was picked vs correct) */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {q.options.map((opt, optIdx) => {
+                          const isCorrectOpt = optIdx === q.correctIndex;
+                          const isUserChoice = optIdx === selectedOptionIndex;
+
+                          let optClass = 'bg-slate-950/50 border-slate-800 text-slate-400';
+                          let badgeIcon = (
+                            <span className="w-5 h-5 rounded-md bg-slate-800 border border-slate-700 text-[10px] font-mono font-bold text-slate-400 flex items-center justify-center shrink-0">
+                              {String.fromCharCode(65 + optIdx)}
+                            </span>
+                          );
+
+                          if (isCorrectOpt) {
+                            optClass = 'bg-emerald-950/70 border-emerald-500/80 text-emerald-200 font-bold ring-1 ring-emerald-500/50';
+                            badgeIcon = (
+                              <span className="w-5 h-5 rounded-md bg-emerald-600 text-slate-950 flex items-center justify-center shrink-0">
+                                <Check className="w-3.5 h-3.5 stroke-[3]" />
+                              </span>
+                            );
+                          } else if (isUserChoice && !isCorrectOpt) {
+                            optClass = 'bg-rose-950/70 border-rose-500/80 text-rose-200 font-bold ring-1 ring-rose-500/50';
+                            badgeIcon = (
+                              <span className="w-5 h-5 rounded-md bg-rose-600 text-white flex items-center justify-center shrink-0">
+                                <X className="w-3.5 h-3.5 stroke-[3]" />
+                              </span>
+                            );
+                          }
+
+                          return (
+                            <div
+                              key={optIdx}
+                              className={`p-2.5 sm:p-3 rounded-xl border text-xs flex items-center justify-between gap-2.5 ${optClass}`}
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                {badgeIcon}
+                                <span className="font-semibold truncate">{opt}</span>
+                              </div>
+                              {isCorrectOpt && (
+                                <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wide shrink-0">
+                                  Correct
+                                </span>
+                              )}
+                              {isUserChoice && !isCorrectOpt && (
+                                <span className="text-[10px] font-bold text-rose-400 uppercase tracking-wide shrink-0">
+                                  Your Choice
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Hindi Explanation & Memory Hook Mnemonics */}
+                      <div className="bg-slate-950/90 rounded-xl p-3 sm:p-3.5 border border-slate-800 text-xs space-y-2">
+                        <div className="flex items-start gap-2">
+                          <span className="font-black text-amber-400 shrink-0">हिन्दी अर्थ:</span>
+                          <span className="text-slate-200 font-medium">{q.hindiMeaning}</span>
+                        </div>
+
+                        {q.mnemonic && (
+                          <div className="text-[11px] text-sky-200 bg-sky-950/40 border border-sky-800/40 p-2.5 rounded-lg flex items-start gap-2">
+                            <span className="font-black text-sky-400 shrink-0">💡 Memory Hook:</span>
+                            <span className="leading-relaxed">{q.mnemonic}</span>
+                          </div>
+                        )}
+
+                        {/* Exam Occurrences */}
+                        <div className="flex items-center gap-1.5 flex-wrap pt-1 text-[10px] text-slate-400">
+                          <span className="font-bold text-slate-400">Past SSC Papers:</span>
+                          {q.examHistory.map((ex, i) => (
+                            <span
+                              key={i}
+                              className="bg-slate-850 border border-slate-700/80 px-2 py-0.5 rounded text-sky-300 font-medium"
+                            >
+                              🏛️ {ex}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Bottom Sticky Action Bar in Solution view */}
+            <div className="pt-4 flex flex-col sm:flex-row items-center justify-center gap-3">
+              <button
+                onClick={() => {
+                  soundManager.playTap();
+                  onPlayAgain();
+                }}
+                className="w-full sm:w-auto bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 text-slate-950 font-black px-6 py-3.5 rounded-2xl shadow-xl shadow-amber-500/20 flex items-center justify-center gap-2 text-sm transition-all active:scale-95 cursor-pointer"
+              >
+                <RotateCcw className="w-4 h-4" />
+                <span>PLAY NEXT MATCH</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  soundManager.playTap();
+                  onBackToLobby();
+                }}
+                className="w-full sm:w-auto bg-slate-900 hover:bg-slate-800 text-slate-200 font-extrabold px-6 py-3.5 rounded-2xl border border-slate-700 flex items-center justify-center gap-2 text-sm transition-all active:scale-95 cursor-pointer shadow-md"
+              >
+                <span>RETURN TO LOBBY</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Report Question Modal */}
