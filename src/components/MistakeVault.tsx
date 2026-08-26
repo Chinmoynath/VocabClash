@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { SavedWord, Question } from '../types';
 import { soundManager } from '../utils/audio';
+import { isItemSaved, isItemMistake } from '../utils/vaultManager';
 import { 
   BookOpen, 
   Trash2, 
@@ -19,8 +20,8 @@ import { ReportQuestionModal } from './ReportQuestionModal';
 
 interface MistakeVaultProps {
   savedWords: SavedWord[];
-  onRemoveWord: (questionId: string) => void;
-  onToggleUserSaved?: (questionId: string) => void;
+  onRemoveWord: (questionId: string, scope?: 'all' | 'saved_by_me' | 'mistakes') => void;
+  onToggleUserSaved?: (questionId: string, question?: Question) => void;
   onOpenAiTutor: (question: Question) => void;
 }
 
@@ -38,29 +39,21 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
   const [isFlipped, setIsFlipped] = useState<boolean>(false);
   const [reportingQuestion, setReportingQuestion] = useState<Question | null>(null);
 
-  const isItemSavedByMe = (item: SavedWord) => {
-    return item.isUserSaved === true || (item.isBookmarked === true && item.isUserSaved !== false);
-  };
-
-  const isItemMistake = (item: SavedWord) => {
-    return (item.mistakeCount || 0) > 0;
-  };
-
-  // Counts for Top Filters
+  // Independent counts for top tabs
   const totalCount = savedWords.length;
-  const userSavedCount = savedWords.filter(isItemSavedByMe).length;
+  const userSavedCount = savedWords.filter(isItemSaved).length;
   const mistakesCount = savedWords.filter(isItemMistake).length;
 
-  // Filtered dataset
+  // Filtered dataset: strictly respects active tab filter, category filter, and search query
   const filteredWords = savedWords.filter(item => {
-    // 1. Origin Filter
-    if (filterOrigin === 'saved_by_me' && !isItemSavedByMe(item)) return false;
+    // 1. Origin Filter: Saved vs Mistakes vs All
+    if (filterOrigin === 'saved_by_me' && !isItemSaved(item)) return false;
     if (filterOrigin === 'mistakes' && !isItemMistake(item)) return false;
 
     // 2. Category Filter
     if (filterCategory !== 'all' && item.question.category !== filterCategory) return false;
 
-    // 3. Search query
+    // 3. Search query: strictly filtered within the currently selected collection
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       const matchWord = item.question.wordOrPhrase.toLowerCase().includes(q);
@@ -75,7 +68,7 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
   // Calculate category count under current origin filter
   const getCategoryCount = (cat: string) => {
     return savedWords.filter(item => {
-      if (filterOrigin === 'saved_by_me' && !isItemSavedByMe(item)) return false;
+      if (filterOrigin === 'saved_by_me' && !isItemSaved(item)) return false;
       if (filterOrigin === 'mistakes' && !isItemMistake(item)) return false;
       if (cat === 'all') return true;
       return item.question.category === cat;
@@ -85,27 +78,27 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
   const currentCard = filteredWords[currentFlashcardIndex];
 
   return (
-    <div className="p-3.5 sm:p-5 lg:p-6 space-y-4 pb-8 max-w-6xl mx-auto w-full">
+    <div className="flex-1 min-h-0 flex flex-col p-3 sm:p-5 lg:p-6 space-y-3 sm:space-y-4 pb-3 sm:pb-6 max-w-4xl mx-auto w-full">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-base font-extrabold text-slate-100 flex items-center gap-2">
-            <BookOpen className="w-5 h-5 text-rose-400" />
-            Mistake Vault & Revision
+      <div className="flex items-center justify-between gap-2 shrink-0">
+        <div className="min-w-0">
+          <h2 className="text-base sm:text-lg font-extrabold text-slate-100 flex items-center gap-2 truncate">
+            <BookOpen className="w-5 h-5 text-rose-400 shrink-0" />
+            <span>Mistake Vault & Revision</span>
           </h2>
-          <p className="text-xs text-slate-400">
-            {savedWords.length} Saved PYQs for Spaced Repetition & Weak-Spot Mastery
+          <p className="text-[11px] sm:text-xs text-slate-400 truncate">
+            {savedWords.length} Total PYQs • {userSavedCount} Saved • {mistakesCount} Mistakes
           </p>
         </div>
 
         {/* View Toggle (List vs Flashcards) */}
-        <div className="flex items-center bg-slate-800 p-1 rounded-xl border border-slate-700 text-xs shadow-sm">
+        <div className="flex items-center bg-slate-800/90 p-1 rounded-xl border border-slate-700 text-xs shadow-sm shrink-0">
           <button
             onClick={() => {
               soundManager.playTap();
               setActiveView('list');
             }}
-            className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
+            className={`px-2.5 sm:px-3 py-1 rounded-lg font-bold transition-all text-xs ${
               activeView === 'list' ? 'bg-slate-700 text-amber-300 shadow' : 'text-slate-400 hover:text-slate-200'
             }`}
           >
@@ -118,7 +111,7 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
               setIsFlipped(false);
               setCurrentFlashcardIndex(0);
             }}
-            className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
+            className={`px-2.5 sm:px-3 py-1 rounded-lg font-bold transition-all text-xs ${
               activeView === 'flashcards' ? 'bg-slate-700 text-amber-300 shadow' : 'text-slate-400 hover:text-slate-200'
             }`}
           >
@@ -188,15 +181,17 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
       </div>
 
       {/* Search & Category Filter Bar */}
-      <div className="space-y-2">
+      <div className="space-y-2 shrink-0">
         <div className="relative">
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
             placeholder={
               filterOrigin === 'saved_by_me'
-                ? "Search your saved words, meanings, or Hindi..."
-                : "Search saved words, meanings, or Hindi..."
+                ? "Search within your Saved words..."
+                : filterOrigin === 'mistakes'
+                ? "Search within your Mistakes..."
+                : "Search all vault words, meanings, or Hindi..."
             }
             value={searchQuery}
             onChange={e => {
@@ -248,15 +243,15 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
 
       {/* FLASHCARD VIEW */}
       {activeView === 'flashcards' && currentCard ? (
-        <div className="space-y-4 pt-2">
+        <div className="max-w-xl mx-auto space-y-4 pt-1 w-full flex-1 min-h-0 flex flex-col justify-between">
           {/* Card Counter & Badges */}
-          <div className="flex items-center justify-between text-xs text-slate-400 font-medium">
+          <div className="flex items-center justify-between text-xs text-slate-400 font-medium shrink-0">
             <span>Card {currentFlashcardIndex + 1} of {filteredWords.length}</span>
-            <div className="flex items-center gap-1.5">
-              {isItemSavedByMe(currentCard) && (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {isItemSaved(currentCard) && (
                 <span className="text-[10px] bg-amber-950/90 text-amber-300 border border-amber-700/80 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
                   <Star className="w-2.5 h-2.5 fill-amber-300 text-amber-300" />
-                  Saved by Me
+                  Saved
                 </span>
               )}
               {isItemMistake(currentCard) && (
@@ -276,7 +271,7 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
               soundManager.playTap();
               setIsFlipped(!isFlipped);
             }}
-            className="w-full min-h-[260px] bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700 rounded-3xl p-5 shadow-2xl flex flex-col justify-between items-center text-center cursor-pointer hover:border-amber-500/60 transition-all relative overflow-hidden"
+            className="w-full flex-1 min-h-[260px] bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700 rounded-3xl p-5 shadow-2xl flex flex-col justify-between items-center text-center cursor-pointer hover:border-amber-500/60 transition-all relative overflow-hidden"
           >
             {!isFlipped ? (
               /* Front of Card */
@@ -296,12 +291,12 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
               </div>
             ) : (
               /* Back of Card */
-              <div className="my-auto space-y-2.5 animate-fadeIn">
+              <div className="my-auto space-y-2.5 animate-fadeIn w-full">
                 <div className="text-sm font-extrabold text-emerald-400">
                   Correct: {currentCard.question.options[currentCard.question.correctIndex]}
                 </div>
                 {/* Meaning & Hindi Meaning for Synonyms / Antonyms / Vocab */}
-                {currentCard.question.category !== 'idioms' && currentCard.question.category !== 'one-word' && (
+                {currentCard.question.category !== 'idioms' && currentCard.question.category !== 'ows' && (
                   <div className="bg-slate-950/80 p-2.5 rounded-xl text-left border border-slate-800 space-y-1">
                     <div className="text-xs text-slate-100 font-medium">
                       <span className="font-bold text-sky-400">Meaning: </span>
@@ -330,7 +325,7 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
           </div>
 
           {/* Flashcard Navigation */}
-          <div className="flex items-center justify-between gap-2.5">
+          <div className="flex items-center justify-between gap-2 sm:gap-2.5 shrink-0">
             <button
               disabled={currentFlashcardIndex === 0}
               onClick={() => {
@@ -346,17 +341,17 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
             {onToggleUserSaved && (
               <button
                 onClick={() => {
-                  onToggleUserSaved(currentCard.question.id);
+                  onToggleUserSaved(currentCard.question.id, currentCard.question);
                 }}
-                className={`p-2.5 rounded-xl text-xs font-bold border flex items-center gap-1.5 ${
-                  isItemSavedByMe(currentCard)
+                className={`p-2.5 rounded-xl text-xs font-bold border flex items-center gap-1.5 transition-colors ${
+                  isItemSaved(currentCard)
                     ? 'bg-amber-950/90 border-amber-600 text-amber-400'
                     : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-amber-400'
                 }`}
-                title="Toggle Saved by Me"
+                title={isItemSaved(currentCard) ? "Remove from Saved" : "Save question"}
               >
-                <Star className={`w-3.5 h-3.5 ${isItemSavedByMe(currentCard) ? 'fill-amber-400' : ''}`} />
-                <span>{isItemSavedByMe(currentCard) ? 'Saved' : 'Save'}</span>
+                <Star className={`w-3.5 h-3.5 ${isItemSaved(currentCard) ? 'fill-amber-400' : ''}`} />
+                <span>{isItemSaved(currentCard) ? 'Saved' : 'Save'}</span>
               </button>
             )}
 
@@ -386,39 +381,45 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
         </div>
       ) : (
         /* LIST VIEW */
-        <div className="space-y-3">
+        <div className="flex-1 min-h-0 flex flex-col space-y-3">
           {filteredWords.length === 0 ? (
-            <div className="bg-slate-850/60 border border-slate-800 rounded-3xl p-8 text-center space-y-4 shadow-sm">
-              <div className="w-14 h-14 rounded-2xl bg-slate-800/80 border border-slate-700 flex items-center justify-center mx-auto text-slate-400">
-                <BookmarkCheck className="w-7 h-7 text-amber-400" />
+            <div className="flex-1 min-h-[260px] sm:min-h-[320px] bg-slate-850/60 border border-slate-800 rounded-3xl p-6 sm:p-10 text-center space-y-3 sm:space-y-4 flex flex-col items-center justify-center shadow-lg my-1 sm:my-2">
+              <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl sm:rounded-3xl bg-slate-800/90 border border-slate-700 flex items-center justify-center mx-auto text-slate-400 shadow-inner">
+                {filterOrigin === 'saved_by_me' ? (
+                  <BookmarkCheck className="w-7 h-7 sm:w-8 sm:h-8 text-amber-400" />
+                ) : filterOrigin === 'mistakes' ? (
+                  <Flame className="w-7 h-7 sm:w-8 sm:h-8 text-rose-400" />
+                ) : (
+                  <Layers className="w-7 h-7 sm:w-8 sm:h-8 text-sky-400" />
+                )}
               </div>
-              <div className="space-y-1">
-                <div className="font-extrabold text-sm text-slate-200">
+              <div className="space-y-1.5 max-w-sm mx-auto">
+                <div className="font-extrabold text-sm sm:text-base text-slate-100">
                   {filterOrigin === 'saved_by_me'
-                    ? 'No Items Saved by You Yet'
+                    ? searchQuery ? 'No Saved items matched your search' : 'No Items Saved by You Yet'
                     : filterOrigin === 'mistakes'
-                    ? 'No Match Mistakes Recorded'
-                    : 'Your Vault is Ready for Revision'}
+                    ? searchQuery ? 'No Mistakes matched your search' : 'No Match Mistakes Recorded'
+                    : searchQuery ? 'No items matched your search' : 'Your Vault is Ready for Revision'}
                 </div>
-                <p className="text-xs text-slate-400 max-w-sm mx-auto leading-relaxed">
+                <p className="text-xs sm:text-sm text-slate-400 leading-relaxed">
                   {filterOrigin === 'saved_by_me'
-                    ? 'Tap the ⭐️ Save button on any question during Practice or 1v1 Duels to store your personal revision items here.'
+                    ? 'Click the ⭐️ Save button on any question during Practice or 1v1 Duels to save items here independently.'
                     : filterOrigin === 'mistakes'
-                    ? 'When you get questions wrong in 1v1 Arena duels, they will automatically be logged here for spaced repetition.'
-                    : 'Whenever you miss a question in a 1v1 duel or tap the ⭐️ icon during practice, words automatically appear here for spaced repetition and smart flashcard drill.'}
+                    ? 'When you answer a question incorrectly in a 1v1 duel or practice drill, it will automatically be logged here.'
+                    : 'Your vault holds both your explicitly saved questions and your match mistakes for spaced repetition.'}
                 </p>
               </div>
 
               <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-2">
-                <div className="text-[11px] text-amber-400/90 bg-amber-950/40 border border-amber-800/50 px-3 py-1.5 rounded-xl font-medium">
-                  💡 Tip: Play a 1v1 Duel or Practice PYQs to auto-populate
+                <div className="text-xs text-amber-300 bg-amber-950/60 border border-amber-800/60 px-3.5 py-1.5 rounded-xl font-medium shadow-md">
+                  💡 Tip: Play a 1v1 Duel or Practice PYQs to study
                 </div>
               </div>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-3.5">
             {filteredWords.map(item => {
-              const userSaved = isItemSavedByMe(item);
+              const userSaved = isItemSaved(item);
               const mistake = isItemMistake(item);
 
               return (
@@ -427,42 +428,42 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
                   className="bg-slate-850 border border-slate-750/90 rounded-2xl p-3.5 space-y-2.5 shadow-sm hover:border-slate-700 transition-all flex flex-col justify-between"
                 >
                   <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-black text-sm text-slate-100">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-black text-sm text-slate-100 break-words">
                           {item.question.wordOrPhrase}
                         </span>
-                        <span className="text-[9px] bg-slate-750 text-slate-300 px-2 py-0.5 rounded-full uppercase font-mono font-bold">
+                        <span className="text-[9px] bg-slate-750 text-slate-300 px-2 py-0.5 rounded-full uppercase font-mono font-bold shrink-0">
                           {item.question.category === 'ows' ? 'ONE WORD' : item.question.category}
                         </span>
                         {userSaved && (
-                          <span className="text-[9px] bg-amber-950/90 text-amber-300 border border-amber-700/80 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                          <span className="text-[9px] bg-amber-950/90 text-amber-300 border border-amber-700/80 px-2 py-0.5 rounded-full font-bold flex items-center gap-1 shrink-0">
                             <Star className="w-2.5 h-2.5 fill-amber-300 text-amber-300" />
-                            Saved by Me
+                            Saved
                           </span>
                         )}
                         {mistake && (
-                          <span className="text-[9px] bg-rose-950/80 text-rose-300 border border-rose-800 px-2 py-0.5 rounded-full font-bold">
+                          <span className="text-[9px] bg-rose-950/80 text-rose-300 border border-rose-800 px-2 py-0.5 rounded-full font-bold shrink-0">
                             {item.mistakeCount}x Mistake
                           </span>
                         )}
                       </div>
-                      <div className="text-xs text-amber-300/90 mt-1 font-medium">
+                      <div className="text-xs text-amber-300/90 mt-1 font-medium break-words">
                         {item.question.hindiMeaning}
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-1">
-                      {/* Star / Bookmark Toggle Button */}
+                    <div className="flex items-center gap-1 shrink-0">
+                      {/* Star / Bookmark Toggle Button: modifies ONLY Saved state */}
                       {onToggleUserSaved && (
                         <button
-                          onClick={() => onToggleUserSaved(item.question.id)}
+                          onClick={() => onToggleUserSaved(item.question.id, item.question)}
                           className={`p-1.5 rounded-lg border transition-all ${
                             userSaved
                               ? 'bg-amber-950/90 border-amber-600 text-amber-400 shadow-sm'
                               : 'bg-slate-900 text-slate-500 hover:text-amber-400 border-slate-800'
                           }`}
-                          title={userSaved ? "Remove from 'Saved by Me'" : "Mark as 'Saved by Me'"}
+                          title={userSaved ? "Remove from Saved" : "Save question"}
                         >
                           <Star className={`w-3.5 h-3.5 ${userSaved ? 'fill-amber-400' : ''}`} />
                         </button>
@@ -492,14 +493,20 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
                         <Flag className="w-3.5 h-3.5" />
                       </button>
 
-                      {/* Delete from Vault */}
+                      {/* Delete from Vault / Current Scope */}
                       <button
                         onClick={() => {
                           soundManager.playTap();
-                          onRemoveWord(item.question.id);
+                          onRemoveWord(item.question.id, filterOrigin);
                         }}
                         className="p-1.5 rounded-lg bg-slate-900 text-slate-500 hover:text-rose-400 border border-slate-800 hover:border-rose-800"
-                        title="Remove completely from Vault"
+                        title={
+                          filterOrigin === 'mistakes'
+                            ? "Remove from Mistakes (keeps Saved if bookmarked)"
+                            : filterOrigin === 'saved_by_me'
+                            ? "Remove from Saved (keeps Mistake record if present)"
+                            : "Remove completely from Vault"
+                        }
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -507,28 +514,28 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
                   </div>
 
                   {/* Meaning for Vocab */}
-                  {item.question.category !== 'idioms' && item.question.category !== 'one-word' && item.question.meaning && (
-                    <div className="text-xs text-slate-300 bg-slate-900/70 p-2 rounded-xl border border-slate-800">
+                  {item.question.category !== 'idioms' && item.question.category !== 'ows' && item.question.meaning && (
+                    <div className="text-xs text-slate-300 bg-slate-900/70 p-2 rounded-xl border border-slate-800 break-words">
                       <span className="font-bold text-sky-400">Meaning: </span>
                       {item.question.meaning}
                     </div>
                   )}
 
                   {/* Correct Option */}
-                  <div className="text-xs text-emerald-400 font-bold bg-emerald-950/30 border border-emerald-900/50 px-2.5 py-1 rounded-lg">
+                  <div className="text-xs text-emerald-400 font-bold bg-emerald-950/30 border border-emerald-900/50 px-2.5 py-1 rounded-lg break-words">
                     Correct: {item.question.options[item.question.correctIndex]}
                   </div>
 
                   {/* Mnemonic Hook */}
-                  <div className="text-[11px] text-slate-300 bg-slate-900/80 p-2 rounded-xl border border-slate-800">
+                  <div className="text-[11px] text-slate-300 bg-slate-900/80 p-2 rounded-xl border border-slate-800 break-words">
                     <span className="font-bold text-amber-400">💡 Trick: </span>
                     {item.question.mnemonic}
                   </div>
 
                   {/* Exam Attribution */}
-                  <div className="text-[10px] text-slate-400 flex items-center justify-between pt-0.5">
-                    <span>Asked in: {item.question.examHistory.slice(0, 2).join(', ')}</span>
-                    <span className="text-amber-400 font-bold">Repeated {item.question.repeatCount}x</span>
+                  <div className="text-[10px] text-slate-400 flex items-center justify-between pt-0.5 gap-2">
+                    <span className="truncate">Asked in: {item.question.examHistory.slice(0, 2).join(', ')}</span>
+                    <span className="text-amber-400 font-bold shrink-0">Repeated {item.question.repeatCount}x</span>
                   </div>
                 </div>
               );

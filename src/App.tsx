@@ -31,6 +31,14 @@ import {
   recordQuestionSolvedForDailyTarget 
 } from './utils/dailyTargetManager';
 import { 
+  isItemSaved,
+  isItemMistake,
+  sanitizeVaultList,
+  recordMistakeInVault,
+  toggleSaveInVault,
+  removeVaultItem
+} from './utils/vaultManager';
+import { 
   auth, 
   saveUserDataToFirestore, 
   fetchUserDataFromFirestore,
@@ -183,7 +191,10 @@ export default function App() {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem(STORAGE_KEY_VAULT);
       if (saved) {
-        try { return JSON.parse(saved); } catch { /* ignore */ }
+        try {
+          const parsed = JSON.parse(saved);
+          return sanitizeVaultList(parsed);
+        } catch { /* ignore */ }
       }
     }
     return [];
@@ -320,7 +331,8 @@ export default function App() {
               setStreak(checkedStreak);
             }
             if (cloudData.savedWords && cloudData.savedWords.length > 0) {
-              setSavedWords(cloudData.savedWords);
+              const sanitizedCloud = sanitizeVaultList(cloudData.savedWords);
+              setSavedWords(sanitizedCloud);
             }
 
             // Immediately write merged data back to Firestore
@@ -600,11 +612,11 @@ export default function App() {
     // Automatically count question towards today's daily streak and daily target
     handleRecordQuestionSolved();
 
-    // Automatically add incorrect questions to Mistake Vault
+    // Automatically add incorrect questions to Mistake Vault (WITHOUT marking as Saved)
     if (!playerAns.isCorrect) {
       const currentQ = matchState.questions[matchState.currentQuestionIndex];
       if (currentQ) {
-        handleBookmarkQuestion(currentQ, true);
+        handleRecordMistake(currentQ);
       }
     }
 
@@ -625,14 +637,19 @@ export default function App() {
   };
 
   // Called when all rounds of the duel complete (Never during rounds)
-  const handleCompleteMatch = (authoritativeResult?: LiveRoomFinalResult) => {
+  const handleCompleteMatch = (
+    authoritativeResult?: LiveRoomFinalResult,
+    finalScores?: { playerScore: number; opponentScore: number; combo?: number; opponentCombo?: number }
+  ) => {
     if (!matchState) return;
 
     let isWinner = false;
     let isDraw = false;
     let lpDelta = 0;
-    let finalPlayerScore = matchState.playerScore;
-    let finalOpponentScore = matchState.opponentScore;
+    let finalPlayerScore = finalScores?.playerScore ?? matchState.playerScore;
+    let finalOpponentScore = finalScores?.opponentScore ?? matchState.opponentScore;
+    const finalComboStreak = finalScores?.combo ?? matchState.comboStreak;
+    const finalOpponentCombo = finalScores?.opponentCombo ?? matchState.opponentCombo;
 
     if (authoritativeResult && authoritativeResult.finalised) {
       // Authoritative synchronized scores directly from Firestore Live Room
@@ -665,9 +682,9 @@ export default function App() {
       }
     } else {
       // Bot / Offline match
-      isWinner = matchState.playerScore > matchState.opponentScore;
-      isDraw = matchState.playerScore === matchState.opponentScore;
-      lpDelta = isWinner ? 30 + (matchState.comboStreak > 2 ? 5 : 0) : isDraw ? 5 : -15;
+      isWinner = finalPlayerScore > finalOpponentScore;
+      isDraw = finalPlayerScore === finalOpponentScore;
+      lpDelta = isWinner ? 30 + (finalComboStreak > 2 ? 5 : 0) : isDraw ? 5 : -15;
     }
 
     const newLP = Math.max(100, player.rankPoints + lpDelta);
@@ -698,6 +715,8 @@ export default function App() {
       ...prev,
       playerScore: finalPlayerScore,
       opponentScore: finalOpponentScore,
+      comboStreak: finalComboStreak,
+      opponentCombo: finalOpponentCombo,
       finalResult: authoritativeResult,
     } : null);
 
@@ -720,54 +739,31 @@ export default function App() {
     }
   };
 
-  // Bookmark / Save question to Mistake Vault
-  const handleBookmarkQuestion = (q: Question, isAutomaticMistake: boolean = false) => {
+  // Record question mistake in vault (does NOT mark as Saved/Bookmarked)
+  const handleRecordMistake = (q: Question) => {
+    setSavedWords(prev => recordMistakeInVault(prev, q));
+  };
+
+  // Explicit user bookmark/save action (toggles Saved status independently of Mistakes)
+  const handleBookmarkQuestion = (q: Question) => {
+    soundManager.playTap();
+    setSavedWords(prev => toggleSaveInVault(prev, q).updatedVault);
+  };
+
+  // Toggle user Saved status from MistakeVault or other views
+  const handleToggleUserSaved = (questionId: string, question?: Question) => {
+    soundManager.playTap();
     setSavedWords(prev => {
-      const exists = prev.find(item => item.question.id === q.id);
-      if (exists) {
-        return prev.map(item =>
-          item.question.id === q.id
-            ? {
-                ...item,
-                mistakeCount: isAutomaticMistake ? item.mistakeCount + 1 : item.mistakeCount,
-                isBookmarked: true,
-              }
-            : item
-        );
-      } else {
-        return [
-          ...prev,
-          {
-            question: q,
-            savedAt: Date.now(),
-            mistakeCount: isAutomaticMistake ? 1 : 0,
-            correctCount: 0,
-            isBookmarked: true,
-          },
-        ];
-      }
+      const targetQ = question || prev.find(item => item.question.id === questionId)?.question;
+      if (!targetQ) return prev;
+      return toggleSaveInVault(prev, targetQ).updatedVault;
     });
   };
 
-  const handleToggleUserSaved = (questionId: string) => {
+  // Remove word according to active scope (mistakes only, saved only, or all)
+  const handleRemoveSavedWord = (questionId: string, scope?: 'all' | 'saved_by_me' | 'mistakes') => {
     soundManager.playTap();
-    setSavedWords(prev =>
-      prev.map(item => {
-        if (item.question.id === questionId) {
-          const currentStatus = item.isUserSaved ?? item.isBookmarked ?? false;
-          return {
-            ...item,
-            isUserSaved: !currentStatus,
-            isBookmarked: !currentStatus,
-          };
-        }
-        return item;
-      })
-    );
-  };
-
-  const handleRemoveSavedWord = (questionId: string) => {
-    setSavedWords(prev => prev.filter(w => w.question.id !== questionId));
+    setSavedWords(prev => removeVaultItem(prev, questionId, scope));
   };
 
   const handleOpenAiTutor = (q: Question) => {
@@ -872,7 +868,8 @@ export default function App() {
     });
   };
 
-  const bookmarkedIds = savedWords.map(w => w.question.id);
+  const bookmarkedIds = savedWords.filter(w => isItemSaved(w)).map(w => w.question.id);
+  const activeMistakeCount = savedWords.filter(w => isItemMistake(w)).length;
 
   return (
     <AndroidDeviceShell>
@@ -890,7 +887,7 @@ export default function App() {
           subscription={subscription}
           dailyStreak={streak}
           currentUser={currentUser}
-          mistakeCount={savedWords.length}
+          mistakeCount={activeMistakeCount}
           onOpenProfile={() => {
             soundManager.playTap();
             setShowProfileModal(true);
@@ -911,7 +908,7 @@ export default function App() {
       )}
 
       {/* Main App Content Viewport */}
-      <div className="flex-1 flex flex-col min-h-0 h-full overflow-hidden relative w-full">
+      <div className="flex-1 flex flex-col min-h-0 overflow-hidden relative w-full">
         {/* Top App Bar */}
         <TopBar
           player={player}
@@ -1144,7 +1141,7 @@ export default function App() {
             }
             setCurrentTab(tab);
           }}
-          mistakeCount={savedWords.length}
+          mistakeCount={activeMistakeCount}
         />
       )}
       </div>

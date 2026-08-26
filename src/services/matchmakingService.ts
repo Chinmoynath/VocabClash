@@ -131,26 +131,47 @@ export function calculateScore(isCorrect: boolean, timeRemainingSec: number, max
 export function simulateOpponentAnswer(
   question: Question,
   opponentAccuracy: number,
-  maxTimeSec: number
+  maxTimeSec: number = 15
 ): { selectedIndex: number; timeTakenMs: number; isCorrect: boolean } {
-  // Accuracy check adjusted by question difficulty
-  let effectiveAccuracy = opponentAccuracy / 100;
-  if (question.difficulty === 'hard') effectiveAccuracy *= 0.8;
-  if (question.difficulty === 'easy') effectiveAccuracy = Math.min(0.96, effectiveAccuracy * 1.15);
+  // Base accuracy with natural per-question noise (±8%)
+  const accuracyNoise = Math.random() * 16 - 8;
+  let effectiveAccuracy = Math.min(0.95, Math.max(0.45, (opponentAccuracy + accuracyNoise) / 100));
 
+  if (question.difficulty === 'hard') effectiveAccuracy *= 0.82;
+  if (question.difficulty === 'easy') effectiveAccuracy = Math.min(0.96, effectiveAccuracy * 1.12);
+
+  // Even strong bots sometimes misread or slip on a question
   const isCorrect = Math.random() < effectiveAccuracy;
 
-  // Realistic human reaction time (1.6s to 8.5s)
-  const baseTime = 1600 + Math.random() * (maxTimeSec * 650);
-  const timeTakenMs = Math.min(maxTimeSec * 1000 - 500, Math.max(1200, Math.floor(baseTime)));
+  // Realistic human reaction time profiles:
+  // Profile 1 (Fast instinct): ~1.5s - 3.0s (30% of rounds)
+  // Profile 2 (Normal reading & deliberation): ~2.6s - 5.0s (50% of rounds)
+  // Profile 3 (Careful double-check / hesitation): ~4.8s - 7.5s (16% of rounds)
+  // Profile 4 (Brain-freeze / slow response): ~9.5s - 13.5s (4% of rounds)
+  const profileRoll = Math.random();
+  let timeTakenMs: number;
+  if (profileRoll < 0.30) {
+    timeTakenMs = Math.round(1500 + Math.random() * 1500); // 1.5s - 3.0s
+  } else if (profileRoll < 0.80) {
+    timeTakenMs = Math.round(2600 + Math.random() * 2400); // 2.6s - 5.0s
+  } else if (profileRoll < 0.96) {
+    timeTakenMs = Math.round(4800 + Math.random() * 2700); // 4.8s - 7.5s
+  } else {
+    timeTakenMs = Math.round(9500 + Math.random() * 4000); // 9.5s - 13.5s
+  }
+
+  // Ensure time taken is safely bounded within round time
+  timeTakenMs = Math.min(maxTimeSec * 1000 - 400, Math.max(1300, timeTakenMs));
 
   let selectedIndex: number;
   if (isCorrect) {
     selectedIndex = question.correctIndex;
   } else {
-    // Pick wrong option
-    const wrongOptions = [0, 1, 2, 3].filter(idx => idx !== question.correctIndex);
-    selectedIndex = wrongOptions[Math.floor(Math.random() * wrongOptions.length)];
+    // Pick wrong option from available options (0..3)
+    const wrongOptions = [0, 1, 2, 3].filter(idx => idx !== question.correctIndex && idx < question.options.length);
+    selectedIndex = wrongOptions.length > 0
+      ? wrongOptions[Math.floor(Math.random() * wrongOptions.length)]
+      : (question.correctIndex + 1) % question.options.length;
   }
 
   return { selectedIndex, timeTakenMs, isCorrect };

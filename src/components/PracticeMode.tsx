@@ -183,7 +183,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     onBookmarkQuestion(currentQ);
     const alreadyBookmarked = bookmarkedIds.includes(currentQ.id);
     showSaveConfirmation(
-      alreadyBookmarked ? 'Word saved in Revision Vault' : '⭐ Question Saved to Revision Vault'
+      alreadyBookmarked ? 'Removed from Saved' : '⭐ Question Saved to Revision Vault'
     );
   };
 

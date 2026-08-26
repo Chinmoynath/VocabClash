@@ -120,6 +120,8 @@ export interface SavedWord {
   savedAt: number;
   mistakeCount: number;
   correctCount: number;
+  isSaved?: boolean;
+  isMistake?: boolean;
   isBookmarked: boolean;
   isUserSaved?: boolean;
   lastReviewedAt?: number;
