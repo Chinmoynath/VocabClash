@@ -37,6 +37,8 @@ interface ArenaHomeProps {
   onSelectCategory: (cat: QuestionCategory | 'mixed') => void;
   onSelectExam: (exam: ExamType) => void;
   onStartMatchmaking: (mode: '1v1_ranked' | 'quick_duel' | 'daily_challenge') => void;
+  onOpenPlayModeSelector: () => void;
+  onOpenFriendLobby: () => void;
   onOpenPremium: () => void;
   onOpenStreak: () => void;
   onOpenProfile?: () => void;
@@ -56,6 +58,8 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
   onSelectCategory,
   onSelectExam,
   onStartMatchmaking,
+  onOpenPlayModeSelector,
+  onOpenFriendLobby,
   onOpenPremium,
   onOpenStreak,
   onOpenProfile,
@@ -208,7 +212,7 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
             <button
               onClick={() => {
                 soundManager.playTap();
-                onStartMatchmaking(player.matchesPlayed === 0 ? 'quick_duel' : '1v1_ranked');
+                onOpenPlayModeSelector();
               }}
               className="w-full bg-gradient-to-r from-amber-500 via-orange-500 to-amber-500 hover:from-amber-400 hover:to-orange-400 active:scale-[0.98] text-slate-950 p-4 sm:p-5 rounded-2xl shadow-xl shadow-orange-950/70 flex items-center justify-between gap-3 border-2 border-amber-300/60 transition-all group relative overflow-hidden cursor-pointer"
             >
@@ -222,16 +226,16 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
                 <div className="text-left min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm sm:text-base lg:text-lg font-black tracking-wide uppercase text-slate-950 leading-tight">
-                      {player.matchesPlayed === 0 ? 'PLAY FIRST DUEL' : '1V1 VOCAB ONLINE DUEL'}
+                      {player.matchesPlayed === 0 ? 'START 1V1 DUEL' : 'START 1V1 VOCAB BATTLE'}
                     </span>
                     <span className="text-[10px] bg-slate-950/35 text-amber-100 font-extrabold px-2 py-0.5 rounded-md border border-slate-950/20 whitespace-nowrap shadow-sm">
-                      {player.matchesPlayed === 0 ? '10 Qs (Intro Match)' : '20 Qs'}
+                      Play Online / Friend
                     </span>
                   </div>
                   <div className="text-xs text-slate-950/85 font-bold mt-1">
                     {player.matchesPlayed === 0
-                      ? '10 Quick PYQ Rounds • High Win Probability • +30 LP'
-                      : 'Full 20-Round Battle • +30 LP on Victory'}
+                      ? 'Ranked Matchmaking or Custom 6-Digit Friend Room'
+                      : 'Play Online Ranked or Create 6-Digit Room with Friend'}
                   </div>
                 </div>
               </div>
@@ -244,24 +248,44 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
             </button>
 
             {/* Secondary Quick Modes Grid */}
-            <div className="grid grid-cols-2 gap-2 sm:gap-3">
-              {/* Quick 10-Round Blitz */}
+            <div className="grid grid-cols-3 gap-2 sm:gap-2.5">
+              {/* Play Online Quick Blitz */}
               <button
                 onClick={() => {
                   soundManager.playTap();
                   onStartMatchmaking('quick_duel');
                 }}
-                className="bg-slate-800/90 hover:bg-slate-750 active:scale-[0.97] border border-slate-700 p-3 sm:p-3.5 rounded-xl text-left transition-all flex flex-col justify-between cursor-pointer"
+                className="bg-slate-800/90 hover:bg-slate-750 active:scale-[0.97] border border-slate-700 p-2.5 sm:p-3 rounded-xl text-left transition-all flex flex-col justify-between cursor-pointer"
               >
                 <div className="flex items-center justify-between w-full">
-                  <span className="text-lg sm:text-xl">⚡</span>
-                  <span className="text-[10px] bg-slate-700 text-slate-300 font-mono px-1.5 py-0.5 rounded font-bold">
-                    10 Rounds
+                  <span className="text-base sm:text-lg">⚡</span>
+                  <span className="text-[9px] bg-slate-700 text-slate-300 font-mono px-1.5 py-0.5 rounded font-bold">
+                    10 Qs
                   </span>
                 </div>
                 <div className="mt-2">
-                  <div className="font-bold text-xs sm:text-sm text-slate-100">Speed Blitz</div>
-                  <div className="text-[10px] text-slate-400">Fast 10-Round Duel</div>
+                  <div className="font-bold text-xs text-slate-100 truncate">Speed Blitz</div>
+                  <div className="text-[9px] text-slate-400 truncate">Instant Queue</div>
+                </div>
+              </button>
+
+              {/* Play with Friend (6-Digit Room) */}
+              <button
+                onClick={() => {
+                  soundManager.playTap();
+                  onOpenFriendLobby();
+                }}
+                className="bg-gradient-to-br from-sky-950/80 to-slate-850 hover:bg-sky-900/40 active:scale-[0.97] border border-sky-600/50 hover:border-sky-400 p-2.5 sm:p-3 rounded-xl text-left transition-all flex flex-col justify-between cursor-pointer group shadow-sm"
+              >
+                <div className="flex items-center justify-between w-full">
+                  <span className="text-base sm:text-lg">👥</span>
+                  <span className="text-[9px] bg-sky-950 text-sky-300 font-mono px-1.5 py-0.5 rounded border border-sky-700/60 font-bold">
+                    6-Digit
+                  </span>
+                </div>
+                <div className="mt-2">
+                  <div className="font-bold text-xs text-sky-200 group-hover:text-sky-100 truncate">Play Friend</div>
+                  <div className="text-[9px] text-sky-400/80 truncate">Custom Lobby</div>
                 </div>
               </button>
 
@@ -271,17 +295,17 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
                   soundManager.playTap();
                   onStartMatchmaking('daily_challenge');
                 }}
-                className="bg-gradient-to-br from-indigo-950/60 to-purple-950/60 hover:opacity-95 active:scale-[0.97] border border-indigo-700/60 p-3 sm:p-3.5 rounded-xl text-left transition-all flex flex-col justify-between cursor-pointer"
+                className="bg-gradient-to-br from-indigo-950/60 to-purple-950/60 hover:opacity-95 active:scale-[0.97] border border-indigo-700/60 p-2.5 sm:p-3 rounded-xl text-left transition-all flex flex-col justify-between cursor-pointer"
               >
                 <div className="flex items-center justify-between w-full">
-                  <span className="text-lg sm:text-xl">🔥</span>
-                  <span className="text-[10px] bg-indigo-900/90 text-indigo-200 font-bold px-1.5 py-0.5 rounded border border-indigo-600/50">
-                    20 Qs • +100 Bonus
+                  <span className="text-base sm:text-lg">🔥</span>
+                  <span className="text-[9px] bg-indigo-900/90 text-indigo-200 font-bold px-1 py-0.5 rounded border border-indigo-600/50">
+                    +100 Bonus
                   </span>
                 </div>
                 <div className="mt-2">
-                  <div className="font-bold text-xs sm:text-sm text-indigo-100">Daily PYQ Sprint</div>
-                  <div className="text-[10px] text-indigo-300/80">20 High-repeat PYQs</div>
+                  <div className="font-bold text-xs text-indigo-100 truncate">Daily Sprint</div>
+                  <div className="text-[9px] text-indigo-300/80 truncate">20 PYQs</div>
                 </div>
               </button>
             </div>

@@ -26,5 +26,14 @@ service cloud.firestore {
     match /live_rooms/{roomId} {
       allow read, write: if true;
     }
+
+    // Custom 6-Digit Friend Lobbies
+    match /friend_lobbies/{lobbyCode} {
+      allow read, write: if true;
+    }
+
+    match /friendRooms/{lobbyCode} {
+      allow read, write: if true;
+    }
   }
 }

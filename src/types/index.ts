@@ -174,3 +174,28 @@ export interface DailyStreakState {
   streakBrokenNotice?: boolean;
 }
 
+export type FriendLobbyStatus = 
+  | 'waiting' 
+  | 'ready' 
+  | 'starting' 
+  | 'in_progress' 
+  | 'cancelled' 
+  | 'expired';
+
+export interface FriendLobby {
+  code: string; // 6-digit numeric room code (e.g. "492810")
+  roomId: string; // Unique shared match room ID
+  host: PlayerProfile;
+  guest?: PlayerProfile;
+  category: QuestionCategory | 'mixed';
+  exam: ExamType;
+  roundCount: number;
+  status: FriendLobbyStatus;
+  questions?: Question[];
+  hostReady: boolean;
+  guestReady: boolean;
+  createdAt: number;
+  expiresAt: number;
+  updatedAt: number;
+}
+

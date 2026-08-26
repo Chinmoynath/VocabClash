@@ -445,14 +445,50 @@ export function subscribeToLiveRoom(
   onError?: (err: any) => void
 ): Unsubscribe {
   const roomRef = doc(db, 'live_rooms', roomId);
-  return onSnapshot(roomRef, (snapshot) => {
+
+  let pollInterval: NodeJS.Timeout | null = null;
+  let isUnsubscribed = false;
+
+  const handleUpdate = (room: LiveDuelRoom) => {
+    if (!isUnsubscribed && room) {
+      onUpdate(room);
+    }
+  };
+
+  const unsubscribeFs = onSnapshot(roomRef, (snapshot) => {
     if (snapshot.exists()) {
-      onUpdate(snapshot.data() as LiveDuelRoom);
+      handleUpdate(snapshot.data() as LiveDuelRoom);
     }
   }, (err) => {
     if (onError) onError(err);
     handleFirestoreError(err, OperationType.GET, `live_rooms/${roomId}`);
   });
+
+  // Server polling fallback (every 800ms)
+  pollInterval = setInterval(async () => {
+    if (isUnsubscribed) return;
+    try {
+      const res = await fetch(`/api/match/room/${roomId}`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.room) {
+          handleUpdate(json.room as LiveDuelRoom);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, 800);
+
+  return () => {
+    isUnsubscribed = true;
+    if (pollInterval) clearInterval(pollInterval);
+    try {
+      unsubscribeFs();
+    } catch {
+      // ignore
+    }
+  };
 }
 
 /**
@@ -466,6 +502,22 @@ export async function submitPlayerAnswerToLiveRoom(
   answer: PlayerAnswerRecord,
   isLastQuestion: boolean
 ): Promise<LiveDuelRoom | null> {
+  // Sync to server API backup
+  try {
+    fetch('/api/match/room/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        roomId,
+        playerId,
+        score: answer.scoreGained,
+        answerRecord: answer,
+      }),
+    }).catch(() => {});
+  } catch {
+    // ignore
+  }
+
   const roomRef = doc(db, 'live_rooms', roomId);
 
   try {

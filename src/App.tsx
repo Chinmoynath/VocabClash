@@ -63,13 +63,30 @@ import { PremiumModal } from './components/PremiumModal';
 import { InterstitialAdModal } from './components/InterstitialAdModal';
 import { StreakModal } from './components/StreakModal';
 import { OnboardingTourModal } from './components/OnboardingTourModal';
+import { PlayModeSelectorModal } from './components/PlayModeSelectorModal';
+import { FriendLobbyModal } from './components/FriendLobbyModal';
 
 const STORAGE_KEY_PLAYER = 'vocabclash_player_v5';
 const STORAGE_KEY_VAULT = 'vocabclash_vault_v2';
 const STORAGE_KEY_SUBSCRIPTION = 'vocabclash_subscription_v2';
 
+// Generates and persists a unique device guest ID so no two guest devices ever collide
+export function getOrCreateGuestId(): string {
+  if (typeof window !== 'undefined') {
+    try {
+      let gid = localStorage.getItem('vocabclash_guest_uid');
+      if (!gid || gid === 'user-live-1' || gid === 'user-cgl-1') {
+        gid = `guest_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 8)}`;
+        localStorage.setItem('vocabclash_guest_uid', gid);
+      }
+      return gid;
+    } catch { /* ignore */ }
+  }
+  return `guest_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 8)}`;
+}
+
 const INITIAL_PLAYER: PlayerProfile = {
-  id: 'user-live-1',
+  id: getOrCreateGuestId(),
   name: 'Govt Aspirant',
   avatar: '👨‍💼',
   country: 'India',
@@ -90,10 +107,12 @@ const INITIAL_PLAYER: PlayerProfile = {
 
 // Helper to sanitize and cleanse any lingering demo template state
 function sanitizeProfile(raw: any, googleUser?: FirebaseUser | null): PlayerProfile {
-  if (!raw) return { ...INITIAL_PLAYER };
+  const deviceGuestId = getOrCreateGuestId();
+  if (!raw) return { ...INITIAL_PLAYER, id: googleUser ? googleUser.uid : deviceGuestId };
 
   const isLegacyDemo = 
     raw.id === 'user-cgl-1' || 
+    raw.id === 'user-live-1' ||
     raw.name === 'Aspirant Rahul' ||
     (raw.matchesPlayed === 48 && (raw.rankPoints === 1840 || raw.rankPoints === 1865 || raw.rankPoints >= 1800)) ||
     (raw.tierTitle && raw.tierTitle.includes('2800 GP') && raw.matchesPlayed <= 50);
@@ -103,7 +122,7 @@ function sanitizeProfile(raw: any, googleUser?: FirebaseUser | null): PlayerProf
   if (isLegacyDemo) {
     return {
       ...INITIAL_PLAYER,
-      id: googleUser ? googleUser.uid : 'user-live-1',
+      id: googleUser ? googleUser.uid : deviceGuestId,
       name: cleanUserName || 'Govt Aspirant',
       photoURL: googleUser?.photoURL || undefined,
       email: googleUser?.email || undefined,
@@ -138,10 +157,12 @@ function sanitizeProfile(raw: any, googleUser?: FirebaseUser | null): PlayerProf
     effectiveName = extractCleanUserName(effectiveName, googleUser?.email || raw.email);
   }
 
+  const resolvedId = googleUser ? googleUser.uid : (raw.id && raw.id !== 'user-live-1' && raw.id !== 'user-cgl-1' ? raw.id : deviceGuestId);
+
   return {
     ...INITIAL_PLAYER,
     ...raw,
-    id: googleUser ? googleUser.uid : (raw.id || 'user-live-1'),
+    id: resolvedId,
     name: effectiveName || cleanUserName || 'Govt Aspirant',
     photoURL: googleUser?.photoURL || raw.photoURL || undefined,
     email: googleUser?.email || raw.email || undefined,
@@ -235,6 +256,28 @@ export default function App() {
   const [showAdModal, setShowAdModal] = useState<boolean>(false);
   const [showStreakModal, setShowStreakModal] = useState<boolean>(false);
   const [showTourModal, setShowTourModal] = useState<boolean>(false);
+  const [showPlayModeModal, setShowPlayModeModal] = useState<boolean>(false);
+  const [showFriendLobbyModal, setShowFriendLobbyModal] = useState<boolean>(false);
+  const [friendLobbyInitialCode, setFriendLobbyInitialCode] = useState<string>('');
+
+  // Auto-detect friend lobby code from URL parameters (e.g. ?lobby=492810 or ?join=492810)
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const urlParams = new URLSearchParams(window.location.search);
+        const lobbyParam = urlParams.get('lobby') || urlParams.get('join') || urlParams.get('room');
+        if (lobbyParam) {
+          const cleanCode = lobbyParam.trim().replace(/\D/g, '');
+          if (cleanCode.length === 6) {
+            setFriendLobbyInitialCode(cleanCode);
+            setShowFriendLobbyModal(true);
+          }
+        }
+      } catch {
+        // ignore URL parsing error
+      }
+    }
+  }, []);
 
   // Auto-trigger onboarding tour for first-time visitors
   useEffect(() => {
@@ -985,6 +1028,11 @@ export default function App() {
                 onSelectCategory={setSelectedCategory}
                 onSelectExam={setSelectedExam}
                 onStartMatchmaking={handleStartMatchmaking}
+                onOpenPlayModeSelector={() => setShowPlayModeModal(true)}
+                onOpenFriendLobby={() => {
+                  setFriendLobbyInitialCode('');
+                  setShowFriendLobbyModal(true);
+                }}
                 onOpenPremium={() => setShowPremiumModal(true)}
                 onOpenStreak={() => setShowStreakModal(true)}
                 onOpenProfile={() => setShowProfileModal(true)}
@@ -1029,6 +1077,53 @@ export default function App() {
           </>
         )}
       </main>
+
+      {/* Play Mode Selection Modal (Online Ranked vs Play with Friend) */}
+      {showPlayModeModal && (
+        <PlayModeSelectorModal
+          player={player}
+          selectedCategory={selectedCategory}
+          selectedExam={selectedExam}
+          currentUser={currentUser}
+          onSelectPlayOnline={() => {
+            setShowPlayModeModal(false);
+            handleStartMatchmaking(player.matchesPlayed === 0 ? 'quick_duel' : '1v1_ranked');
+          }}
+          onSelectPlayWithFriend={() => {
+            setShowPlayModeModal(false);
+            setFriendLobbyInitialCode('');
+            setShowFriendLobbyModal(true);
+          }}
+          onClose={() => setShowPlayModeModal(false)}
+        />
+      )}
+
+      {/* Custom 6-Digit Friend Lobby Modal */}
+      {showFriendLobbyModal && (
+        <FriendLobbyModal
+          player={player}
+          currentUser={currentUser}
+          initialCategory={selectedCategory}
+          initialExam={selectedExam}
+          initialCode={friendLobbyInitialCode}
+          onUserChange={user => setCurrentUser(user)}
+          onSelectPlayOnline={() => {
+            setShowFriendLobbyModal(false);
+            setFriendLobbyInitialCode('');
+            handleStartMatchmaking(player.matchesPlayed === 0 ? 'quick_duel' : '1v1_ranked');
+          }}
+          onClose={() => {
+            setShowFriendLobbyModal(false);
+            setFriendLobbyInitialCode('');
+          }}
+          onStartMatch={(opponent, questions, roomId) => {
+            setShowFriendLobbyModal(false);
+            setFriendLobbyInitialCode('');
+            setMatchMode('1v1_ranked');
+            handleReadyToFight(opponent, true, questions, roomId);
+          }}
+        />
+      )}
 
       {/* Matchmaking Radar Modal */}
       {isMatchmaking && (

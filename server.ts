@@ -398,6 +398,313 @@ app.post('/api/payment/verify', (req, res) => {
   }
 });
 
+// ==========================================
+// Custom 6-Digit Friend Lobby Server Endpoints
+// ==========================================
+interface ServerFriendLobby {
+  code: string;
+  roomId: string;
+  host: any;
+  guest?: any;
+  category: string;
+  exam: string;
+  roundCount: number;
+  status: 'waiting' | 'ready' | 'starting' | 'in_progress' | 'cancelled' | 'expired';
+  questions?: any[];
+  hostReady: boolean;
+  guestReady: boolean;
+  createdAt: number;
+  expiresAt: number;
+  updatedAt: number;
+}
+
+const serverLobbies = new Map<string, ServerFriendLobby>();
+const serverLiveRooms = new Map<string, any>();
+
+// Periodic cleanup of stale lobbies (> 1 hour old)
+setInterval(() => {
+  const now = Date.now();
+  for (const [code, lobby] of serverLobbies.entries()) {
+    if (lobby.expiresAt < now || lobby.status === 'cancelled') {
+      serverLobbies.delete(code);
+    }
+  }
+  for (const [roomId, room] of serverLiveRooms.entries()) {
+    if (room.updatedAt && now - room.updatedAt > 3600000) {
+      serverLiveRooms.delete(roomId);
+    }
+  }
+}, 60000);
+
+// Create or Register Lobby Endpoint
+app.post('/api/lobby/create', (req, res) => {
+  try {
+    const { 
+      code: customCode, 
+      roomId: customRoomId, 
+      host, 
+      category = 'mixed', 
+      exam = 'SSC_CGL', 
+      roundCount = 20, 
+      questions = [] 
+    } = req.body;
+
+    if (!host || !host.id) {
+      return res.status(400).json({ success: false, error: 'Host player profile is required' });
+    }
+
+    // Use requested code if provided and valid, otherwise generate unique 6-digit code
+    let code = (customCode && typeof customCode === 'string') 
+      ? customCode.trim().replace(/\D/g, '') 
+      : '';
+    
+    if (code.length !== 6) {
+      code = Math.floor(100000 + Math.random() * 900000).toString();
+      while (serverLobbies.has(code)) {
+        code = Math.floor(100000 + Math.random() * 900000).toString();
+      }
+    }
+
+    const roomId = customRoomId || `duel_friend_${code}_${Date.now()}`;
+    const now = Date.now();
+    const lobby: ServerFriendLobby = {
+      code,
+      roomId,
+      host,
+      category,
+      exam,
+      roundCount,
+      status: 'waiting',
+      questions,
+      hostReady: true,
+      guestReady: false,
+      createdAt: now,
+      expiresAt: now + 3600000, // 1 hour TTL
+      updatedAt: now,
+    };
+
+    serverLobbies.set(code, lobby);
+    console.log(`[LOBBY] Created/Registered 6-digit lobby ${code} by ${host.name} (${host.id})`);
+    res.json({ success: true, code, roomId, lobby });
+  } catch (error: any) {
+    console.error('Error creating lobby:', error);
+    res.status(500).json({ success: false, error: error.message || 'Failed to create lobby' });
+  }
+});
+
+// Join Lobby Endpoint
+app.post('/api/lobby/join', (req, res) => {
+  try {
+    const { code, guest } = req.body;
+    if (!code || typeof code !== 'string') {
+      return res.status(400).json({ success: false, error: '6-digit room code is required' });
+    }
+    if (!guest || !guest.id) {
+      return res.status(400).json({ success: false, error: 'Guest player profile is required' });
+    }
+
+    const cleanCode = code.trim().replace(/\D/g, '');
+    const lobby = serverLobbies.get(cleanCode);
+
+    if (!lobby) {
+      return res.status(404).json({ success: false, error: `Room #${cleanCode} not found on server. Please check the code with your friend.` });
+    }
+
+    if (lobby.status !== 'waiting' && lobby.guest?.id !== guest.id) {
+      return res.status(400).json({ success: false, error: 'Lobby is already full or battle is already in progress.' });
+    }
+
+    if (lobby.expiresAt < Date.now()) {
+      serverLobbies.delete(cleanCode);
+      return res.status(410).json({ success: false, error: 'This lobby has expired. Ask your friend to create a new one.' });
+    }
+
+    // Join player as guest
+    lobby.guest = guest;
+    lobby.guestReady = true;
+    lobby.status = 'ready';
+    lobby.updatedAt = Date.now();
+    serverLobbies.set(cleanCode, lobby);
+
+    console.log(`[LOBBY] Player ${guest.name} (${guest.id}) joined lobby ${cleanCode}`);
+    res.json({ success: true, lobby });
+  } catch (error: any) {
+    console.error('Error joining lobby:', error);
+    res.status(500).json({ success: false, error: error.message || 'Failed to join lobby' });
+  }
+});
+
+// Get Lobby Status Endpoint
+app.get('/api/lobby/:code', (req, res) => {
+  const code = (req.params.code || '').trim().replace(/\D/g, '');
+  const lobby = serverLobbies.get(code);
+  if (!lobby) {
+    return res.status(404).json({ success: false, error: 'Lobby not found' });
+  }
+  res.json({ success: true, lobby });
+});
+
+// Start Match in Lobby Endpoint
+app.post('/api/lobby/start', (req, res) => {
+  try {
+    const { code, hostId, questions } = req.body;
+    const cleanCode = (code || '').trim().replace(/\D/g, '');
+    const lobby = serverLobbies.get(cleanCode);
+
+    if (!lobby) {
+      return res.status(404).json({ success: false, error: 'Lobby not found' });
+    }
+
+    if (lobby.host.id !== hostId) {
+      return res.status(403).json({ success: false, error: 'Only the host can start the duel' });
+    }
+
+    if (!lobby.guest) {
+      return res.status(400).json({ success: false, error: 'Waiting for friend to join before starting' });
+    }
+
+    lobby.status = 'in_progress';
+    if (questions && Array.isArray(questions) && questions.length > 0) {
+      lobby.questions = questions;
+    }
+    lobby.updatedAt = Date.now();
+    serverLobbies.set(cleanCode, lobby);
+
+    // Also initialize serverLiveRoom
+    const liveRoomData = {
+      id: lobby.roomId,
+      roomId: lobby.roomId,
+      mode: 'friend_lobby',
+      category: lobby.category,
+      exam: lobby.exam,
+      roundCount: lobby.roundCount,
+      player1: lobby.host,
+      player2: lobby.guest,
+      questions: lobby.questions || questions || [],
+      status: 'in_progress',
+      scores: {
+        [lobby.host.id]: 0,
+        [lobby.guest.id]: 0,
+      },
+      combos: {
+        [lobby.host.id]: 0,
+        [lobby.guest.id]: 0,
+      },
+      answers: {
+        [lobby.host.id]: [],
+        [lobby.guest.id]: [],
+      },
+      completedPlayers: [],
+      activeEmotes: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    serverLiveRooms.set(lobby.roomId, liveRoomData);
+
+    console.log(`[LOBBY] Match started for room ${cleanCode} (RoomId: ${lobby.roomId})`);
+    res.json({ success: true, lobby, liveRoom: liveRoomData });
+  } catch (error: any) {
+    console.error('Error starting lobby:', error);
+    res.status(500).json({ success: false, error: error.message || 'Failed to start match' });
+  }
+});
+
+// Live Room Sync Endpoint (Score, Answers, Emotes fallback)
+app.post('/api/match/room/sync', (req, res) => {
+  try {
+    const { roomId, playerId, score, combo, answerRecord, emote } = req.body;
+    if (!roomId) {
+      return res.status(400).json({ success: false, error: 'roomId is required' });
+    }
+
+    let room = serverLiveRooms.get(roomId);
+    if (!room) {
+      room = {
+        id: roomId,
+        roomId,
+        scores: {},
+        combos: {},
+        answers: {},
+        completedPlayers: [],
+        activeEmotes: [],
+        updatedAt: Date.now(),
+      };
+      serverLiveRooms.set(roomId, room);
+    }
+
+    if (playerId) {
+      if (typeof score === 'number') {
+        room.scores = room.scores || {};
+        room.scores[playerId] = score;
+      }
+      if (typeof combo === 'number') {
+        room.combos = room.combos || {};
+        room.combos[playerId] = combo;
+      }
+      if (answerRecord) {
+        room.answers = room.answers || {};
+        room.answers[playerId] = room.answers[playerId] || [];
+        // Avoid duplicate answers
+        const exists = room.answers[playerId].some((a: any) => a.questionId === answerRecord.questionId);
+        if (!exists) {
+          room.answers[playerId].push(answerRecord);
+        }
+      }
+    }
+
+    if (emote) {
+      room.activeEmotes = room.activeEmotes || [];
+      room.activeEmotes.push({
+        ...emote,
+        timestamp: Date.now(),
+      });
+      // Keep only last 10 seconds of emotes
+      room.activeEmotes = room.activeEmotes.filter((e: any) => Date.now() - e.timestamp < 10000);
+    }
+
+    room.updatedAt = Date.now();
+    serverLiveRooms.set(roomId, room);
+    res.json({ success: true, room });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Live Room Get Endpoint
+app.get('/api/match/room/:roomId', (req, res) => {
+  const roomId = req.params.roomId;
+  const room = serverLiveRooms.get(roomId);
+  if (!room) {
+    return res.status(404).json({ success: false, error: 'Room not found' });
+  }
+  res.json({ success: true, room });
+});
+
+// Cancel / Leave Lobby Endpoint
+app.post('/api/lobby/leave', (req, res) => {
+  try {
+    const { code, playerId } = req.body;
+    const cleanCode = (code || '').trim();
+    const lobby = serverLobbies.get(cleanCode);
+
+    if (lobby) {
+      if (lobby.host.id === playerId) {
+        lobby.status = 'cancelled';
+        serverLobbies.delete(cleanCode);
+      } else if (lobby.guest?.id === playerId) {
+        lobby.guest = undefined;
+        lobby.guestReady = false;
+        lobby.status = 'waiting';
+        lobby.updatedAt = Date.now();
+        serverLobbies.set(cleanCode, lobby);
+      }
+    }
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Gemini AI Tutor Vocabulary Explanation Endpoint
 app.post('/api/gemini/explain', async (req, res) => {
   const { wordOrPhrase, category, meaning, examHistory } = req.body;

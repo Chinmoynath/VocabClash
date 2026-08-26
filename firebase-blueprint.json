@@ -47,7 +47,7 @@
       "properties": {
         "id": { "type": "string", "description": "Room ID" },
         "roomId": { "type": "string", "description": "Unique match ID" },
-        "mode": { "type": "string", "description": "1v1_ranked or quick_duel" },
+        "mode": { "type": "string", "description": "1v1_ranked, quick_duel, or friend_lobby" },
         "category": { "type": "string", "description": "Category" },
         "exam": { "type": "string", "description": "Exam" },
         "roundCount": { "type": "number", "description": "Rounds" },
@@ -64,6 +64,28 @@
         "updatedAt": { "type": "number", "description": "Timestamp updated" }
       },
       "required": ["id", "roomId", "player1", "player2", "status", "createdAt"]
+    },
+    "FriendLobby": {
+      "title": "FriendLobby",
+      "description": "Custom private 6-digit lobby for playing 1v1 matches with friends",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string", "description": "6-digit numeric room code" },
+        "roomId": { "type": "string", "description": "Unique match room ID" },
+        "host": { "type": "object", "description": "Host player profile" },
+        "guest": { "type": "object", "description": "Guest player profile" },
+        "category": { "type": "string", "description": "Question category filter" },
+        "exam": { "type": "string", "description": "Target exam filter" },
+        "roundCount": { "type": "number", "description": "Number of questions in match" },
+        "status": { "type": "string", "description": "waiting, ready, starting, in_progress, cancelled, or expired" },
+        "questions": { "type": "array", "description": "Synchronized questions list" },
+        "hostReady": { "type": "boolean", "description": "Host readiness state" },
+        "guestReady": { "type": "boolean", "description": "Guest readiness state" },
+        "createdAt": { "type": "number", "description": "Creation timestamp in ms" },
+        "expiresAt": { "type": "number", "description": "Expiration timestamp in ms" },
+        "updatedAt": { "type": "number", "description": "Last updated timestamp in ms" }
+      },
+      "required": ["code", "roomId", "host", "status", "createdAt"]
     }
   },
   "firestore": {
@@ -78,6 +100,14 @@
     "/live_rooms/{roomId}": {
       "schema": "LiveDuelRoom",
       "description": "Shared synchronized 1v1 live duel rooms"
+    },
+    "/friend_lobbies/{lobbyCode}": {
+      "schema": "FriendLobby",
+      "description": "Private 6-digit custom rooms for 1v1 battles with friends"
+    },
+    "/friendRooms/{lobbyCode}": {
+      "schema": "FriendLobby",
+      "description": "Private 6-digit custom rooms for 1v1 battles with friends (canonical alias)"
     }
   }
 }
