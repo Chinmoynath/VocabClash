@@ -673,6 +673,64 @@ export async function forceFinalizeLiveRoom(roomId: string): Promise<LiveDuelRoo
 }
 
 /**
+ * Forfeits an active live room when a player leaves or abandons the match in between.
+ * The leaving player suffers an immediate -15 LP penalty, while the opponent is awarded +30 LP victory.
+ */
+export async function forfeitLiveRoom(
+  roomId: string,
+  forfeitingPlayerId: string
+): Promise<LiveDuelRoom | null> {
+  const roomRef = doc(db, 'live_rooms', roomId);
+
+  try {
+    return await runTransaction(db, async (transaction) => {
+      const roomSnap = await transaction.get(roomRef);
+      if (!roomSnap.exists()) return null;
+
+      const room = roomSnap.data() as LiveDuelRoom;
+      if (room.finalResult && room.finalResult.finalised) {
+        return room;
+      }
+
+      const p1Id = room.player1.id;
+      const p2Id = room.player2.id;
+      const isP1Forfeit = forfeitingPlayerId === p1Id;
+
+      const winnerId = isP1Forfeit ? p2Id : p1Id;
+      const loserId = isP1Forfeit ? p1Id : p2Id;
+
+      const p1Score = (room.scores && room.scores[p1Id]) || 0;
+      const p2Score = (room.scores && room.scores[p2Id]) || 0;
+
+      const finalResult: LiveRoomFinalResult = {
+        winnerId,
+        loserId,
+        player1FinalScore: p1Score,
+        player2FinalScore: p2Score,
+        player1LPChange: isP1Forfeit ? -15 : 30,
+        player2LPChange: isP1Forfeit ? 30 : -15,
+        finalised: true,
+      };
+
+      transaction.update(roomRef, {
+        status: 'completed',
+        finalResult,
+        updatedAt: Date.now(),
+      });
+
+      return {
+        ...room,
+        status: 'completed',
+        finalResult,
+      } as LiveDuelRoom;
+    });
+  } catch (error) {
+    console.error('Error forfeiting live room:', error);
+    return null;
+  }
+}
+
+/**
  * Sends a real-time emote to the shared Live Room.
  */
 export async function sendLiveRoomEmote(

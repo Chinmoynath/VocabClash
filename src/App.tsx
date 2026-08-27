@@ -17,7 +17,7 @@ import {
   getTierFromLP, 
   getTierTitle 
 } from './services/matchmakingService';
-import { LiveRoomFinalResult } from './services/realtimeMatchmaking';
+import { LiveRoomFinalResult, forfeitLiveRoom } from './services/realtimeMatchmaking';
 import { soundManager } from './utils/audio';
 import { isAdDue, resetAdTimerForTest } from './utils/adManager';
 import { extractCleanUserName, formatNameFromEmail } from './utils/nameHelper';
@@ -259,6 +259,7 @@ export default function App() {
   const [showPlayModeModal, setShowPlayModeModal] = useState<boolean>(false);
   const [showFriendLobbyModal, setShowFriendLobbyModal] = useState<boolean>(false);
   const [friendLobbyInitialCode, setFriendLobbyInitialCode] = useState<string>('');
+  const [forfeitNotice, setForfeitNotice] = useState<string | null>(null);
 
   // Auto-detect friend lobby code from URL parameters (e.g. ?lobby=492810 or ?join=492810)
   useEffect(() => {
@@ -829,7 +830,52 @@ export default function App() {
   };
 
   const handleLeaveMatch = () => {
-    soundManager.playTap();
+    soundManager.playWrong();
+
+    // If leaving an active match in progress, penalize with -15 LP and reset win streak
+    if (matchState && !isMatchCompleted) {
+      const forfeitPenalty = -15;
+      const newLP = Math.max(0, player.rankPoints + forfeitPenalty);
+      const newTier = getTierFromLP(newLP);
+      const newTierTitle = getTierTitle(newTier);
+
+      const nextMatchesPlayed = player.matchesPlayed + 1;
+      const nextAccuracy = Math.round((player.matchesWon / nextMatchesPlayed) * 100);
+
+      const updatedPlayer: PlayerProfile = {
+        ...player,
+        rankPoints: newLP,
+        tier: newTier,
+        tierTitle: newTierTitle,
+        matchesPlayed: nextMatchesPlayed,
+        winStreak: 0, // Forfeiting breaks active win streak
+        accuracyRate: nextAccuracy,
+      };
+
+      setPlayer(updatedPlayer);
+
+      // Instantly persist penalty to Firestore if user is authenticated
+      if (currentUser) {
+        saveUserDataToFirestore(
+          currentUser.uid,
+          { player: updatedPlayer, subscription, streak, savedWords },
+          currentUser
+        ).catch(err => console.warn('Instant cloud save after match forfeit failed:', err));
+      }
+
+      // If it's a real live room, broadcast forfeit result to opponent in Firestore
+      if (matchState.isRealPlayer && (matchState.realRoomId || matchState.matchId)) {
+        const rId = matchState.realRoomId || matchState.matchId;
+        forfeitLiveRoom(rId, player.id).catch(err => console.warn('Failed to broadcast room forfeit:', err));
+      }
+
+      // Display floating forfeit penalty notification
+      setForfeitNotice('⚠️ Match Forfeited: -15 LP deducted & win streak reset');
+      setTimeout(() => {
+        setForfeitNotice(null);
+      }, 4500);
+    }
+
     setMatchState(null);
     setIsMatchCompleted(false);
     setCurrentTab('arena');
@@ -976,6 +1022,13 @@ export default function App() {
             setShowTourModal(true);
           }}
         />
+
+        {/* Forfeit Penalty Notification Banner */}
+        {forfeitNotice && (
+          <div className="w-full bg-gradient-to-r from-rose-900/90 via-rose-800/90 to-rose-900/90 border-b border-rose-600/60 px-4 py-2 text-center text-xs font-black text-rose-100 flex items-center justify-center gap-2 shadow-lg backdrop-blur-md animate-fadeIn z-20 shrink-0">
+            <span>{forfeitNotice}</span>
+          </div>
+        )}
 
         {/* Main Dynamic View Content */}
         <main id="app-main-content" className="flex-1 min-h-0 relative overflow-y-auto flex flex-col no-scrollbar">

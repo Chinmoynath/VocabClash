@@ -96,7 +96,7 @@ export const PlayModeSelectorModal: React.FC<PlayModeSelectorModalProps> = ({
                 </div>
 
                 <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                  Match with real aspirants across India. Compete for all-India LP ranking & Cadre promotions.
+                  Battle real aspirants in 1v1
                 </p>
 
                 <div className="flex items-center gap-3 mt-2.5 text-[11px] text-slate-400 font-medium">
@@ -146,12 +146,12 @@ export const PlayModeSelectorModal: React.FC<PlayModeSelectorModalProps> = ({
                 </div>
 
                 <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                  Create a custom room or enter your friend's 6-digit code to duel on identical PYQs in real-time.
+                  Create a room or join with a 6-digit code
                 </p>
 
                 <div className="flex items-center gap-3 mt-2.5 text-[11px] text-slate-400 font-medium">
                   <span className="text-sky-300 font-semibold flex items-center gap-1">
-                    <Share2 className="w-3 h-3 text-sky-400" /> Share via WhatsApp / Link
+                    <Share2 className="w-3 h-3 text-sky-400" /> Share invite link
                   </span>
                   <span>•</span>
                   <span>{currentUser ? 'Ready to Duel' : 'Google 1-Tap Sign-In'}</span>

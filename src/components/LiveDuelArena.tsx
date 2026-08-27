@@ -15,6 +15,7 @@ import {
   submitPlayerAnswerToLiveRoom, 
   sendLiveRoomEmote, 
   forceFinalizeLiveRoom,
+  forfeitLiveRoom,
   LiveDuelRoom,
   LiveRoomFinalResult 
 } from '../services/realtimeMatchmaking';
@@ -936,26 +937,29 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
               <AlertTriangle className="w-6 h-6" />
             </div>
 
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               <h3 className="text-base font-black text-slate-100">
-                Leave Active Duel?
+                Forfeit Active Duel?
               </h3>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Leaving this match will forfeit your current round progress and return you to the main arena lobby.
+              <p className="text-xs text-rose-400 font-bold">
+                You will lose -15 LP by leaving now.
               </p>
             </div>
 
             <div className="flex flex-col gap-2 pt-1">
               <button
                 onClick={() => {
-                  soundManager.playTap();
+                  soundManager.playWrong();
                   setShowLeaveConfirm(false);
+                  if (isRealMatch && roomId) {
+                    forfeitLiveRoom(roomId, myPlayerId).catch(console.warn);
+                  }
                   onLeaveMatch();
                 }}
                 className="w-full bg-rose-600 hover:bg-rose-500 active:scale-98 text-white font-black py-2.5 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-rose-950 transition-all"
               >
                 <LogOut className="w-4 h-4" />
-                <span>Yes, Forfeit & Return to Lobby</span>
+                <span>Yes, Forfeit (-15 LP)</span>
               </button>
 
               <button
