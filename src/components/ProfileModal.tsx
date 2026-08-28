@@ -20,9 +20,11 @@ import {
   ChevronRight,
   ShieldCheck,
   LifeBuoy,
-  Mail
+  Mail,
+  Scale
 } from 'lucide-react';
 import { SupportModal } from './SupportModal';
+import { LegalAccountModal } from './LegalAccountModal';
 
 export const TARGET_EXAM_GROUPS = [
   {
@@ -122,6 +124,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   const [isEditing, setIsEditing] = useState<boolean>(false);
   const [showResetConfirm, setShowResetConfirm] = useState<boolean>(false);
   const [showSupportModal, setShowSupportModal] = useState<boolean>(false);
+  const [showLegalModal, setShowLegalModal] = useState<boolean>(false);
   const [name, setName] = useState<string>(player.name);
   const [avatar, setAvatar] = useState<string>(player.avatar);
   const [targetExam, setTargetExam] = useState<string>(player.targetExam);
@@ -453,6 +456,30 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
           </button>
         )}
 
+        {/* ⚖️ Legal & Account Button */}
+        {!isEditing && (
+          <button
+            onClick={() => {
+              soundManager.playTap();
+              setShowLegalModal(true);
+            }}
+            className="w-full bg-gradient-to-r from-slate-850 to-slate-800 hover:from-slate-800 hover:to-slate-750 border border-slate-700/90 text-slate-200 font-bold p-2.5 rounded-xl text-xs flex items-center justify-between shadow-sm transition-all cursor-pointer"
+          >
+            <div className="flex items-center gap-2.5">
+              <div className="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center">
+                <Scale className="w-4 h-4" />
+              </div>
+              <div className="text-left">
+                <div className="text-slate-100 font-bold">
+                  ⚖ Legal & Account
+                </div>
+                <div className="text-[10px] text-slate-400">Privacy, Terms & Account Settings</div>
+              </div>
+            </div>
+            <ChevronRight className="w-4 h-4 text-slate-400" />
+          </button>
+        )}
+
         {/* Edit / Save Action */}
         <div className="space-y-2">
           {isEditing ? (
@@ -518,6 +545,25 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
             onClose={() => setShowSupportModal(false)}
             player={player}
             subscription={subscription}
+          />
+        )}
+
+        {/* ⚖️ Legal & Account Modal */}
+        {showLegalModal && (
+          <LegalAccountModal
+            currentUser={currentUser}
+            onClose={() => setShowLegalModal(false)}
+            onSignOut={async () => {
+              setShowLegalModal(false);
+              if (onSignOut) {
+                await onSignOut();
+              }
+            }}
+            onAccountDeleted={() => {
+              setShowLegalModal(false);
+              onClose();
+              if (onUserChange) onUserChange(null);
+            }}
           />
         )}
       </div>
