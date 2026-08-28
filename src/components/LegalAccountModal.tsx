@@ -241,27 +241,80 @@ export const LegalAccountModal: React.FC<LegalAccountModalProps> = ({
 
           {/* PRIVACY POLICY VIEW */}
           {currentView === 'privacy' && (
-            <div className="space-y-3 text-xs text-slate-300 leading-relaxed">
-              <div className="flex items-center justify-between bg-slate-950/60 p-2.5 rounded-xl border border-slate-800">
+            <div className="space-y-3.5 text-xs text-slate-300 leading-relaxed pr-1">
+              <div className="flex items-center justify-between bg-slate-950/60 p-2.5 rounded-xl border border-slate-800 shrink-0">
                 <span className="text-[11px] text-slate-400">Last updated: August 2026</span>
-                <a href="/privacy.html" target="_blank" rel="noreferrer" className="text-sky-400 text-[11px] hover:underline flex items-center gap-1">
+                <a href="/privacy.html" target="_blank" rel="noreferrer" className="text-sky-400 text-[11px] hover:underline flex items-center gap-1 font-medium">
                   Web Page <ExternalLink className="w-3 h-3" />
                 </a>
               </div>
 
-              <div>
-                <h4 className="font-bold text-white mb-0.5">1. Information Collected</h4>
-                <p className="text-slate-400">Email, display name, target exam preferences, LP rankings, match history, and Mistake Vault saved questions stored in Firebase Firestore.</p>
+              {/* Privacy Overview Banner */}
+              <div className="bg-sky-500/10 border border-sky-500/30 p-3 rounded-xl text-[11px] text-sky-200 leading-normal">
+                <strong className="text-sky-300 block mb-0.5 font-bold">Privacy Commitment</strong>
+                VocabClash is committed to transparent data stewardship. We only collect the minimal account and gameplay data necessary to maintain your competitive ranking, study statistics, and cloud synchronization.
               </div>
 
               <div>
-                <h4 className="font-bold text-white mb-0.5">2. Integrated Services</h4>
-                <p className="text-slate-400">We utilize Google Firebase (Auth & Database), Google Analytics (usage metrics), Google AdSense / AdMob (advertisements), Razorpay (secure payment gateway for VIP passes), and Google AI / Gemini (root-word explanations).</p>
+                <h4 className="font-bold text-white mb-0.5 text-xs">1. Information We Collect</h4>
+                <p className="text-slate-400">
+                  When you register or sign in, we process basic profile credentials such as your email address, display name, profile avatar, and chosen target exam category. During gameplay, we store match history, League Points (LP), win streaks, accuracy metrics, and vocabulary items saved to your Mistake Vault.
+                </p>
               </div>
 
               <div>
-                <h4 className="font-bold text-white mb-0.5">3. Account & Data Deletion</h4>
-                <p className="text-slate-400">Users can permanently delete their account and associated records at any time inside the app or at <a href="/delete-account.html" target="_blank" rel="noreferrer" className="text-sky-400 hover:underline">/delete-account</a>.</p>
+                <h4 className="font-bold text-white mb-0.5 text-xs">2. How We Use Your Data</h4>
+                <p className="text-slate-400">
+                  Your data is used strictly to power core gameplay: calculating leaderboard rankings, synchronizing progress across devices, matching opponents with similar skill ratings, providing personalized root-word review via AI Tutor, and maintaining account security.
+                </p>
+              </div>
+
+              <div>
+                <h4 className="font-bold text-white mb-0.5 text-xs">3. Third-Party Services & Integrations</h4>
+                <p className="text-slate-400">
+                  We partner with industry-standard cloud providers:
+                </p>
+                <ul className="text-slate-400 text-[11px] list-disc list-inside space-y-1 mt-1 pl-1">
+                  <li><strong>Google Firebase:</strong> Secure authentication and real-time Firestore database storage.</li>
+                  <li><strong>Google AdSense & AdMob:</strong> Serving contextual, non-intrusive advertisements to support free access.</li>
+                  <li><strong>Google AI / Gemini:</strong> Generating contextual root-word explanations and Hindi mnemonics for study assistance.</li>
+                  <li><strong>Razorpay:</strong> Encrypted payment gateway processing for optional VIP upgrades. No payment card details are stored by VocabClash.</li>
+                </ul>
+              </div>
+
+              <div>
+                <h4 className="font-bold text-white mb-0.5 text-xs">4. Data Retention & Security</h4>
+                <p className="text-slate-400">
+                  All communications between the app and backend services are encrypted via SSL/TLS. Your data is stored securely in Firebase Cloud Infrastructure and retained only as long as your account remains active.
+                </p>
+              </div>
+
+              <div>
+                <h4 className="font-bold text-white mb-0.5 text-xs">5. Account & Data Deletion Rights</h4>
+                <p className="text-slate-400">
+                  Under Google Play Data Safety guidelines, you have the full right to delete your account and all associated Firestore records. You can initiate this at any time in the app via{' '}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      soundManager.playTap();
+                      setCurrentView('delete');
+                    }}
+                    className="text-rose-400 hover:underline font-bold inline-flex items-center cursor-pointer"
+                  >
+                    Delete Account
+                  </button>{' '}
+                  or by visiting <a href="/delete-account.html" target="_blank" rel="noreferrer" className="text-sky-400 hover:underline">/delete-account</a>.
+                </p>
+              </div>
+
+              <div className="bg-slate-950/70 border border-slate-800 p-3 rounded-xl space-y-1 mt-2">
+                <h4 className="font-bold text-white text-xs">6. Contact Data Privacy Officer</h4>
+                <p className="text-slate-400 text-[11px]">
+                  For any questions or requests regarding your personal data, contact us at{' '}
+                  <a href="mailto:support@vocabclash.in" className="text-amber-400 hover:underline font-mono font-bold">
+                    support@vocabclash.in
+                  </a>.
+                </p>
               </div>
             </div>
           )}
