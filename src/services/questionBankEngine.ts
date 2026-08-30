@@ -396,6 +396,16 @@ export class QuestionBankEngine {
         existing.correctIndex = q.correctIndex;
         existing.meaning = q.meaning || existing.meaning;
         existing.hindiMeaning = q.hindiMeaning || existing.hindiMeaning;
+        existing.mnemonic = q.mnemonic || existing.mnemonic;
+        existing.exampleSentence = q.exampleSentence || existing.exampleSentence;
+        existing.rootWordInfo = q.rootWordInfo || existing.rootWordInfo;
+        existing.explanation = q.explanation || existing.explanation;
+        if (Array.isArray(q.optionDetails) && q.optionDetails.length === 4) {
+          existing.optionDetails = q.optionDetails;
+        }
+        if (q.enrichment) {
+          existing.enrichment = q.enrichment;
+        }
         existing.verified = true;
         existing.sourceType = 'verified_pyq';
         existing.memoryKey = memoryKey;
@@ -443,6 +453,11 @@ export class QuestionBankEngine {
 
   public getImportedQuestionsCount(): number {
     return this.importedPool.length;
+  }
+
+  public getImportedPool(): Question[] {
+    this.init();
+    return [...this.importedPool];
   }
 
   /**

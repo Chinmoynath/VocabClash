@@ -9,6 +9,39 @@ export interface SkippedQuestionItem {
   reason: string;
 }
 
+export interface ExtractedJsonMetadata {
+  examFamily?: string;
+  exam?: string;
+  year?: number;
+  shift?: string | null;
+  tier?: string;
+  paper?: string;
+}
+
+export function extractJsonMetadata(jsonContent: string): ExtractedJsonMetadata | null {
+  try {
+    const parsed = JSON.parse(jsonContent);
+    if (!parsed || typeof parsed !== 'object') return null;
+    const meta = parsed.metadata || (Array.isArray(parsed) ? null : parsed);
+    if (!meta || typeof meta !== 'object') return null;
+
+    const result: ExtractedJsonMetadata = {};
+    if (meta.examFamily && typeof meta.examFamily === 'string') result.examFamily = meta.examFamily.trim();
+    if (meta.exam && typeof meta.exam === 'string') result.exam = meta.exam.trim();
+    if (meta.year && !isNaN(parseInt(meta.year, 10))) result.year = parseInt(meta.year, 10);
+    if (meta.shift !== undefined) {
+      const s = String(meta.shift).trim();
+      result.shift = (s && s !== 'Not Specified' && s !== 'null' && s !== 'undefined') ? s : null;
+    }
+    if (meta.tier && typeof meta.tier === 'string') result.tier = meta.tier.trim();
+    if (meta.paper && typeof meta.paper === 'string') result.paper = meta.paper.trim();
+
+    return Object.keys(result).length > 0 ? result : null;
+  } catch {
+    return null;
+  }
+}
+
 export interface ParseJSONResult {
   batch: ImportBatch;
   eligibleQuestions: ExtractedQuestion[];
@@ -189,12 +222,27 @@ export function parseAndValidatePyqJSON(
     throw new Error('Unsupported JSON root format. Expected an array or object with questions.');
   }
 
-  const examFamily = metadataOverride?.examFamily || metaFromFile.examFamily || 'SSC';
-  const exam = metadataOverride?.exam || metaFromFile.exam || 'SSC CGL';
-  const year = metadataOverride?.year || metaFromFile.year || 2024;
-  const tier = metadataOverride?.tier || metaFromFile.tier || 'Tier 1';
-  const shift = metadataOverride?.shift || metaFromFile.shift || 'Shift 1';
-  const paper = metadataOverride?.paper || metaFromFile.paper || 'English';
+  const fallbackExamFamily = 'SSC';
+  const fallbackExam = 'SSC CGL';
+  const fallbackYear = 2024;
+  const fallbackTier = 'Tier 1';
+  const fallbackPaper = 'English';
+
+  const defaultExamFamily = metadataOverride?.examFamily || metaFromFile.examFamily || fallbackExamFamily;
+  const defaultExam = metadataOverride?.exam || metaFromFile.exam || fallbackExam;
+  const defaultYear = metadataOverride?.year || (metaFromFile.year ? parseInt(metaFromFile.year, 10) : undefined) || fallbackYear;
+  const defaultTier = metadataOverride?.tier || metaFromFile.tier || fallbackTier;
+  
+  // Shift priority: override -> file metadata -> null (do NOT invent a shift)
+  const resolveShift = (val?: any): string | null => {
+    if (val === undefined || val === null) return null;
+    const str = String(val).trim();
+    if (!str || str === 'Not Specified' || str === 'null' || str === 'undefined') return null;
+    return str;
+  };
+
+  const defaultShift = resolveShift(metadataOverride?.shift ?? metaFromFile.shift);
+  const defaultPaper = metadataOverride?.paper || metaFromFile.paper || fallbackPaper;
 
   const batchId = `batch_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
@@ -296,6 +344,54 @@ export function parseAndValidatePyqJSON(
 
     const tempId = `json_${batchId}_${index + 1}`;
 
+    // Metadata Priority: QUESTION-LEVEL VALUE -> JSON METADATA VALUE -> ADMIN FORM VALUE
+    const itemExamFamily = item.examFamily || metaFromFile.examFamily || metadataOverride?.examFamily || fallbackExamFamily;
+    const itemExam = item.exam || metaFromFile.exam || metadataOverride?.exam || fallbackExam;
+    const itemYear = (item.year !== undefined && !isNaN(parseInt(item.year, 10))) 
+      ? parseInt(item.year, 10) 
+      : ((metaFromFile.year !== undefined && !isNaN(parseInt(metaFromFile.year, 10)))
+        ? parseInt(metaFromFile.year, 10)
+        : (metadataOverride?.year || fallbackYear));
+    const itemShift = resolveShift(item.shift) ?? resolveShift(metaFromFile.shift) ?? resolveShift(metadataOverride?.shift);
+    const itemTier = item.tier || metaFromFile.tier || metadataOverride?.tier || fallbackTier;
+    const itemPaper = item.paper || metaFromFile.paper || metadataOverride?.paper || fallbackPaper;
+    const itemQuestionNumber = item.questionNumber ?? item.qNo ?? item.qNumber ?? item.questionNo ?? item.number ?? (index + 1);
+
+    // Validate and preserve incoming optionDetails if 4 valid items provided
+    let incomingOptionDetails: any = undefined;
+    if (Array.isArray(item.optionDetails) && item.optionDetails.length === 4) {
+      const isValid = item.optionDetails.every((od: any) => od && typeof od === 'object' && (od.option !== undefined || od.text !== undefined));
+      if (isValid) {
+        incomingOptionDetails = item.optionDetails.map((od: any, odIdx: number) => ({
+          option: String(od.option || od.text || finalOptions[odIdx] || '').trim(),
+          englishMeaning: String(od.englishMeaning || od.meaning || od.definition || '').trim(),
+          hindiMeaning: String(od.hindiMeaning || od.hindi || od.hindiTranslation || '').trim(),
+          explanation: od.explanation ? String(od.explanation).trim() : (od.shortExplanation ? String(od.shortExplanation).trim() : undefined),
+          shortExplanation: od.shortExplanation ? String(od.shortExplanation).trim() : (od.explanation ? String(od.explanation).trim() : undefined),
+          mnemonicHook: od.mnemonicHook ? String(od.mnemonicHook).trim() : (od.mnemonic ? String(od.mnemonic).trim() : undefined),
+          isCorrect: od.isCorrect !== undefined ? Boolean(od.isCorrect) : (odIdx === correctIdx),
+        }));
+      }
+    }
+
+    const itemMeaning = String(item.meaning || item.englishMeaning || item.definition || item.wordMeaning || '').trim();
+    const itemHindiMeaning = String(item.hindiMeaning || item.hindi || item.hindiDefinition || item.hindiTranslation || '').trim();
+    const itemMnemonic = String(item.mnemonic || item.mnemonicHook || item.memoryHook || item.trick || '').trim();
+    const itemExampleSentence = String(item.exampleSentence || item.example || item.sentence || item.usage || '').trim();
+    const itemRootWordInfo = String(item.rootWordInfo || item.root || item.etymology || item.rootEtymology || '').trim();
+    const itemExplanation = String(item.explanation || item.solution || item.examRationale || item.rationale || '').trim();
+
+    // Determine initial enrichment status if pre-populated
+    let incomingEnrichment = item.enrichment;
+    if (!incomingEnrichment && itemMeaning && itemHindiMeaning && itemMnemonic && itemExampleSentence && incomingOptionDetails) {
+      incomingEnrichment = {
+        status: 'complete',
+        version: 'json-provided',
+        enrichedAt: Date.now(),
+        provider: 'json_source'
+      };
+    }
+
     eligibleQuestions.push({
       tempId,
       question: questionPrompt,
@@ -303,14 +399,22 @@ export function parseAndValidatePyqJSON(
       options: finalOptions,
       correctIndex: correctIdx,
       category,
-      meaning: item.meaning || '',
-      hindiMeaning: item.hindiMeaning || '',
-      examFamily: item.examFamily || examFamily,
-      exam: item.exam || exam,
-      year: parseInt(item.year, 10) || year,
-      tier: item.tier || tier,
-      shift: item.shift || shift,
-      paper: item.paper || paper,
+      instruction: item.instruction ? String(item.instruction).trim() : undefined,
+      meaning: itemMeaning,
+      hindiMeaning: itemHindiMeaning,
+      mnemonic: itemMnemonic,
+      exampleSentence: itemExampleSentence,
+      rootWordInfo: itemRootWordInfo,
+      explanation: itemExplanation,
+      optionDetails: incomingOptionDetails,
+      enrichment: incomingEnrichment,
+      examFamily: itemExamFamily,
+      exam: itemExam,
+      year: itemYear,
+      tier: itemTier,
+      shift: itemShift,
+      questionNumber: itemQuestionNumber,
+      paper: itemPaper,
       reviewStatus,
       duplicateConfidence,
       duplicateOfId,
@@ -324,12 +428,12 @@ export function parseAndValidatePyqJSON(
   const batch: ImportBatch = {
     batchId,
     sourceFileName: fileName,
-    examFamily,
-    exam,
-    year,
-    tier,
-    shift,
-    paper,
+    examFamily: defaultExamFamily,
+    exam: defaultExam,
+    year: defaultYear,
+    tier: defaultTier,
+    shift: defaultShift || undefined,
+    paper: defaultPaper,
     dateImported: Date.now(),
     totalDetected: eligibleQuestions.length,
     approvedCount,

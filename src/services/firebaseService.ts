@@ -66,10 +66,37 @@ export enum OperationType {
   WRITE = 'write',
 }
 
+// Circuit breaker for Firestore quota limit exhaustion to prevent write queue flooding
+let quotaExhaustedUntil: number = 0;
+let hasLoggedQuotaWarning = false;
+
+export function isFirestoreQuotaExhausted(): boolean {
+  if (quotaExhaustedUntil && Date.now() < quotaExhaustedUntil) {
+    return true;
+  }
+  if (quotaExhaustedUntil && Date.now() >= quotaExhaustedUntil) {
+    // Reset circuit breaker after cooldown
+    quotaExhaustedUntil = 0;
+    hasLoggedQuotaWarning = false;
+  }
+  return false;
+}
+
+export function markFirestoreQuotaExhausted(durationMs: number = 30 * 60 * 1000): void {
+  quotaExhaustedUntil = Date.now() + durationMs;
+  if (!hasLoggedQuotaWarning) {
+    console.warn(
+      `[Firestore Quota Protection] Free tier write quota reached. Circuit breaker engaged for ${Math.round(durationMs / 60000)} mins. State is securely persisted in local storage.`
+    );
+    hasLoggedQuotaWarning = true;
+  }
+}
+
 export interface FirestoreErrorInfo {
   error: string;
   operationType: OperationType;
   path: string | null;
+  isQuotaExhausted?: boolean;
   authInfo: {
     userId?: string | null;
     email?: string | null;
@@ -84,8 +111,20 @@ export interface FirestoreErrorInfo {
 }
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errMsg = error instanceof Error ? error.message : String(error);
+  const isQuota = 
+    errMsg.includes('resource-exhausted') || 
+    errMsg.includes('Quota limit exceeded') || 
+    errMsg.includes('Quota exceeded') ||
+    errMsg.includes('Free daily write units');
+
+  if (isQuota) {
+    markFirestoreQuotaExhausted();
+  }
+
   const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+    error: errMsg,
+    isQuotaExhausted: isQuota,
     authInfo: {
       userId: auth.currentUser?.uid,
       email: auth.currentUser?.email,
@@ -100,7 +139,10 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     operationType,
     path
   };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
+
+  if (!isQuota) {
+    console.error('Firestore Error: ', JSON.stringify(errInfo));
+  }
   return errInfo;
 }
 
@@ -376,6 +418,18 @@ export async function saveUserDataToFirestore(
     
     const cleanPayload = sanitizeForFirestore(rawPayload);
     
+    // Always keep a clean client-side snapshot backup
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(`vocabclash_cloud_backup_${uid}`, JSON.stringify(cleanPayload));
+      } catch { /* storage full */ }
+    }
+
+    // Check if Firestore quota is currently exhausted
+    if (isFirestoreQuotaExhausted()) {
+      return; // Local backup is safe, avoid triggering Firestore SDK retry loops
+    }
+
     // Check if substantial payload (ignoring exact updatedAt timestamp) has actually changed
     const comparablePayload = { ...cleanPayload, updatedAt: 0 };
     const serialized = JSON.stringify(comparablePayload);
@@ -400,18 +454,47 @@ export async function saveUserDataToFirestore(
   }
 }
 
-// Fetch user state from Firestore
+// Fetch user state from Firestore (with local cloud backup fallback)
 export async function fetchUserDataFromFirestore(uid: string): Promise<UserCloudData | null> {
   const path = `users/${uid}`;
   try {
+    if (isFirestoreQuotaExhausted() && typeof window !== 'undefined') {
+      const cached = localStorage.getItem(`vocabclash_cloud_backup_${uid}`);
+      if (cached) {
+        return JSON.parse(cached) as UserCloudData;
+      }
+    }
+
     const userDocRef = doc(db, 'users', uid);
     const docSnap = await getDoc(userDocRef);
     if (docSnap.exists()) {
-      return docSnap.data() as UserCloudData;
+      const data = docSnap.data() as UserCloudData;
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem(`vocabclash_cloud_backup_${uid}`, JSON.stringify(data));
+        } catch { /* ignore */ }
+      }
+      return data;
+    }
+
+    // Check if local backup exists
+    if (typeof window !== 'undefined') {
+      const cached = localStorage.getItem(`vocabclash_cloud_backup_${uid}`);
+      if (cached) {
+        return JSON.parse(cached) as UserCloudData;
+      }
     }
     return null;
   } catch (err) {
     handleFirestoreError(err, OperationType.GET, path);
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem(`vocabclash_cloud_backup_${uid}`);
+        if (cached) {
+          return JSON.parse(cached) as UserCloudData;
+        }
+      } catch { /* ignore */ }
+    }
     return null;
   }
 }

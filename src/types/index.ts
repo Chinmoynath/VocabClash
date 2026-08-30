@@ -15,6 +15,16 @@ export type Difficulty = 'easy' | 'medium' | 'hard';
 
 export type ImportanceLevel = 'high' | 'very-high' | 'ultra-high';
 
+export interface QuestionOptionDetail {
+  option: string;
+  englishMeaning: string;
+  hindiMeaning: string;
+  explanation?: string;
+  shortExplanation?: string;
+  mnemonicHook?: string;
+  isCorrect?: boolean;
+}
+
 export interface Question {
   id: string;
   category: QuestionCategory;
@@ -27,6 +37,17 @@ export interface Question {
   exampleSentence: string;
   mnemonic: string; // Memory trick / Hinglish hook
   rootWordInfo?: string; // Etymology / Prefix / Suffix breakdown
+  explanation?: string; // Concise rationale for why the correct option fits the category
+  optionDetails?: QuestionOptionDetail[]; // Rich learning details for each of the 4 options
+  enrichment?: {
+    status: 'complete' | 'partial' | 'failed';
+    version: string;
+    enrichedAt?: number;
+    provider?: string;
+  };
+  enrichmentWarning?: string;
+  question?: string; // Full question prompt if applicable
+  tier?: string;
   examHistory: string[]; // e.g. ["SSC CGL 2023 Tier-1", "SSC CPO 2022", "RRB NTPC 2021"]
   repeatCount: number; // e.g. 14
   importanceLevel: ImportanceLevel;
@@ -37,6 +58,11 @@ export interface Question {
   memoryKey?: string;
   sourceType?: 'verified_pyq' | 'generated_practice';
   reviewReason?: 'fresh' | 'due_review' | 'mistake_review' | 'saved_review' | 'pool_exhausted_review';
+  examFamily?: string;
+  exam?: string;
+  year?: number;
+  shift?: string | null;
+  questionNumber?: number | string;
 }
 
 export type RankTier = 

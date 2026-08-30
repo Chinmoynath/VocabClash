@@ -1,6 +1,7 @@
 import { Plugin } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
+import { processPyqEnrichmentBatch } from './pyqEnrichmentLogic';
 
 dotenv.config();
 
@@ -166,6 +167,35 @@ Include accurate Hindi meanings, realistic 4 options, exact correct answer index
               res.statusCode = 200;
               res.setHeader('Content-Type', 'application/json');
               res.end(JSON.stringify({ questions: JSON.parse(response.text || '[]') }));
+              return;
+            }
+
+            if (req.url === '/api/gemini/enrich-pyq-batch' || req.url === '/api/gemini/enrich-pyq') {
+              let questionsList: any[] = [];
+              if (Array.isArray(body.questions)) {
+                questionsList = body.questions;
+              } else if (body.question && typeof body.question === 'object') {
+                questionsList = [body.question];
+              } else if (body.wordOrPhrase) {
+                questionsList = [body];
+              }
+
+              if (questionsList.length === 0) {
+                res.statusCode = 400;
+                res.setHeader('Content-Type', 'application/json');
+                res.end(JSON.stringify({ error: 'Array of questions is required' }));
+                return;
+              }
+
+              const enrichedResults = await processPyqEnrichmentBatch(questionsList, ai);
+
+              res.statusCode = 200;
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({
+                success: true,
+                enrichedQuestions: enrichedResults,
+                enrichedQuestion: enrichedResults[0] || null,
+              }));
               return;
             }
 

@@ -6,6 +6,7 @@ import Razorpay from 'razorpay';
 import nodemailer from 'nodemailer';
 import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
+import { processPyqEnrichmentBatch } from './server/pyqEnrichmentLogic';
 
 dotenv.config();
 
@@ -704,6 +705,40 @@ app.post('/api/lobby/leave', (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+// Gemini AI Batch Educational Enrichment Endpoint for PYQs (supports /enrich-pyq and /enrich-pyq-batch)
+const handleEnrichmentRequest = async (req: express.Request, res: express.Response) => {
+  try {
+    let questionsList: any[] = [];
+    if (Array.isArray(req.body.questions)) {
+      questionsList = req.body.questions;
+    } else if (req.body.question && typeof req.body.question === 'object') {
+      questionsList = [req.body.question];
+    } else if (req.body.wordOrPhrase) {
+      questionsList = [req.body];
+    }
+
+    if (questionsList.length === 0) {
+      return res.status(400).json({ error: 'Array of questions or question object is required' });
+    }
+
+    const ai = getGenAI();
+    const enrichedList = await processPyqEnrichmentBatch(questionsList, ai);
+
+    return res.json({
+      success: true,
+      enrichedQuestions: enrichedList,
+      // For single question requests:
+      enrichedQuestion: enrichedList[0] || null,
+    });
+  } catch (error: any) {
+    console.error('Error in PYQ enrichment handler:', error);
+    res.status(500).json({ success: false, error: error.message || 'Enrichment failed' });
+  }
+};
+
+app.post('/api/gemini/enrich-pyq', handleEnrichmentRequest);
+app.post('/api/gemini/enrich-pyq-batch', handleEnrichmentRequest);
 
 // Gemini AI Tutor Vocabulary Explanation Endpoint
 app.post('/api/gemini/explain', async (req, res) => {

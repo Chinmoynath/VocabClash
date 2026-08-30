@@ -1034,15 +1034,15 @@ export function getOptionBreakdown(
       if (category === 'idioms') {
         return {
           option: opt,
-          hindiMeaning: `मुहावरे का सही भाव: ${cleanOpt}`,
-          englishMeaning: `Figurative definition: "${cleanOpt}"`,
+          hindiMeaning: `मुहावरे का सही भावार्थ: "${cleanOpt}"`,
+          englishMeaning: `Accurate figurative definition: "${cleanOpt}"`,
           isCorrect: true,
         };
       }
       return {
         option: opt,
-        hindiMeaning: questionHindiMeaning || `शब्दार्थ: "${cleanOpt}" का सही अर्थ`,
-        englishMeaning: questionMeaning || `Definition of "${cleanOpt}"`,
+        hindiMeaning: questionHindiMeaning || `"${cleanOpt}" का यथार्थ शब्दार्थ`,
+        englishMeaning: questionMeaning || `Accurate definition corresponding to "${cleanOpt}"`,
         isCorrect: true,
       };
     }
@@ -1051,16 +1051,44 @@ export function getOptionBreakdown(
     if (category === 'idioms') {
       return {
         option: opt,
-        hindiMeaning: `शाब्दिक अर्थ: "${cleanOpt}"`,
-        englishMeaning: `Literal phrase: "${cleanOpt}"`,
+        hindiMeaning: `शाब्दिक वाक्यांश: "${cleanOpt}"`,
+        englishMeaning: `Literal context: "${cleanOpt}" (differs from the figurative sense)`,
         isCorrect: false,
       };
     }
 
+    // Morphological & prefix derivation for distractors
+    const optLower = cleanOpt.toLowerCase();
+    let derivedEnglish = `Distinct vocabulary concept denoting "${cleanOpt}", serving as an exam distractor.`;
+    let derivedHindi = `"${cleanOpt}" का स्वतंत्र अर्थ`;
+
+    if (optLower.startsWith('pan')) {
+      derivedEnglish = `Relates to all-encompassing, public, or universal scope (Greek pan-).`;
+      derivedHindi = `सार्वजनिक / समग्र या सर्वव्यापी भाव`;
+    } else if (optLower.startsWith('castig') || optLower.startsWith('chast')) {
+      derivedEnglish = `To criticize, discipline, or reprimand severely (Latin castigare).`;
+      derivedHindi = `कठोर आलोचना / फटकार या दंड`;
+    } else if (optLower.startsWith('tribut')) {
+      derivedEnglish = `An act, statement, or gift that is intended to show gratitude or respect.`;
+      derivedHindi = `श्रद्धांजलि / भेंट / सम्मान`;
+    } else if (optLower.startsWith('praise') || optLower.startsWith('laud') || optLower.startsWith('appl')) {
+      derivedEnglish = `Expression of high approval, commendation, or admiration.`;
+      derivedHindi = `प्रशंसा / स्तुति / गुणगान`;
+    } else if (optLower.startsWith('critic') || optLower.startsWith('censor') || optLower.startsWith('condemn')) {
+      derivedEnglish = `Expression of strong disapproval, fault-finding, or censure.`;
+      derivedHindi = `निंदा / आलोचना / दोषारोपण`;
+    } else if (optLower.startsWith('bene')) {
+      derivedEnglish = `Denotes favorable, kind, or well-intentioned nature (Latin bene-).`;
+      derivedHindi = `कल्याणकारी / हितकारी भाव`;
+    } else if (optLower.startsWith('mal')) {
+      derivedEnglish = `Denotes harmful, defective, or unfavorable nature (Latin mal-).`;
+      derivedHindi = `हानिकारक / दुर्भावनापूर्ण भाव`;
+    }
+
     return {
       option: opt,
-      hindiMeaning: `अर्थ: "${cleanOpt}"`,
-      englishMeaning: `Vocabulary meaning of "${cleanOpt}"`,
+      hindiMeaning: derivedHindi,
+      englishMeaning: derivedEnglish,
       isCorrect: false,
     };
   });

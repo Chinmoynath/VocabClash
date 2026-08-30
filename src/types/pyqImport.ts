@@ -1,4 +1,4 @@
-import { Question, QuestionCategory } from './index';
+import { Question, QuestionCategory, QuestionOptionDetail } from './index';
 
 export type ReviewStatus = 'approved' | 'needs_review' | 'answer_required' | 'duplicate' | 'rejected';
 
@@ -9,19 +9,33 @@ export interface ExtractedQuestion {
   options: string[];
   correctIndex: number | null; // 0-3 or null if answer missing
   category: QuestionCategory;
+  instruction?: string;
   meaning?: string;
   hindiMeaning?: string;
+  mnemonic?: string;
+  exampleSentence?: string;
+  rootWordInfo?: string;
+  explanation?: string;
+  optionDetails?: QuestionOptionDetail[];
+  enrichment?: {
+    status: 'complete' | 'partial' | 'failed';
+    version: string;
+    enrichedAt?: number;
+    provider?: string;
+  };
+  enrichmentWarning?: string;
   examFamily: string; // e.g. "SSC", "Banking", "Defence", "Railways"
   exam: string;       // e.g. "SSC CGL", "IBPS PO", "CDS"
   year: number;
   tier?: string;      // e.g. "Tier 1", "Prelims", "Shift 2"
-  shift?: string;
+  shift?: string | null;
+  questionNumber?: number | string;
   paper?: string;
   reviewStatus: ReviewStatus;
   duplicateConfidence?: 'exact' | 'high' | 'none';
   duplicateOfId?: string;
   duplicateOfQuestion?: string;
-  sourceType: 'pdf_import' | 'manual_text' | 'json_import';
+  sourceType: 'pdf_import' | 'manual_text' | 'json_import' | 'verified_pyq' | 'generated_practice';
   sourceFileName?: string;
   pageNumber?: number;
   rawText?: string;
