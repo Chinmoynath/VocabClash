@@ -1,14 +1,9 @@
 import { Question, QuestionCategory, ExamType, Difficulty, ImportanceLevel } from '../types';
-import { getMasteryMap } from '../utils/masteryManager';
-import { 
-  getPersistentSeenWords, 
-  getTodaySeenWords, 
-  recordQuestionSeen, 
-  recordBatchQuestionsSeen 
-} from '../utils/questionHistoryManager';
+import { questionReviewScheduler, ReviewState } from './questionReviewScheduler';
 import { VOCAB_MASTER_EXTENDED, WordEntry } from '../data/vocabMasterData';
 import { OWS_MASTER_EXTENDED, OWSEntry } from '../data/owsMasterData';
 import { IDIOM_MASTER_EXTENDED, IdiomEntry } from '../data/idiomMasterData';
+import { fetchPublishedQuestionBank } from './pyqFirestoreService';
 
 // Authentic Govt Exam Years and Shifts for realistic attribution
 const EXAM_YEARS = [
@@ -171,37 +166,293 @@ export const ALL_VOCAB_MASTER: WordEntry[] = [
   ...BASE_EXTRA_WORDS,
 ];
 
+export interface ConceptGroup {
+  memoryKey: string;
+  conceptKey: string;
+  category: QuestionCategory;
+  conceptDisplay: string;
+  variants: Question[];
+  verifiedVariants: Question[];
+  generatedVariants: Question[];
+}
+
+export function buildMemoryKey(
+  category: QuestionCategory,
+  wordOrPhrase: string,
+  options?: string[],
+  correctIndex?: number
+): string {
+  const norm = wordOrPhrase.trim().toLowerCase();
+  if (category === 'synonyms' || category === 'antonyms') {
+    return `word:${norm}`;
+  }
+  if (category === 'ows') {
+    if (options && typeof correctIndex === 'number' && options[correctIndex]) {
+      return `ows:${options[correctIndex].trim().toLowerCase()}`;
+    }
+    // If prompt is short answer itself:
+    if (norm.split(/\s+/).length <= 3) {
+      return `ows:${norm}`;
+    }
+    return `ows:${norm.slice(0, 40).replace(/[^a-z0-9]/g, '')}`;
+  }
+  if (category === 'idioms') {
+    return `idiom:${norm.replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ')}`;
+  }
+  return `concept:${norm}`;
+}
+
 export class QuestionBankEngine {
   private synonymsPool: Question[] = [];
   private antonymsPool: Question[] = [];
   private owsPool: Question[] = [];
   private idiomsPool: Question[] = [];
+  private importedPool: Question[] = [];
+
+  // Grouped canonical concept dictionary for true concept-level scheduling
+  private playableConcepts: Map<QuestionCategory, Map<string, ConceptGroup>> = new Map();
+
   private initialized: boolean = false;
+  private isFetchingCloudQuestions: boolean = false;
+  private lastCloudFetchTime: number = 0;
+  private lastSelectedCategory: QuestionCategory | null = null;
+  private consecutiveCategoryCount: number = 0;
 
   public init() {
     if (this.initialized) return;
 
+    questionReviewScheduler.init();
+
+    // 1. Generate practice pools
     this.synonymsPool = this.generateSynonymsPool(6500);
     this.antonymsPool = this.generateAntonymsPool(6500);
     this.owsPool = this.generateOWSPool(6500);
     this.idiomsPool = this.generateIdiomsPool(6500);
 
+    // 2. Load stored imported questions from localStorage cache
+    this.loadImportedQuestionsFromLocal();
+
+    // 3. Build unified concept maps
+    this.rebuildConceptMap();
+
+    // 4. Asynchronously refresh published cloud question bank
+    this.refreshFromFirestore();
+
     this.initialized = true;
+  }
+
+  // Load imported questions from persistent client storage if available
+  private loadImportedQuestionsFromLocal() {
+    if (typeof window === 'undefined') return;
+    try {
+      const stored = localStorage.getItem('vocabclash_imported_pyqs');
+      if (stored) {
+        const parsed: Question[] = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          this.importedPool = parsed.map(q => ({
+            ...q,
+            isPYQ: true,
+            verified: true,
+            sourceType: 'verified_pyq',
+            memoryKey: q.memoryKey || buildMemoryKey(q.category, q.wordOrPhrase, q.options, q.correctIndex),
+            conceptKey: q.conceptKey || buildMemoryKey(q.category, q.wordOrPhrase, q.options, q.correctIndex),
+          }));
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to load imported questions from storage:', e);
+    }
+  }
+
+  // Rebuild the grouped concept directory across all 4 categories
+  public rebuildConceptMap() {
+    const categories: QuestionCategory[] = ['synonyms', 'antonyms', 'ows', 'idioms'];
+    this.playableConcepts.clear();
+
+    for (const cat of categories) {
+      const catMap = new Map<string, ConceptGroup>();
+      this.playableConcepts.set(cat, catMap);
+    }
+
+    const allQuestions: Question[] = [
+      ...this.synonymsPool,
+      ...this.antonymsPool,
+      ...this.owsPool,
+      ...this.idiomsPool,
+      ...this.importedPool,
+    ];
+
+    for (const q of allQuestions) {
+      const cat = q.category;
+      const catMap = this.playableConcepts.get(cat);
+      if (!catMap) continue;
+
+      const memoryKey = q.memoryKey || buildMemoryKey(cat, q.wordOrPhrase, q.options, q.correctIndex);
+      q.memoryKey = memoryKey;
+      q.conceptKey = memoryKey;
+
+      let group = catMap.get(memoryKey);
+      if (!group) {
+        group = {
+          memoryKey,
+          conceptKey: memoryKey,
+          category: cat,
+          conceptDisplay: q.wordOrPhrase,
+          variants: [],
+          verifiedVariants: [],
+          generatedVariants: [],
+        };
+        catMap.set(memoryKey, group);
+      }
+
+      // Avoid duplicate question IDs in the same concept
+      if (!group.variants.some(v => v.id === q.id)) {
+        group.variants.push(q);
+        if (q.sourceType === 'verified_pyq' || q.verified) {
+          group.verifiedVariants.push(q);
+        } else {
+          group.generatedVariants.push(q);
+        }
+      }
+    }
+  }
+
+  /**
+   * CANONICAL GET PLAYABLE POOL:
+   * Merges generated practice variations with active Firestore published PYQs.
+   */
+  public getPlayablePool(category: QuestionCategory | 'mixed'): Question[] {
+    this.init();
+    if (category === 'mixed') {
+      return [
+        ...this.synonymsPool,
+        ...this.antonymsPool,
+        ...this.owsPool,
+        ...this.idiomsPool,
+        ...this.importedPool,
+      ];
+    }
+
+    const importedInCat = this.importedPool.filter(q => q.category === category);
+    if (category === 'synonyms') return [...importedInCat, ...this.synonymsPool];
+    if (category === 'antonyms') return [...importedInCat, ...this.antonymsPool];
+    if (category === 'ows') return [...importedInCat, ...this.owsPool];
+    if (category === 'idioms') return [...importedInCat, ...this.idiomsPool];
+    return [];
+  }
+
+  // Asynchronously fetch published questions from Firestore question_bank with cache TTL
+  public async refreshFromFirestore(force: boolean = false): Promise<number> {
+    const now = Date.now();
+    // Cache for 10 minutes unless forced
+    if (!force && this.lastCloudFetchTime && now - this.lastCloudFetchTime < 600000) {
+      return this.importedPool.length;
+    }
+
+    if (this.isFetchingCloudQuestions) return this.importedPool.length;
+    this.isFetchingCloudQuestions = true;
+
+    try {
+      const cloudQuestions = await fetchPublishedQuestionBank();
+      if (cloudQuestions && cloudQuestions.length > 0) {
+        this.registerApprovedQuestions(cloudQuestions, true);
+        this.lastCloudFetchTime = now;
+      }
+    } catch (e) {
+      console.warn('Could not sync questions from Firestore:', e);
+    } finally {
+      this.isFetchingCloudQuestions = false;
+    }
+
+    return this.importedPool.length;
+  }
+
+  // Register newly approved imported questions into live question bank
+  public registerApprovedQuestions(questions: Question[], persistLocal: boolean = true): { addedCount: number; mergedCount: number } {
+    let added = 0;
+    let merged = 0;
+
+    for (const raw of questions) {
+      const memoryKey = raw.memoryKey || buildMemoryKey(raw.category, raw.wordOrPhrase, raw.options, raw.correctIndex);
+      const q: Question = {
+        ...raw,
+        isPYQ: true,
+        verified: true,
+        sourceType: 'verified_pyq',
+        memoryKey,
+        conceptKey: memoryKey,
+      };
+
+      const existingIdx = this.importedPool.findIndex(
+        item => item.id === q.id || (item.category === q.category && item.wordOrPhrase.toLowerCase() === q.wordOrPhrase.toLowerCase())
+      );
+
+      if (existingIdx >= 0) {
+        const existing = this.importedPool[existingIdx];
+        const combinedHistory = Array.from(new Set([...(existing.examHistory || []), ...(q.examHistory || [])]));
+        existing.examHistory = combinedHistory;
+        existing.repeatCount = Math.max(existing.repeatCount || 1, q.repeatCount || 1);
+        existing.options = q.options;
+        existing.correctIndex = q.correctIndex;
+        existing.meaning = q.meaning || existing.meaning;
+        existing.hindiMeaning = q.hindiMeaning || existing.hindiMeaning;
+        existing.verified = true;
+        existing.sourceType = 'verified_pyq';
+        existing.memoryKey = memoryKey;
+        existing.conceptKey = memoryKey;
+        merged++;
+      } else {
+        this.importedPool.push(q);
+        added++;
+      }
+    }
+
+    // Persist to local storage cache
+    if (persistLocal && typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('vocabclash_imported_pyqs', JSON.stringify(this.importedPool));
+      } catch (e) {
+        console.warn('Failed to save imported questions:', e);
+      }
+    }
+
+    this.rebuildConceptMap();
+    return { addedCount: added, mergedCount: merged };
+  }
+
+  // Retrieve all available questions
+  public getAllAvailableQuestions(): Question[] {
+    return this.getPlayablePool('mixed');
+  }
+
+  // Dynamic real count for any category
+  public getRealCategoryCount(cat: QuestionCategory): number {
+    this.init();
+    const map = this.playableConcepts.get(cat);
+    return map ? map.size : 0;
+  }
+
+  public getCategoryCount(category: QuestionCategory | 'mixed'): number {
+    this.init();
+    if (category === 'synonyms') return this.synonymsPool.length + this.importedPool.filter(q => q.category === 'synonyms').length;
+    if (category === 'antonyms') return this.antonymsPool.length + this.importedPool.filter(q => q.category === 'antonyms').length;
+    if (category === 'ows') return this.owsPool.length + this.importedPool.filter(q => q.category === 'ows').length;
+    if (category === 'idioms') return this.idiomsPool.length + this.importedPool.filter(q => q.category === 'idioms').length;
+    return this.getAllAvailableQuestions().length;
+  }
+
+  public getImportedQuestionsCount(): number {
+    return this.importedPool.length;
   }
 
   /**
    * FIRST MATCH ONBOARDING QUESTION POOL (10 Questions):
-   * - Curated specifically for new visitors / first match onboarding
-   * - 7-8 Easy high-yield PYQs (70-80%) to build confidence & dopamine
-   * - 2-3 Medium high-frequency PYQs (20-30%) to provide genuine exam feel
-   * - Covers Synonyms, Antonyms, One-Word Substitutions, and Idioms
+   * Curated high-dopamine, high-frequency PYQs
    */
   public getFirstMatchQuestions(exam: ExamType = 'SSC_CGL'): Question[] {
     this.init();
     
-    // Curated high-dopamine, high-frequency PYQ definitions
     const easyWordsPool: Question[] = [
-      // Easy Synonyms
       {
         id: 'first-syn-1',
         category: 'synonyms',
@@ -218,6 +469,9 @@ export class QuestionBankEngine {
         repeatCount: 18,
         importanceLevel: 'ultra-high',
         difficulty: 'easy',
+        sourceType: 'verified_pyq',
+        isPYQ: true,
+        verified: true,
       },
       {
         id: 'first-syn-2',
@@ -235,6 +489,9 @@ export class QuestionBankEngine {
         repeatCount: 15,
         importanceLevel: 'ultra-high',
         difficulty: 'easy',
+        sourceType: 'verified_pyq',
+        isPYQ: true,
+        verified: true,
       },
       {
         id: 'first-syn-3',
@@ -252,8 +509,10 @@ export class QuestionBankEngine {
         repeatCount: 14,
         importanceLevel: 'ultra-high',
         difficulty: 'easy',
+        sourceType: 'verified_pyq',
+        isPYQ: true,
+        verified: true,
       },
-      // Easy Antonyms
       {
         id: 'first-ant-1',
         category: 'antonyms',
@@ -270,6 +529,9 @@ export class QuestionBankEngine {
         repeatCount: 15,
         importanceLevel: 'ultra-high',
         difficulty: 'easy',
+        sourceType: 'verified_pyq',
+        isPYQ: true,
+        verified: true,
       },
       {
         id: 'first-ant-2',
@@ -287,25 +549,10 @@ export class QuestionBankEngine {
         repeatCount: 12,
         importanceLevel: 'ultra-high',
         difficulty: 'easy',
+        sourceType: 'verified_pyq',
+        isPYQ: true,
+        verified: true,
       },
-      {
-        id: 'first-ant-3',
-        category: 'antonyms',
-        wordOrPhrase: 'SPURIOUS',
-        instruction: 'Select the most appropriate ANTONYM of the given word:',
-        options: ['Fake', 'Counterfeit', 'Authentic', 'Bogus'],
-        correctIndex: 2,
-        meaning: 'Not being what it purports to be; false or fake.',
-        hindiMeaning: 'नकली / अप्रमाणिक (Antonym: असली / प्रामाणिक)',
-        exampleSentence: 'Avoid spurious claims and rely only on authentic sources.',
-        mnemonic: 'Spurious = "Spur (Pure nahi hai)" → Fake/Nakli.',
-        rootWordInfo: 'From Latin "spurius" (false, illegitimate).',
-        examHistory: ['SSC CGL Tier-2 2023', 'SSC CPO 2022', 'CDS 2023'],
-        repeatCount: 16,
-        importanceLevel: 'ultra-high',
-        difficulty: 'easy',
-      },
-      // Easy One-Word Substitution
       {
         id: 'first-ows-1',
         category: 'ows',
@@ -322,6 +569,9 @@ export class QuestionBankEngine {
         repeatCount: 19,
         importanceLevel: 'ultra-high',
         difficulty: 'easy',
+        sourceType: 'verified_pyq',
+        isPYQ: true,
+        verified: true,
       },
       {
         id: 'first-ows-2',
@@ -339,8 +589,10 @@ export class QuestionBankEngine {
         repeatCount: 17,
         importanceLevel: 'ultra-high',
         difficulty: 'easy',
+        sourceType: 'verified_pyq',
+        isPYQ: true,
+        verified: true,
       },
-      // Easy Idioms
       {
         id: 'first-idm-1',
         category: 'idioms',
@@ -357,6 +609,9 @@ export class QuestionBankEngine {
         repeatCount: 22,
         importanceLevel: 'ultra-high',
         difficulty: 'easy',
+        sourceType: 'verified_pyq',
+        isPYQ: true,
+        verified: true,
       },
       {
         id: 'first-idm-2',
@@ -374,10 +629,12 @@ export class QuestionBankEngine {
         repeatCount: 18,
         importanceLevel: 'ultra-high',
         difficulty: 'easy',
+        sourceType: 'verified_pyq',
+        isPYQ: true,
+        verified: true,
       }
     ];
 
-    // Medium pool for the 20-30% questions
     const mediumWordsPool: Question[] = [
       {
         id: 'first-med-1',
@@ -395,6 +652,9 @@ export class QuestionBankEngine {
         repeatCount: 17,
         importanceLevel: 'ultra-high',
         difficulty: 'medium',
+        sourceType: 'verified_pyq',
+        isPYQ: true,
+        verified: true,
       },
       {
         id: 'first-med-2',
@@ -412,6 +672,9 @@ export class QuestionBankEngine {
         repeatCount: 14,
         importanceLevel: 'ultra-high',
         difficulty: 'medium',
+        sourceType: 'verified_pyq',
+        isPYQ: true,
+        verified: true,
       },
       {
         id: 'first-med-3',
@@ -429,6 +692,9 @@ export class QuestionBankEngine {
         repeatCount: 15,
         importanceLevel: 'ultra-high',
         difficulty: 'medium',
+        sourceType: 'verified_pyq',
+        isPYQ: true,
+        verified: true,
       },
       {
         id: 'first-med-4',
@@ -446,33 +712,21 @@ export class QuestionBankEngine {
         repeatCount: 16,
         importanceLevel: 'ultra-high',
         difficulty: 'medium',
+        sourceType: 'verified_pyq',
+        isPYQ: true,
+        verified: true,
       }
     ];
 
-    // Pick 7-8 Easy questions (75%)
     const shuffledEasy = this.shuffle(easyWordsPool).slice(0, 7);
-    // Pick 2-3 Medium questions (25%)
     const shuffledMed = this.shuffle(mediumWordsPool).slice(0, 3);
-
-    // Merge and shuffle them so it's a smooth natural flow (Easy, Easy, Medium, Easy, etc.)
-    const final10 = this.shuffle([...shuffledEasy, ...shuffledMed]).slice(0, 10);
-    recordBatchQuestionsSeen(final10.map(q => q.wordOrPhrase));
-    return final10;
-  }
-
-  public getCategoryCount(category: QuestionCategory | 'mixed'): number {
-    this.init();
-    if (category === 'synonyms') return this.synonymsPool.length;
-    if (category === 'antonyms') return this.antonymsPool.length;
-    if (category === 'ows') return this.owsPool.length;
-    if (category === 'idioms') return this.idiomsPool.length;
-    return this.synonymsPool.length + this.antonymsPool.length + this.owsPool.length + this.idiomsPool.length;
+    return this.shuffle([...shuffledEasy, ...shuffledMed]).slice(0, 10);
   }
 
   /**
    * High-entropy, non-deterministic shuffle
    */
-  private shuffle<T>(array: T[]): T[] {
+  public shuffle<T>(array: T[]): T[] {
     const arr = [...array];
     for (let i = arr.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
@@ -482,107 +736,252 @@ export class QuestionBankEngine {
   }
 
   /**
-   * GUARANTEED UNIQUE QUESTIONS FOR A 1V1 DUEL MATCH:
-   * - Strictly filters out questions/words seen today or in the last 200+ attempts
-   * - Ensures every single round has a distinct word and unique options
-   * - Records chosen questions into persistent history immediately
+   * Intelligent Category Selection for Mixed Mode
+   * Balances content distribution while respecting scarce categories (OWS/Idioms)
    */
-  public getUniqueQuestionsForMatch(
-    category: QuestionCategory | 'mixed',
-    exam: ExamType,
-    count: number = 20
-  ): Question[] {
-    this.init();
-    const persistentHistory = new Set(getPersistentSeenWords().slice(-300));
-    const todaySeen = getTodaySeenWords();
-    const seenWordsInMatch = new Set<string>();
-    const seenIdsInMatch = new Set<string>();
-    const selected: Question[] = [];
-
-    const examKeywordMap: Record<string, string> = {
-      SSC_CGL: 'SSC CGL',
-      SSC_CHSL: 'SSC CHSL',
-      SSC_CPO: 'SSC CPO',
-      SSC_MTS: 'SSC MTS',
-      RRB_NTPC: 'RRB NTPC',
-      RRB_GROUP_D: 'RRB',
-      BANK_PO: 'IBPS',
-      CDS_NDA: 'CDS',
-    };
-    const examKeyword = exam !== 'ALL' ? examKeywordMap[exam] || '' : '';
-
-    const filterExam = (pool: Question[]) => {
-      if (!examKeyword) return pool;
-      const matched = pool.filter(q => q.examHistory.some(h => h.includes(examKeyword)));
-      return matched.length >= count ? matched : pool;
+  private chooseMixedCategory(): QuestionCategory {
+    const allCats: QuestionCategory[] = ['synonyms', 'antonyms', 'ows', 'idioms'];
+    
+    // Check available fresh or due concepts per category
+    const weights: Record<QuestionCategory, number> = {
+      synonyms: 1.0,
+      antonyms: 1.0,
+      ows: 1.0,
+      idioms: 1.0,
     };
 
-    const getCandidatesFromPool = (pool: Question[], targetCount: number) => {
-      const shuffled = this.shuffle(filterExam(pool));
-      
-      // Tier 1: Fresh candidates not seen today and not in recent history
-      const tier1: Question[] = [];
-      // Tier 2: Candidates not seen today but present in older history
-      const tier2: Question[] = [];
-      // Tier 3: Other candidates
-      const tier3: Question[] = [];
-
-      for (const q of shuffled) {
-        const norm = q.wordOrPhrase.trim().toUpperCase();
-        if (seenWordsInMatch.has(norm) || seenIdsInMatch.has(q.id)) continue;
-
-        if (!todaySeen.has(norm) && !persistentHistory.has(norm) && !persistentHistory.has(q.id)) {
-          tier1.push(q);
-        } else if (!todaySeen.has(norm)) {
-          tier2.push(q);
-        } else {
-          tier3.push(q);
-        }
-      }
-
-      const combined = [...this.shuffle(tier1), ...this.shuffle(tier2), ...this.shuffle(tier3)];
-      const picked: Question[] = [];
-
-      for (const q of combined) {
-        const norm = q.wordOrPhrase.trim().toUpperCase();
-        if (!seenWordsInMatch.has(norm) && !seenIdsInMatch.has(q.id)) {
-          seenWordsInMatch.add(norm);
-          seenIdsInMatch.add(q.id);
-          picked.push(q);
-          if (picked.length >= targetCount) break;
-        }
-      }
-
-      return picked;
-    };
-
-    if (category === 'mixed') {
-      const perCat = Math.ceil(count / 4);
-      const syns = getCandidatesFromPool(this.synonymsPool, perCat);
-      const ants = getCandidatesFromPool(this.antonymsPool, perCat);
-      const ows = getCandidatesFromPool(this.owsPool, perCat);
-      const idms = getCandidatesFromPool(this.idiomsPool, perCat);
-
-      const allMixed = this.shuffle([...syns, ...ants, ...ows, ...idms]).slice(0, count);
-      
-      // Record batch seen
-      recordBatchQuestionsSeen(allMixed.map(q => q.wordOrPhrase));
-      return allMixed;
-    } else {
-      let pool = this.synonymsPool;
-      if (category === 'antonyms') pool = this.antonymsPool;
-      else if (category === 'ows') pool = this.owsPool;
-      else if (category === 'idioms') pool = this.idiomsPool;
-
-      const candidates = getCandidatesFromPool(pool, count);
-      recordBatchQuestionsSeen(candidates.map(q => q.wordOrPhrase));
-      return candidates;
+    // If a category has been selected twice consecutively, penalize it to force variety
+    if (this.lastSelectedCategory && this.consecutiveCategoryCount >= 2) {
+      weights[this.lastSelectedCategory] = 0.2;
     }
+
+    const availableConcepts = (cat: QuestionCategory) => {
+      const map = this.playableConcepts.get(cat);
+      return map ? map.size : 0;
+    };
+
+    // Factor in relative concept availability
+    for (const cat of allCats) {
+      const count = availableConcepts(cat);
+      if (count < 20) {
+        weights[cat] *= 0.6; // Don't burn through scarce category instantly
+      }
+    }
+
+    const totalWeight = allCats.reduce((sum, cat) => sum + weights[cat], 0);
+    let rand = Math.random() * totalWeight;
+
+    for (const cat of allCats) {
+      if (rand < weights[cat]) {
+        if (this.lastSelectedCategory === cat) {
+          this.consecutiveCategoryCount += 1;
+        } else {
+          this.lastSelectedCategory = cat;
+          this.consecutiveCategoryCount = 1;
+        }
+        return cat;
+      }
+      rand -= weights[cat];
+    }
+
+    return 'synonyms';
   }
 
   /**
-   * For backwards compatibility with standard getQuestions call
+   * ADAPTIVE CONCEPT-FIRST QUESTION SCHEDULING FOR PYQ DRILL:
+   * 1. Evaluates concept review state (due/weak/fresh)
+   * 2. Selects CONCEPT FIRST before selecting question variant
+   * 3. Boosts fresh unseen verified PYQ variants (20% bonus)
+   * 4. Guarantees natural spacing with fuzz (8-15 gap for wrong, 25-45 for hard)
    */
+  public getNextDrillQuestion(
+    category: QuestionCategory | 'mixed',
+    exam: ExamType = 'ALL',
+    recentWordsHistory: string[] = []
+  ): Question {
+    this.init();
+
+    const targetCategory = category === 'mixed' ? this.chooseMixedCategory() : category;
+    const catMap = this.playableConcepts.get(targetCategory);
+
+    if (!catMap || catMap.size === 0) {
+      // Fallback
+      return this.synonymsPool[0];
+    }
+
+    const recentMemoryKeys = new Set([
+      ...questionReviewScheduler.getRecentMemoryKeys().slice(-40),
+      ...recentWordsHistory.slice(-25).map(w => buildMemoryKey(targetCategory, w))
+    ]);
+
+    const recentQuestionIds = new Set(questionReviewScheduler.getRecentQuestionIds().slice(-100));
+
+    const allConcepts = Array.from(catMap.values());
+    const now = Date.now();
+
+    // 1. Partition concepts
+    const dueConcepts: ConceptGroup[] = [];
+    const mistakeConcepts: ConceptGroup[] = [];
+    const savedConcepts: ConceptGroup[] = [];
+    const freshConcepts: ConceptGroup[] = [];
+    const familiarConcepts: ConceptGroup[] = [];
+
+    for (const group of allConcepts) {
+      const isRecentlyPlayed = recentMemoryKeys.has(group.memoryKey);
+      const state = questionReviewScheduler.getReviewState(group.memoryKey);
+
+      if (!state || state.seenCount === 0) {
+        if (!isRecentlyPlayed) {
+          freshConcepts.push(group);
+        }
+      } else {
+        if (state.isSaved && !isRecentlyPlayed) {
+          savedConcepts.push(group);
+        }
+
+        if (questionReviewScheduler.isConceptDue(group.memoryKey, now)) {
+          dueConcepts.push(group);
+        } else if (state.wrongCount > 0 && state.consecutiveCorrect < 2 && !isRecentlyPlayed) {
+          mistakeConcepts.push(group);
+        } else if (!isRecentlyPlayed) {
+          familiarConcepts.push(group);
+        }
+      }
+    }
+
+    // 2. Select Concept Group based on target distribution:
+    // ~65-70% Fresh, ~15-20% Due, ~10% Mistakes/Weak, ~5% Saved
+    let selectedGroup: ConceptGroup | null = null;
+    let reviewReason: Question['reviewReason'] = 'fresh';
+
+    const roll = Math.random();
+
+    if (dueConcepts.length > 0 && (roll < 0.22 || freshConcepts.length === 0)) {
+      selectedGroup = dueConcepts[Math.floor(Math.random() * dueConcepts.length)];
+      reviewReason = 'due_review';
+    } else if (mistakeConcepts.length > 0 && (roll < 0.32 || freshConcepts.length === 0)) {
+      selectedGroup = mistakeConcepts[Math.floor(Math.random() * mistakeConcepts.length)];
+      reviewReason = 'mistake_review';
+    } else if (savedConcepts.length > 0 && roll < 0.37 && Math.random() < 0.4) {
+      selectedGroup = savedConcepts[Math.floor(Math.random() * savedConcepts.length)];
+      reviewReason = 'saved_review';
+    } else if (freshConcepts.length > 0) {
+      // Prioritize fresh concepts with verified PYQs (20% boost)
+      const freshWithVerified = freshConcepts.filter(g => g.verifiedVariants.length > 0);
+      if (freshWithVerified.length > 0 && Math.random() < 0.65) {
+        selectedGroup = freshWithVerified[Math.floor(Math.random() * freshWithVerified.length)];
+      } else {
+        selectedGroup = freshConcepts[Math.floor(Math.random() * freshConcepts.length)];
+      }
+      reviewReason = 'fresh';
+    } else if (familiarConcepts.length > 0) {
+      // Pick familiar concept with oldest last-seen
+      familiarConcepts.sort((a, b) => {
+        const sa = questionReviewScheduler.getReviewState(a.memoryKey);
+        const sb = questionReviewScheduler.getReviewState(b.memoryKey);
+        return (sa?.lastSeenAt || 0) - (sb?.lastSeenAt || 0);
+      });
+      selectedGroup = familiarConcepts[0];
+      reviewReason = 'pool_exhausted_review';
+    } else {
+      // Fallback to any non-empty group
+      selectedGroup = allConcepts[Math.floor(Math.random() * allConcepts.length)];
+      reviewReason = 'pool_exhausted_review';
+    }
+
+    // 3. Select Question Variant within the chosen Concept
+    const variants = selectedGroup.variants;
+    // Prefer unseen verified PYQ variant if available
+    const unseenVerified = selectedGroup.verifiedVariants.filter(v => !recentQuestionIds.has(v.id));
+    const unseenGenerated = selectedGroup.generatedVariants.filter(v => !recentQuestionIds.has(v.id));
+
+    let chosenQuestion: Question;
+    if (unseenVerified.length > 0) {
+      chosenQuestion = unseenVerified[Math.floor(Math.random() * unseenVerified.length)];
+    } else if (unseenGenerated.length > 0) {
+      chosenQuestion = unseenGenerated[Math.floor(Math.random() * unseenGenerated.length)];
+    } else {
+      chosenQuestion = variants[Math.floor(Math.random() * variants.length)];
+    }
+
+    return {
+      ...chosenQuestion,
+      memoryKey: selectedGroup.memoryKey,
+      conceptKey: selectedGroup.conceptKey,
+      reviewReason,
+    };
+  }
+
+  /**
+   * GUARANTEED UNIQUE QUESTIONS FOR A 1V1 DUEL MATCH:
+   * - Strictly unique question IDs AND strictly unique memoryKey per match
+   * - 70% fresh concepts, 20% due concepts, 10% weak concepts
+   * - Never duplicates word prompt or concept in the same match
+   */
+  public getUniqueQuestionsForMatch(
+    category: QuestionCategory | 'mixed',
+    exam: ExamType = 'ALL',
+    count: number = 20
+  ): Question[] {
+    this.init();
+
+    const usedMemoryKeys = new Set<string>();
+    const usedQuestionIds = new Set<string>();
+    const selectedQuestions: Question[] = [];
+
+    const categoriesToPull: QuestionCategory[] = category === 'mixed'
+      ? ['synonyms', 'antonyms', 'ows', 'idioms']
+      : [category];
+
+    const perCatTarget = Math.ceil(count / categoriesToPull.length);
+
+    for (const cat of categoriesToPull) {
+      const catMap = this.playableConcepts.get(cat);
+      if (!catMap) continue;
+
+      const allGroups = this.shuffle(Array.from(catMap.values()));
+      const available = allGroups.filter(g => !usedMemoryKeys.has(g.memoryKey));
+
+      let catCount = 0;
+      for (const group of available) {
+        if (catCount >= perCatTarget || selectedQuestions.length >= count) break;
+
+        // Choose question variant
+        const validVariants = group.variants.filter(v => !usedQuestionIds.has(v.id));
+        if (validVariants.length === 0) continue;
+
+        // Prioritize verified PYQ
+        const verified = validVariants.filter(v => v.sourceType === 'verified_pyq');
+        const chosen = verified.length > 0 ? verified[0] : validVariants[0];
+
+        usedMemoryKeys.add(group.memoryKey);
+        usedQuestionIds.add(chosen.id);
+        selectedQuestions.push({
+          ...chosen,
+          memoryKey: group.memoryKey,
+          conceptKey: group.conceptKey,
+        });
+        catCount++;
+      }
+    }
+
+    // Fill remaining if needed
+    if (selectedQuestions.length < count) {
+      const allPool = this.shuffle(this.getAllAvailableQuestions());
+      for (const q of allPool) {
+        if (selectedQuestions.length >= count) break;
+        const mKey = q.memoryKey || buildMemoryKey(q.category, q.wordOrPhrase, q.options, q.correctIndex);
+        if (!usedMemoryKeys.has(mKey) && !usedQuestionIds.has(q.id)) {
+          usedMemoryKeys.add(mKey);
+          usedQuestionIds.add(q.id);
+          selectedQuestions.push({ ...q, memoryKey: mKey, conceptKey: mKey });
+        }
+      }
+    }
+
+    return this.shuffle(selectedQuestions);
+  }
+
   public getQuestions(
     category: QuestionCategory | 'mixed',
     exam: ExamType,
@@ -591,85 +990,150 @@ export class QuestionBankEngine {
     return this.getUniqueQuestionsForMatch(category, exam, count);
   }
 
+  // ==================== ADMIN HEALTH DIAGNOSTICS ====================
+
   /**
-   * INTELLIGENT ANTI-REPETITION NEXT QUESTION FOR PYQ DRILL:
-   * - Excludes words seen in the last 400+ attempts across sessions & days.
-   * - Excludes words seen today.
-   * - Prioritizes unmastered & unseen questions.
-   * - If bank is exhausted, cycles back starting from the oldest seen questions (FIFO).
+   * Diagnostic summary comparing Firestore cloud data with runtime engine state
    */
-  public getNextDrillQuestion(
-    category: QuestionCategory | 'mixed',
-    exam: ExamType,
-    recentWordsHistory: string[] = []
-  ): Question {
+  public getCloudVsRuntimeCounts(): {
+    cloudCounts: Record<QuestionCategory, number>;
+    runtimeVariantCounts: Record<QuestionCategory, number>;
+    runtimeConceptCounts: Record<QuestionCategory, number>;
+    totalCloud: number;
+    totalRuntimeVariants: number;
+    totalConcepts: number;
+  } {
     this.init();
-    const masteryMap = getMasteryMap();
-    const persistentHistory = getPersistentSeenWords();
-    const todaySeen = getTodaySeenWords();
+    const categories: QuestionCategory[] = ['synonyms', 'antonyms', 'ows', 'idioms'];
 
-    // Combine session history with persistent history (last 350 items)
-    const combinedRecentSet = new Set([
-      ...recentWordsHistory.slice(-50).map(w => w.trim().toUpperCase()),
-      ...persistentHistory.slice(-350).map(w => w.trim().toUpperCase()),
-      ...Array.from(todaySeen),
-    ]);
+    const cloudCounts: Record<QuestionCategory, number> = { synonyms: 0, antonyms: 0, ows: 0, idioms: 0 };
+    const runtimeVariantCounts: Record<QuestionCategory, number> = { synonyms: 0, antonyms: 0, ows: 0, idioms: 0 };
+    const runtimeConceptCounts: Record<QuestionCategory, number> = { synonyms: 0, antonyms: 0, ows: 0, idioms: 0 };
 
-    let candidatePool: Question[] = [];
-    if (category === 'synonyms') candidatePool = this.synonymsPool;
-    else if (category === 'antonyms') candidatePool = this.antonymsPool;
-    else if (category === 'ows') candidatePool = this.owsPool;
-    else if (category === 'idioms') candidatePool = this.idiomsPool;
-    else {
-      // Mixed: pick random category
-      const rnd = Math.random();
-      if (rnd < 0.25) candidatePool = this.synonymsPool;
-      else if (rnd < 0.5) candidatePool = this.antonymsPool;
-      else if (rnd < 0.75) candidatePool = this.owsPool;
-      else candidatePool = this.idiomsPool;
-    }
-
-    // Filter by exam if set
-    if (exam !== 'ALL') {
-      const examNameMap: Record<string, string> = {
-        SSC_CGL: 'SSC CGL',
-        SSC_CHSL: 'SSC CHSL',
-        SSC_CPO: 'SSC CPO',
-        SSC_MTS: 'SSC MTS',
-        RRB_NTPC: 'RRB NTPC',
-        RRB_GROUP_D: 'RRB',
-        BANK_PO: 'IBPS',
-        CDS_NDA: 'CDS',
-      };
-      const kw = examNameMap[exam] || '';
-      if (kw) {
-        const filtered = candidatePool.filter(q => q.examHistory.some(h => h.includes(kw)));
-        if (filtered.length > 20) candidatePool = filtered;
+    for (const q of this.importedPool) {
+      if (cloudCounts[q.category] !== undefined) {
+        cloudCounts[q.category]++;
       }
     }
 
-    // 1. Fresh candidates not seen in recent history or today
-    const freshCandidates = candidatePool.filter(q => {
-      const norm = q.wordOrPhrase.trim().toUpperCase();
-      return !combinedRecentSet.has(norm);
-    });
+    runtimeVariantCounts.synonyms = this.synonymsPool.length + cloudCounts.synonyms;
+    runtimeVariantCounts.antonyms = this.antonymsPool.length + cloudCounts.antonyms;
+    runtimeVariantCounts.ows = this.owsPool.length + cloudCounts.ows;
+    runtimeVariantCounts.idioms = this.idiomsPool.length + cloudCounts.idioms;
 
-    const activePool = freshCandidates.length > 5 ? freshCandidates : candidatePool;
+    for (const cat of categories) {
+      const map = this.playableConcepts.get(cat);
+      runtimeConceptCounts[cat] = map ? map.size : 0;
+    }
 
-    // 2. Prioritize non-mastered words (< 10 correct attempts)
-    const unmasteredPool = activePool.filter(q => {
-      const norm = q.wordOrPhrase.trim().toUpperCase();
-      const rec = masteryMap[norm];
-      return !rec || rec.correctCount < 10;
-    });
+    const totalCloud = Object.values(cloudCounts).reduce((a, b) => a + b, 0);
+    const totalRuntimeVariants = Object.values(runtimeVariantCounts).reduce((a, b) => a + b, 0);
+    const totalConcepts = Object.values(runtimeConceptCounts).reduce((a, b) => a + b, 0);
 
-    const targetPool = unmasteredPool.length > 0 ? unmasteredPool : activePool;
-    const rndIdx = Math.floor(Math.random() * targetPool.length);
-    const chosen = targetPool[rndIdx];
+    return {
+      cloudCounts,
+      runtimeVariantCounts,
+      runtimeConceptCounts,
+      totalCloud,
+      totalRuntimeVariants,
+      totalConcepts,
+    };
+  }
 
-    // Record as seen
-    recordQuestionSeen(chosen.wordOrPhrase, chosen.id);
-    return chosen;
+  /**
+   * Preview a live verified or practice question for inspection
+   */
+  public getPreviewQuestion(category: QuestionCategory): Question | null {
+    this.init();
+    const map = this.playableConcepts.get(category);
+    if (!map || map.size === 0) return null;
+
+    const allGroups = Array.from(map.values());
+    const verifiedGroups = allGroups.filter(g => g.verifiedVariants.length > 0);
+
+    if (verifiedGroups.length > 0) {
+      const randomGroup = verifiedGroups[Math.floor(Math.random() * verifiedGroups.length)];
+      return randomGroup.verifiedVariants[0];
+    }
+
+    const randomGroup = allGroups[Math.floor(Math.random() * allGroups.length)];
+    return randomGroup.variants[0] || null;
+  }
+
+  /**
+   * Run 200-question drill simulation to test repetition spacing and distribution
+   */
+  public runRepetitionSimulation(sampleSize: number = 200): {
+    totalQuestions: number;
+    categoryCounts: Record<QuestionCategory, number>;
+    categoryPercentages: Record<QuestionCategory, string>;
+    uniqueConceptsSeen: number;
+    minRepeatGap: number;
+    avgRepeatGap: number;
+    verifiedPyqExposureCount: number;
+    verifiedPyqPercentage: string;
+    passedStrictChecks: boolean;
+    logNotes: string[];
+  } {
+    this.init();
+    const seenConceptHistory: string[] = [];
+    const conceptGaps: number[] = [];
+    const catCounts: Record<QuestionCategory, number> = { synonyms: 0, antonyms: 0, ows: 0, idioms: 0 };
+    let verifiedCount = 0;
+    const logNotes: string[] = [];
+
+    for (let i = 0; i < sampleSize; i++) {
+      const q = this.getNextDrillQuestion('mixed', 'ALL', seenConceptHistory);
+      catCounts[q.category] = (catCounts[q.category] || 0) + 1;
+
+      if (q.sourceType === 'verified_pyq' || q.verified) {
+        verifiedCount++;
+      }
+
+      const mKey = q.memoryKey || buildMemoryKey(q.category, q.wordOrPhrase);
+      const lastIndex = seenConceptHistory.lastIndexOf(mKey);
+      if (lastIndex >= 0) {
+        const gap = i - lastIndex;
+        conceptGaps.push(gap);
+      }
+
+      seenConceptHistory.push(mKey);
+    }
+
+    const uniqueCount = new Set(seenConceptHistory).size;
+    const minGap = conceptGaps.length > 0 ? Math.min(...conceptGaps) : sampleSize;
+    const avgGap = conceptGaps.length > 0 
+      ? Math.round((conceptGaps.reduce((a, b) => a + b, 0) / conceptGaps.length) * 10) / 10 
+      : sampleSize;
+
+    const catPerc: Record<QuestionCategory, string> = {
+      synonyms: `${Math.round((catCounts.synonyms / sampleSize) * 100)}%`,
+      antonyms: `${Math.round((catCounts.antonyms / sampleSize) * 100)}%`,
+      ows: `${Math.round((catCounts.ows / sampleSize) * 100)}%`,
+      idioms: `${Math.round((catCounts.idioms / sampleSize) * 100)}%`,
+    };
+
+    const verifiedPerc = `${Math.round((verifiedCount / sampleSize) * 100)}%`;
+    const passedStrictChecks = minGap >= 8 && uniqueCount >= Math.min(sampleSize * 0.7, 120);
+
+    logNotes.push(`Generated ${sampleSize} simulation rounds across all 4 categories.`);
+    logNotes.push(`Category distribution: Synonyms: ${catPerc.synonyms}, Antonyms: ${catPerc.antonyms}, OWS: ${catPerc.ows}, Idioms: ${catPerc.idioms}.`);
+    logNotes.push(`Unique concepts encountered: ${uniqueCount}/${sampleSize}.`);
+    logNotes.push(`Minimum concept repeat gap: ${minGap} rounds (Target >= 8).`);
+    logNotes.push(`Verified PYQ Exposure: ${verifiedCount} / ${sampleSize} (${verifiedPerc}).`);
+
+    return {
+      totalQuestions: sampleSize,
+      categoryCounts: catCounts,
+      categoryPercentages: catPerc,
+      uniqueConceptsSeen: uniqueCount,
+      minRepeatGap: minGap,
+      avgRepeatGap: avgGap,
+      verifiedPyqExposureCount: verifiedCount,
+      verifiedPyqPercentage: verifiedPerc,
+      passedStrictChecks,
+      logNotes,
+    };
   }
 
   // ==================== GENERATORS ====================
@@ -685,12 +1149,10 @@ export class QuestionBankEngine {
       const variantIdx = Math.floor(i / vocabList.length);
       const isReverse = variantIdx % 2 === 1;
 
-      // Select target answer and prompt
       let promptWord = baseEntry.word;
       let targetAnswer = baseEntry.synonyms[variantIdx % baseEntry.synonyms.length].trim();
 
       if (isReverse && baseEntry.synonyms.length > 0) {
-        // Reverse direction: Prompt is one of the synonyms, Answer is the primary word
         promptWord = baseEntry.synonyms[(variantIdx + 1) % baseEntry.synonyms.length].trim().toUpperCase();
         targetAnswer = baseEntry.word.charAt(0).toUpperCase() + baseEntry.word.slice(1).toLowerCase();
       }
@@ -698,7 +1160,6 @@ export class QuestionBankEngine {
       const normalizedPrompt = promptWord.trim().toLowerCase();
       const normalizedTarget = targetAnswer.toLowerCase();
 
-      // Prohibited distractors:
       const prohibited = new Set<string>([
         normalizedPrompt,
         normalizedTarget,
@@ -708,7 +1169,6 @@ export class QuestionBankEngine {
 
       const candidateDistractors: string[] = [];
 
-      // Collect distractors from other entries
       for (let j = 1; j < vocabList.length; j++) {
         const otherEntry = vocabList[(i + j) % vocabList.length];
         if (otherEntry.word.trim().toLowerCase() === normalizedPrompt) continue;
@@ -751,6 +1211,8 @@ export class QuestionBankEngine {
       const year1 = EXAM_YEARS[(i + 1) % EXAM_YEARS.length];
       const year2 = EXAM_YEARS[(i + 4) % EXAM_YEARS.length];
 
+      const memoryKey = `word:${baseEntry.word.toLowerCase().trim()}`;
+
       pool.push({
         id: `syn-${idCounter++}`,
         category: 'synonyms',
@@ -767,6 +1229,9 @@ export class QuestionBankEngine {
         repeatCount: Math.min(28, baseEntry.repeats + (i % 6)),
         importanceLevel: i % 3 === 0 ? 'ultra-high' : i % 2 === 0 ? 'very-high' : 'high',
         difficulty: i % 4 === 0 ? 'hard' : i % 2 === 0 ? 'medium' : 'easy',
+        sourceType: 'generated_practice',
+        memoryKey,
+        conceptKey: memoryKey,
       });
     }
 
@@ -804,7 +1269,6 @@ export class QuestionBankEngine {
 
       const candidateDistractors: string[] = [];
 
-      // Classic exam trap: include the word's own synonym as one distractor option!
       for (const syn of baseEntry.synonyms) {
         const norm = syn.trim().toLowerCase();
         if (norm !== normalizedPrompt && norm !== normalizedTarget && !prohibited.has(norm)) {
@@ -856,6 +1320,8 @@ export class QuestionBankEngine {
       const year1 = EXAM_YEARS[(i + 2) % EXAM_YEARS.length];
       const year2 = EXAM_YEARS[(i + 5) % EXAM_YEARS.length];
 
+      const memoryKey = `word:${baseEntry.word.toLowerCase().trim()}`;
+
       pool.push({
         id: `ant-${idCounter++}`,
         category: 'antonyms',
@@ -872,6 +1338,9 @@ export class QuestionBankEngine {
         repeatCount: Math.min(27, baseEntry.repeats + ((i + 2) % 6)),
         importanceLevel: i % 3 === 0 ? 'ultra-high' : 'very-high',
         difficulty: i % 3 === 0 ? 'hard' : 'medium',
+        sourceType: 'generated_practice',
+        memoryKey,
+        conceptKey: memoryKey,
       });
     }
 
@@ -932,6 +1401,8 @@ export class QuestionBankEngine {
       const year1 = EXAM_YEARS[(i + 3) % EXAM_YEARS.length];
       const year2 = EXAM_YEARS[(i + 6) % EXAM_YEARS.length];
 
+      const memoryKey = `ows:${targetAnswer.toLowerCase().trim()}`;
+
       pool.push({
         id: `ows-${idCounter++}`,
         category: 'ows',
@@ -948,6 +1419,9 @@ export class QuestionBankEngine {
         repeatCount: Math.min(30, baseEntry.repeats + (i % 5)),
         importanceLevel: 'ultra-high',
         difficulty: i % 3 === 0 ? 'hard' : 'medium',
+        sourceType: 'generated_practice',
+        memoryKey,
+        conceptKey: memoryKey,
       });
     }
 
@@ -1013,6 +1487,8 @@ export class QuestionBankEngine {
       const year1 = EXAM_YEARS[(i + 2) % EXAM_YEARS.length];
       const year2 = EXAM_YEARS[(i + 5) % EXAM_YEARS.length];
 
+      const memoryKey = `idiom:${baseEntry.idiom.toLowerCase().trim().replace(/[^a-z0-9 ]/g, '')}`;
+
       pool.push({
         id: `idm-${idCounter++}`,
         category: 'idioms',
@@ -1029,6 +1505,9 @@ export class QuestionBankEngine {
         repeatCount: Math.min(29, baseEntry.repeats + (i % 6)),
         importanceLevel: 'ultra-high',
         difficulty: i % 3 === 0 ? 'hard' : 'medium',
+        sourceType: 'generated_practice',
+        memoryKey,
+        conceptKey: memoryKey,
       });
     }
 

@@ -17,6 +17,7 @@ import {
   getTierFromLP, 
   getTierTitle 
 } from './services/matchmakingService';
+import { questionReviewScheduler } from './services/questionReviewScheduler';
 import { LiveRoomFinalResult, forfeitLiveRoom } from './services/realtimeMatchmaking';
 import { soundManager } from './utils/audio';
 import { isAdDue, resetAdTimerForTest } from './utils/adManager';
@@ -65,6 +66,7 @@ import { StreakModal } from './components/StreakModal';
 import { OnboardingTourModal } from './components/OnboardingTourModal';
 import { PlayModeSelectorModal } from './components/PlayModeSelectorModal';
 import { FriendLobbyModal } from './components/FriendLobbyModal';
+import { AdminPyqImporter } from './components/AdminPyqImporter';
 
 const STORAGE_KEY_PLAYER = 'vocabclash_player_v5';
 const STORAGE_KEY_VAULT = 'vocabclash_vault_v2';
@@ -260,6 +262,37 @@ export default function App() {
   const [showFriendLobbyModal, setShowFriendLobbyModal] = useState<boolean>(false);
   const [friendLobbyInitialCode, setFriendLobbyInitialCode] = useState<string>('');
   const [forfeitNotice, setForfeitNotice] = useState<string | null>(null);
+  const [showAdminImporter, setShowAdminImporter] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return (
+        window.location.pathname.includes('/admin/pyq-import') ||
+        window.location.pathname.includes('/admin') ||
+        window.location.hash.includes('admin-pyq') ||
+        window.location.search.includes('admin=pyq')
+      );
+    }
+    return false;
+  });
+
+  // Listen to hash / route changes for private admin portal
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleHashOrPopState = () => {
+      const isAdminRoute = 
+        window.location.pathname.includes('/admin/pyq-import') ||
+        window.location.pathname.includes('/admin') ||
+        window.location.hash.includes('admin-pyq') ||
+        window.location.search.includes('admin=pyq');
+      setShowAdminImporter(isAdminRoute);
+    };
+
+    window.addEventListener('popstate', handleHashOrPopState);
+    window.addEventListener('hashchange', handleHashOrPopState);
+    return () => {
+      window.removeEventListener('popstate', handleHashOrPopState);
+      window.removeEventListener('hashchange', handleHashOrPopState);
+    };
+  }, []);
 
   // Auto-detect friend lobby code from URL parameters (e.g. ?lobby=492810 or ?join=492810)
   useEffect(() => {
@@ -306,6 +339,7 @@ export default function App() {
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
+      questionReviewScheduler.setAuthUser(user ? user.uid : null);
       if (user) {
         setIsSyncing(true);
         try {
@@ -1021,6 +1055,11 @@ export default function App() {
             soundManager.playTap();
             setShowTourModal(true);
           }}
+          isAdmin={(currentUser?.email?.toLowerCase() === 'nathchinmoy777@gmail.com' || (currentUser?.email && currentUser.email.toLowerCase().includes('admin')))}
+          onOpenAdminImporter={() => {
+            soundManager.playTap();
+            setShowAdminImporter(true);
+          }}
         />
 
         {/* Forfeit Penalty Notification Banner */}
@@ -1276,6 +1315,19 @@ export default function App() {
           onOpenPremium={() => {
             setShowAdModal(false);
             setShowPremiumModal(true);
+          }}
+        />
+      )}
+
+      {/* Private Admin PDF PYQ Importer Portal */}
+      {showAdminImporter && (
+        <AdminPyqImporter
+          userEmail={currentUser?.email || null}
+          onClose={() => {
+            setShowAdminImporter(false);
+            if (typeof window !== 'undefined' && window.location.hash.includes('admin-pyq')) {
+              window.location.hash = '';
+            }
           }}
         />
       )}

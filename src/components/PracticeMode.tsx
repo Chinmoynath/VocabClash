@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { QuestionCategory, ExamType, Question } from '../types';
 import { getNextDrillQuestion } from '../services/matchmakingService';
-import { recordQuestionAttempt, getWordMastery, getOverallMasteryStats, QuestionMasteryRecord } from '../utils/masteryManager';
+import { questionReviewScheduler, ReviewState } from '../services/questionReviewScheduler';
 import { getPersistentSeenWords } from '../utils/questionHistoryManager';
 import { getOptionBreakdown, OptionDetail } from '../utils/optionExplanations';
 import { soundManager } from '../utils/audio';
@@ -23,7 +23,8 @@ import {
   Layers,
   Lightbulb,
   Flag,
-  LifeBuoy
+  LifeBuoy,
+  RotateCcw
 } from 'lucide-react';
 import { AdSenseUnit } from './AdSenseUnit';
 import { ADSENSE_BANNER_SLOT } from '../services/adSenseService';
@@ -61,8 +62,10 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     const initHistory = getPersistentSeenWords().slice(-100);
     return getNextDrillQuestion('mixed', 'ALL', initHistory);
   });
-  const [currentMastery, setCurrentMastery] = useState<QuestionMasteryRecord | null>(() => 
-    currentQ ? getWordMastery(currentQ.wordOrPhrase) : null
+
+  const questionStartTimeRef = useRef<number>(Date.now());
+  const [currentReviewState, setCurrentReviewState] = useState<ReviewState | null>(() => 
+    currentQ ? questionReviewScheduler.getReviewState(currentQ.memoryKey || currentQ.wordOrPhrase) || null : null
   );
 
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
@@ -75,13 +78,14 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
   const [showSupportModal, setShowSupportModal] = useState<boolean>(false);
   const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Overall mastery summary for top stats
-  const [masteryStats, setMasteryStats] = useState(() => getOverallMasteryStats());
+  // Overall scheduler summary for top stats
+  const [schedulerStats, setSchedulerStats] = useState(() => questionReviewScheduler.getStats());
 
-  // Keep word mastery updated for the current question
+  // Keep review state updated for the current question
   useEffect(() => {
     if (currentQ) {
-      setCurrentMastery(getWordMastery(currentQ.wordOrPhrase));
+      questionStartTimeRef.current = Date.now();
+      setCurrentReviewState(questionReviewScheduler.getReviewState(currentQ.memoryKey || currentQ.wordOrPhrase) || null);
     }
   }, [currentQ]);
 
@@ -139,14 +143,15 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
       onSolveQuestion();
     }
 
+    const elapsedMs = Date.now() - questionStartTimeRef.current;
     const isCorrect = idx === currentQ.correctIndex;
 
-    // Record spaced repetition attempt in persistent storage
-    const updatedRecord = recordQuestionAttempt(currentQ.wordOrPhrase, isCorrect);
-    setCurrentMastery(updatedRecord);
-    setMasteryStats(getOverallMasteryStats());
+    // Record spaced repetition attempt in adaptive scheduler
+    const updatedRecord = questionReviewScheduler.recordAttempt(currentQ, isCorrect, elapsedMs);
+    setCurrentReviewState(updatedRecord);
+    setSchedulerStats(questionReviewScheduler.getStats());
 
-    // Add to session word history (to prevent immediate repeat for 50 questions)
+    // Add to session word history
     setRecentWordsHistory(prev => [...prev.slice(-50), currentQ.wordOrPhrase]);
     setSessionSolvedCount(prev => prev + 1);
 
@@ -169,7 +174,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
       onBatchComplete();
     }
 
-    // Pull next spaced-repetition question from the 24,000+ pool
+    // Pull next adaptive repetition question
     const nextQ = getNextDrillQuestion(category, exam, [...recentWordsHistory, currentQ.wordOrPhrase]);
     setCurrentQ(nextQ);
     setQuestionNumber(prev => prev + 1);
@@ -182,6 +187,9 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     soundManager.playTap();
     onBookmarkQuestion(currentQ);
     const alreadyBookmarked = bookmarkedIds.includes(currentQ.id);
+    const nextSaved = !alreadyBookmarked;
+    questionReviewScheduler.setSavedStatus(currentQ.memoryKey || currentQ.wordOrPhrase, nextSaved);
+
     showSaveConfirmation(
       alreadyBookmarked ? 'Removed from Saved' : '⭐ Question Saved to Revision Vault'
     );
@@ -219,7 +227,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
             PYQ Endless Drill
           </h2>
           <p className="text-xs text-slate-400">
-            24,000+ Govt Exam PYQ Pool with Smart Spaced Repetition & Full Option Analysis
+            24,000+ Govt Exam PYQ Pool with Adaptive Spaced Repetition & Option Analysis
           </p>
         </div>
 
@@ -251,10 +259,16 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
             Session: <b className="text-slate-200">{sessionSolvedCount} solved</b>
           </span>
         </div>
-        <div className="flex items-center gap-1.5 text-[11px]">
-          <Award className="w-3.5 h-3.5 text-amber-400" />
-          <span className="text-slate-400">Mastered:</span>
-          <span className="font-bold text-amber-400">{masteryStats.masteredCount}</span>
+        <div className="flex items-center gap-3 text-[11px]">
+          <div className="flex items-center gap-1">
+            <span className="text-slate-400">Due:</span>
+            <span className="font-bold text-sky-400">{schedulerStats.dueCount}</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <Award className="w-3.5 h-3.5 text-amber-400" />
+            <span className="text-slate-400">Mastered:</span>
+            <span className="font-bold text-amber-400">{schedulerStats.masteredCount}</span>
+          </div>
         </div>
       </div>
 
@@ -286,24 +300,52 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
         <div className="space-y-3 pt-1">
           {/* Top Info & Actions Header (Clean 1-line layout) */}
           <div className="flex items-center justify-between text-xs text-slate-400 gap-2">
-            <div className="flex items-center gap-1.5 min-w-0">
+            <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
               <span className="bg-amber-950/80 text-amber-300 border border-amber-800/60 px-2 py-0.5 rounded-full font-bold text-[10px] shrink-0">
                 🔥 Repeated {currentQ.repeatCount}x
               </span>
 
-              {/* Mastery tag for this word */}
-              {currentMastery && currentMastery.correctCount >= 10 ? (
+              {/* Spaced Review Reason Pill (Subtle & clean) */}
+              {currentQ.reviewReason === 'due_review' && (
+                <span className="bg-sky-950 text-sky-300 border border-sky-700/80 px-2 py-0.5 rounded-full font-bold text-[10px] flex items-center gap-1 shrink-0">
+                  <RotateCcw className="w-2.5 h-2.5" />
+                  Due Review
+                </span>
+              )}
+              {currentQ.reviewReason === 'mistake_review' && (
+                <span className="bg-rose-950 text-rose-300 border border-rose-700/80 px-2 py-0.5 rounded-full font-bold text-[10px] flex items-center gap-1 shrink-0">
+                  <RotateCcw className="w-2.5 h-2.5" />
+                  Mistake Review
+                </span>
+              )}
+              {currentQ.reviewReason === 'saved_review' && (
+                <span className="bg-amber-950 text-amber-300 border border-amber-700/80 px-2 py-0.5 rounded-full font-bold text-[10px] flex items-center gap-1 shrink-0">
+                  <Bookmark className="w-2.5 h-2.5" />
+                  Saved Review
+                </span>
+              )}
+
+              {/* 5-State Concept Memory Level */}
+              {currentReviewState?.level === 'mastered' ? (
                 <span className="bg-emerald-950/90 text-emerald-300 border border-emerald-700/80 px-2 py-0.5 rounded-full font-bold text-[10px] flex items-center gap-1 shrink-0">
                   <CheckCircle2 className="w-2.5 h-2.5" />
-                  Mastered ({currentMastery.correctCount}✓)
+                  Mastered
                 </span>
-              ) : currentMastery && currentMastery.correctCount > 0 ? (
+              ) : currentReviewState?.level === 'strong' ? (
+                <span className="bg-indigo-950/80 text-indigo-300 border border-indigo-700/60 px-2 py-0.5 rounded-full font-semibold text-[10px] shrink-0">
+                  Strong ({currentReviewState.consecutiveCorrect}✓)
+                </span>
+              ) : currentReviewState?.level === 'familiar' ? (
+                <span className="bg-cyan-950/80 text-cyan-300 border border-cyan-800/60 px-2 py-0.5 rounded-full font-semibold text-[10px] shrink-0">
+                  Familiar ({currentReviewState.correctCount}✓)
+                </span>
+              ) : currentReviewState?.level === 'learning' ? (
                 <span className="bg-blue-950/80 text-blue-300 border border-blue-800/60 px-2 py-0.5 rounded-full font-semibold text-[10px] shrink-0">
-                  Learning ({currentMastery.correctCount}/10✓)
+                  Learning
                 </span>
               ) : (
                 <span className="bg-slate-800 text-slate-400 border border-slate-700 px-2 py-0.5 rounded-full font-medium text-[10px] shrink-0">
-                  Fresh Word
+                  Fresh Concept
                 </span>
               )}
             </div>

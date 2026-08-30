@@ -86,6 +86,56 @@
         "updatedAt": { "type": "number", "description": "Last updated timestamp in ms" }
       },
       "required": ["code", "roomId", "host", "status", "createdAt"]
+    },
+    "QuestionBankItem": {
+      "title": "QuestionBankItem",
+      "description": "Approved and published government exam PYQ item in live VocabClash Question Bank",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique question ID" },
+        "category": { "type": "string", "description": "synonyms, antonyms, ows, or idioms" },
+        "wordOrPhrase": { "type": "string", "description": "Core target word or phrase" },
+        "instruction": { "type": "string", "description": "Question instruction" },
+        "options": { "type": "array", "description": "Array of 4 options" },
+        "correctIndex": { "type": "number", "description": "0-indexed correct option" },
+        "meaning": { "type": "string", "description": "English meaning" },
+        "hindiMeaning": { "type": "string", "description": "Hindi translation/meaning" },
+        "exampleSentence": { "type": "string", "description": "Contextual usage sentence" },
+        "mnemonic": { "type": "string", "description": "Memory trick / Hinglish hook" },
+        "rootWordInfo": { "type": "string", "description": "Etymology or origin" },
+        "examHistory": { "type": "array", "description": "Array of exam appearances" },
+        "repeatCount": { "type": "number", "description": "Historical repeat count" },
+        "importanceLevel": { "type": "string", "description": "ultra-high, very-high, or high" },
+        "difficulty": { "type": "string", "description": "easy, medium, or hard" },
+        "isPYQ": { "type": "boolean", "description": "True for authentic PYQ" },
+        "verified": { "type": "boolean", "description": "True if admin-approved" },
+        "sourceBatchId": { "type": "string", "description": "ID of import batch" },
+        "createdAt": { "type": "number", "description": "Timestamp created in ms" },
+        "updatedAt": { "type": "number", "description": "Timestamp updated in ms" }
+      },
+      "required": ["id", "category", "wordOrPhrase", "options", "correctIndex"]
+    },
+    "PyqImportBatch": {
+      "title": "PyqImportBatch",
+      "description": "Metadata for an imported JSON / PDF batch of PYQ questions",
+      "type": "object",
+      "properties": {
+        "batchId": { "type": "string", "description": "Unique batch ID" },
+        "sourceFileName": { "type": "string", "description": "Original source file name" },
+        "examFamily": { "type": "string", "description": "Exam family (SSC, Banking, etc.)" },
+        "exam": { "type": "string", "description": "Exam name" },
+        "year": { "type": "number", "description": "Exam year" },
+        "tier": { "type": "string", "description": "Tier or stage" },
+        "shift": { "type": "string", "description": "Exam shift" },
+        "paper": { "type": "string", "description": "Exam paper/subject" },
+        "dateImported": { "type": "number", "description": "Import timestamp" },
+        "totalDetected": { "type": "number", "description": "Total eligible questions detected" },
+        "approvedCount": { "type": "number", "description": "Count of approved questions" },
+        "publishedCount": { "type": "number", "description": "Count of published questions" },
+        "status": { "type": "string", "description": "pending_review, completed, or discarded" },
+        "updatedAt": { "type": "number", "description": "Timestamp last updated" }
+      },
+      "required": ["batchId", "dateImported", "status"]
     }
   },
   "firestore": {
@@ -108,6 +158,14 @@
     "/friendRooms/{lobbyCode}": {
       "schema": "FriendLobby",
       "description": "Private 6-digit custom rooms for 1v1 battles with friends (canonical alias)"
+    },
+    "/question_bank/{questionId}": {
+      "schema": "QuestionBankItem",
+      "description": "Published and verified authentic PYQ question bank items for VocabClash"
+    },
+    "/pyq_import_batches/{batchId}": {
+      "schema": "PyqImportBatch",
+      "description": "Admin batch ingestion logs and tracking"
     }
   }
 }

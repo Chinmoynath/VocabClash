@@ -170,6 +170,38 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
           onSignOut={onSignOut}
         />
 
+        {/* Admin PYQ Ingestion Pipeline Button (Prominent for Admin) */}
+        {(currentUser?.email?.toLowerCase() === 'nathchinmoy777@gmail.com' || (currentUser?.email && currentUser.email.toLowerCase().includes('admin'))) && (
+          <button
+            onClick={() => {
+              soundManager.playTap();
+              if (typeof window !== 'undefined') {
+                window.location.hash = 'admin-pyq';
+              }
+              onClose();
+            }}
+            className="w-full py-2.5 px-3.5 bg-gradient-to-r from-amber-950/90 to-amber-900/90 hover:from-amber-900 hover:to-amber-850 border-2 border-amber-500/80 rounded-2xl text-amber-200 text-xs font-black flex items-center justify-between transition shadow-lg shadow-amber-950/50 cursor-pointer animate-pulse"
+          >
+            <div className="flex items-center gap-2.5">
+              <div className="w-7 h-7 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/50 flex items-center justify-center text-sm">
+                📁
+              </div>
+              <div className="text-left">
+                <div className="text-amber-300 font-extrabold flex items-center gap-1.5">
+                  <span>PYQ PDF Importer</span>
+                  <span className="text-[9px] bg-amber-500 text-slate-950 px-1.5 py-0.2 rounded font-black tracking-wider uppercase">
+                    Admin
+                  </span>
+                </div>
+                <div className="text-[10px] text-amber-400/80 font-normal">Extract & Review Govt Exam Questions</div>
+              </div>
+            </div>
+            <span className="text-xs text-amber-400 font-bold bg-amber-500/20 px-2 py-1 rounded-xl border border-amber-500/40">
+              Open →
+            </span>
+          </button>
+        )}
+
         {/* VIP Membership Banner in Profile */}
         <div 
           onClick={() => {
@@ -497,6 +529,26 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
             >
               <Edit3 className="w-4 h-4" />
               <span>EDIT PROFILE & TARGET EXAM</span>
+            </button>
+          )}
+
+          {/* Admin PYQ Ingestion Pipeline Link (Admin UID/Email Only) */}
+          {(currentUser?.email === 'Nathchinmoy777@gmail.com' || (currentUser?.email && currentUser.email.toLowerCase().includes('admin'))) && (
+            <button
+              onClick={() => {
+                soundManager.playTap();
+                if (typeof window !== 'undefined') {
+                  window.location.hash = 'admin-pyq';
+                }
+                onClose();
+              }}
+              className="w-full py-2.5 px-3 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/40 rounded-xl text-amber-300 text-xs font-bold flex items-center justify-between transition shadow-sm"
+            >
+              <div className="flex items-center gap-2">
+                <span>📁</span>
+                <span>Admin PYQ PDF Importer</span>
+              </div>
+              <span className="text-[10px] bg-amber-500/20 px-2 py-0.5 rounded font-mono">Open Portal →</span>
             </button>
           )}
 

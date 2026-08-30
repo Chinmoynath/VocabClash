@@ -14,6 +14,8 @@ interface TopBarProps {
   onOpenPremium: () => void;
   onOpenStreak: () => void;
   onOpenTour?: () => void;
+  onOpenAdminImporter?: () => void;
+  isAdmin?: boolean;
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -25,6 +27,8 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenProfile,
   onOpenPremium,
   onOpenStreak,
+  onOpenAdminImporter,
+  isAdmin = false,
 }) => {
   return (
     <header className="w-full bg-slate-900/95 backdrop-blur-md px-3 sm:px-4 py-2 border-b border-slate-800 flex items-center justify-between z-30 shrink-0">
@@ -110,6 +114,21 @@ export const TopBar: React.FC<TopBarProps> = ({
             {subscription.isPremium ? 'VIP' : 'PRO'}
           </span>
         </button>
+
+        {/* Admin Quick Portal Access Icon */}
+        {isAdmin && onOpenAdminImporter && (
+          <button
+            onClick={() => {
+              soundManager.playTap();
+              onOpenAdminImporter();
+            }}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-md shadow-amber-500/30 transition-all cursor-pointer animate-pulse"
+            title="Open Admin PYQ PDF Importer"
+          >
+            <span>📁</span>
+            <span className="text-[10px] uppercase tracking-wider font-extrabold hidden sm:inline">PYQ Import</span>
+          </button>
+        )}
 
         {/* Audio Toggle */}
         <button

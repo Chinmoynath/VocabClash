@@ -44,11 +44,12 @@ export function createGoogleProvider(): GoogleAuthProvider {
 
 export const googleProvider = createGoogleProvider();
 
-// Initialize Firestore with memory cache to prevent IDB closing transaction exceptions
+// Initialize Firestore with memory cache and auto-detect long polling for reliable web channel connections
 let dbInstance: ReturnType<typeof getFirestore>;
 try {
   dbInstance = initializeFirestore(app, {
-    localCache: memoryLocalCache()
+    localCache: memoryLocalCache(),
+    experimentalAutoDetectLongPolling: true,
   }, firebaseConfig.firestoreDatabaseId || undefined);
 } catch {
   dbInstance = getFirestore(app, firebaseConfig.firestoreDatabaseId || undefined);
@@ -331,6 +332,10 @@ export function sanitizeForFirestore<T>(data: T): T {
   return data;
 }
 
+// In-memory write tracking to prevent write stream flooding
+const lastSavedPayloadMap = new Map<string, string>();
+let isWritingUserData = false;
+
 // Save complete user state to Firestore
 export async function saveUserDataToFirestore(
   uid: string,
@@ -342,9 +347,10 @@ export async function saveUserDataToFirestore(
   },
   currentUser?: FirebaseUser | null
 ): Promise<void> {
+  if (!uid) return;
   const path = `users/${uid}`;
+  
   try {
-    const userDocRef = doc(db, 'users', uid);
     const rawPayload = {
       uid,
       email: currentUser?.email || data.player.email || null,
@@ -369,9 +375,28 @@ export async function saveUserDataToFirestore(
     };
     
     const cleanPayload = sanitizeForFirestore(rawPayload);
+    
+    // Check if substantial payload (ignoring exact updatedAt timestamp) has actually changed
+    const comparablePayload = { ...cleanPayload, updatedAt: 0 };
+    const serialized = JSON.stringify(comparablePayload);
+    const lastSaved = lastSavedPayloadMap.get(uid);
+    if (lastSaved === serialized) {
+      return; // Skip duplicate identical write
+    }
+
+    if (isWritingUserData) {
+      // If a write is currently in-flight, wait a short moment to avoid concurrent write stream overloading
+      await new Promise(r => setTimeout(r, 200));
+    }
+
+    isWritingUserData = true;
+    const userDocRef = doc(db, 'users', uid);
     await setDoc(userDocRef, cleanPayload, { merge: true });
+    lastSavedPayloadMap.set(uid, serialized);
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
+  } finally {
+    isWritingUserData = false;
   }
 }
 

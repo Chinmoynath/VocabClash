@@ -31,6 +31,12 @@ export interface Question {
   repeatCount: number; // e.g. 14
   importanceLevel: ImportanceLevel;
   difficulty: Difficulty;
+  isPYQ?: boolean;
+  verified?: boolean;
+  conceptKey?: string;
+  memoryKey?: string;
+  sourceType?: 'verified_pyq' | 'generated_practice';
+  reviewReason?: 'fresh' | 'due_review' | 'mistake_review' | 'saved_review' | 'pool_exhausted_review';
 }
 
 export type RankTier = 

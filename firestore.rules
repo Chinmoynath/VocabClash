@@ -6,6 +6,10 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    function isPyqAdmin() {
+      return request.auth != null && request.auth.token.email == 'nathchinmoy777@gmail.com';
+    }
+
     // User Profile Document (Authenticated Owner access)
     match /users/{userId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
@@ -34,6 +38,17 @@ service cloud.firestore {
 
     match /friendRooms/{lobbyCode} {
       allow read, write: if true;
+    }
+
+    // Question Bank: Public read for client arena/drills, Admin-only write
+    match /question_bank/{questionId} {
+      allow read: if true;
+      allow create, update, delete: if isPyqAdmin();
+    }
+
+    // PYQ Import Batches: Admin-only read/write
+    match /pyq_import_batches/{batchId} {
+      allow read, write: if isPyqAdmin();
     }
   }
 }
