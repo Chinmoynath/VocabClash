@@ -21,6 +21,7 @@ import {
   Brain
 } from 'lucide-react';
 import { ReportQuestionModal } from './ReportQuestionModal';
+import { formatExamTag } from '../services/jsonPyqParser';
 
 interface MistakeVaultProps {
   savedWords: SavedWord[];
@@ -579,7 +580,13 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
 
                   {/* Exam Attribution */}
                   <div className="text-[10px] text-slate-400 flex items-center justify-between pt-0.5 gap-2">
-                    <span className="truncate">Asked in: {item.question.examHistory.slice(0, 2).join(', ')}</span>
+                    <span className="truncate">
+                      Asked in: {
+                        item.question.exam || item.question.year || item.question.examDate || item.question.shift
+                          ? formatExamTag(item.question.exam, item.question.year, item.question.examDate, item.question.shift)
+                          : (item.question.examHistory && item.question.examHistory.length > 0 ? item.question.examHistory.slice(0, 2).join(', ') : 'Govt Exam PYQ')
+                      }
+                    </span>
                     <span className="text-amber-400 font-bold shrink-0">Repeated {item.question.repeatCount}x</span>
                   </div>
                 </div>

@@ -62,6 +62,7 @@ export interface Question {
   exam?: string;
   year?: number;
   shift?: string | null;
+  examDate?: string | null; // e.g. "19 Sept", "18 Oct"
   questionNumber?: number | string;
 }
 

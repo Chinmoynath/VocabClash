@@ -29,7 +29,7 @@ import {
   Wand2
 } from 'lucide-react';
 import { ExtractedQuestion, ImportBatch, ReviewStatus } from '../types/pyqImport';
-import { parseAndValidatePyqJSON, SkippedQuestionItem, extractJsonMetadata } from '../services/jsonPyqParser';
+import { parseAndValidatePyqJSON, SkippedQuestionItem, extractJsonMetadata, formatExamTag, normalizeExamDate } from '../services/jsonPyqParser';
 import { questionBankEngine } from '../services/questionBankEngine';
 import { publishApprovedQuestionsToFirestore, isUserAdmin, ADMIN_EMAIL } from '../services/pyqFirestoreService';
 import { 
@@ -70,6 +70,7 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
     year: number;
     tier: string;
     shift: string;
+    examDate: string;
     paper: string;
   }>({
     examFamily: 'SSC',
@@ -77,6 +78,7 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
     year: 2024,
     tier: 'Tier 1',
     shift: '',
+    examDate: '',
     paper: 'English Comprehension'
   });
 
@@ -170,6 +172,7 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
               exam: newExam,
               year: detected.year || prev.year,
               shift: detected.shift !== undefined && detected.shift !== null ? detected.shift : prev.shift,
+              examDate: detected.examDate || prev.examDate,
               tier: detected.tier || prev.tier,
               paper: detected.paper || prev.paper,
             };
@@ -199,6 +202,7 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
             exam: newExam,
             year: detected.year || prev.year,
             shift: detected.shift !== undefined && detected.shift !== null ? detected.shift : prev.shift,
+            examDate: detected.examDate || prev.examDate,
             tier: detected.tier || prev.tier,
             paper: detected.paper || prev.paper,
           };
@@ -392,12 +396,13 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
         const resolvedShift = (q.shift && q.shift !== 'Not Specified' && q.shift !== 'null' && q.shift !== 'undefined')
           ? q.shift
           : (metadata.shift && metadata.shift !== 'Not Specified' && metadata.shift !== 'null' ? metadata.shift : null);
+        const resolvedExamDate = q.examDate ? normalizeExamDate(q.examDate) : (metadata.examDate ? normalizeExamDate(metadata.examDate) : null);
         const resolvedExam = q.exam || metadata.exam || 'SSC CGL';
         const resolvedYear = q.year || metadata.year || 2024;
         const resolvedFamily = q.examFamily || metadata.examFamily || 'SSC';
         const resolvedQNo = q.questionNumber !== undefined ? q.questionNumber : (qIndex + 1);
 
-        const examHistoryItem = [resolvedExam, String(resolvedYear), resolvedShift].filter(Boolean).join(' ');
+        const examHistoryItem = formatExamTag(resolvedExam, resolvedYear, resolvedExamDate, resolvedShift);
 
         return {
           id: `pyq-${q.category}-${resolvedYear}-${q.wordOrPhrase.toLowerCase().replace(/[^a-z0-9]/g, '_')}-${Math.random().toString(36).slice(2, 6)}`,
@@ -423,6 +428,7 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
           exam: resolvedExam,
           year: resolvedYear,
           shift: resolvedShift,
+          examDate: resolvedExamDate,
           questionNumber: resolvedQNo,
           examHistory: q.examHistory && q.examHistory.length > 0 ? q.examHistory : [examHistoryItem],
           repeatCount: q.repeatCount || 1,
@@ -438,11 +444,13 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
       const resolvedShift = (metadata.shift && metadata.shift !== 'Not Specified' && metadata.shift !== 'null')
         ? metadata.shift
         : null;
+      const resolvedExamDate = metadata.examDate ? normalizeExamDate(metadata.examDate) : null;
 
       const batchMetadata: ImportBatch = currentBatch 
         ? {
             ...currentBatch,
             shift: currentBatch.shift || resolvedShift || undefined,
+            examDate: currentBatch.examDate || resolvedExamDate || undefined,
             status: 'completed',
             publishedCount: approved.length,
           }
@@ -455,6 +463,7 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
             year: metadata.year,
             tier: metadata.tier,
             shift: resolvedShift || undefined,
+            examDate: resolvedExamDate || undefined,
             paper: metadata.paper,
             totalQuestionsInFile: extractedQuestions.length + skippedItems.length,
             eligibleQuestionsCount: extractedQuestions.length,
@@ -771,7 +780,7 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
               )}
 
               {/* Metadata Controls */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 pt-2">
                 <div>
                   <label className="text-xs text-slate-400 block mb-1 font-medium">Exam Family</label>
                   <select
@@ -811,6 +820,17 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
                     value={metadata.year}
                     onChange={e => setMetadata({ ...metadata, year: parseInt(e.target.value, 10) || 2024 })}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-sky-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs text-slate-400 block mb-1 font-medium">Date & Month</label>
+                  <input
+                    type="text"
+                    value={metadata.examDate}
+                    onChange={e => setMetadata({ ...metadata, examDate: e.target.value })}
+                    placeholder="e.g. 19 Sept, 18 Oct"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-sky-500 font-medium"
                   />
                 </div>
 
@@ -983,6 +1003,9 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
                                   </span>
                                   {(() => {
                                     const parts: string[] = [q.exam, String(q.year)];
+                                    if (q.examDate && q.examDate.trim()) {
+                                      parts.push(q.examDate);
+                                    }
                                     if (q.shift && q.shift.trim() && q.shift !== 'Not Specified' && q.shift !== 'null' && q.shift !== 'undefined') {
                                       parts.push(q.shift);
                                     }
@@ -1651,7 +1674,17 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Date & Month</label>
+                <input
+                  type="text"
+                  value={editingQuestion.examDate || ''}
+                  onChange={e => setEditingQuestion({ ...editingQuestion, examDate: e.target.value || null })}
+                  placeholder="e.g. 19 Sept, 18 Oct"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-sky-500 font-medium"
+                />
+              </div>
               <div>
                 <label className="text-xs text-slate-400 block mb-1">Exam Shift</label>
                 <select

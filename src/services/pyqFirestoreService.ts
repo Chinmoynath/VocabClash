@@ -19,6 +19,7 @@ import {
 } from './firebaseService';
 import { Question, QuestionCategory, QuestionOptionDetail } from '../types';
 import { ImportBatch } from '../types/pyqImport';
+import { formatExamTag, normalizeExamDate } from './jsonPyqParser';
 
 export const ADMIN_EMAIL = 'nathchinmoy777@gmail.com';
 
@@ -103,6 +104,7 @@ export async function fetchPublishedQuestionBank(): Promise<Question[]> {
           exam: data.exam || 'SSC CGL',
           year: data.year || 2024,
           shift: data.shift || null,
+          examDate: data.examDate || null,
           questionNumber: data.questionNumber || undefined,
         });
       }
@@ -152,10 +154,12 @@ export async function publishApprovedQuestionsToFirestore(
     const resolvedBatchShift = (batch.shift && batch.shift !== 'Not Specified' && batch.shift !== 'null' && batch.shift !== 'undefined')
       ? batch.shift
       : null;
+    const resolvedBatchExamDate = batch.examDate ? normalizeExamDate(batch.examDate) : null;
 
     const sanitizedBatch = sanitizeForFirestore({
       ...batch,
       shift: resolvedBatchShift,
+      examDate: resolvedBatchExamDate,
       status: 'completed',
       publishedCount: questions.length,
       updatedAt: Date.now(),
@@ -174,6 +178,7 @@ export async function publishApprovedQuestionsToFirestore(
         const resolvedShift = (q.shift && q.shift !== 'Not Specified' && q.shift !== 'null' && q.shift !== 'undefined') 
           ? q.shift 
           : resolvedBatchShift;
+        const resolvedExamDate = q.examDate ? (normalizeExamDate(q.examDate) || q.examDate) : resolvedBatchExamDate;
 
         const examFamily = q.examFamily || batch.examFamily || 'SSC';
         const exam = q.exam || batch.exam || 'SSC CGL';
@@ -183,6 +188,8 @@ export async function publishApprovedQuestionsToFirestore(
         const validOptionDetails = (Array.isArray(q.optionDetails) && q.optionDetails.length === 4)
           ? q.optionDetails
           : null;
+
+        const dynamicExamTag = formatExamTag(exam, year, resolvedExamDate, resolvedShift);
 
         const payload: any = sanitizeForFirestore({
           id: q.id,
@@ -203,6 +210,7 @@ export async function publishApprovedQuestionsToFirestore(
           exam,
           year,
           shift: resolvedShift,
+          examDate: resolvedExamDate,
           questionNumber,
           appearances: [
             {
@@ -210,11 +218,12 @@ export async function publishApprovedQuestionsToFirestore(
               exam,
               year,
               shift: resolvedShift,
+              examDate: resolvedExamDate,
               questionNumber,
             }
           ],
           examHistory: q.examHistory && q.examHistory.length > 0 ? q.examHistory : [
-            [exam, String(year), resolvedShift].filter(Boolean).join(' ')
+            dynamicExamTag
           ],
           repeatCount: q.repeatCount || 1,
           importanceLevel: q.importanceLevel || 'ultra-high',

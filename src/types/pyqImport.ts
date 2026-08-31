@@ -29,6 +29,7 @@ export interface ExtractedQuestion {
   year: number;
   tier?: string;      // e.g. "Tier 1", "Prelims", "Shift 2"
   shift?: string | null;
+  examDate?: string | null; // e.g. "19 Sept", "18 Oct"
   questionNumber?: number | string;
   paper?: string;
   reviewStatus: ReviewStatus;
@@ -50,6 +51,7 @@ export interface ImportBatch {
   year: number;
   tier?: string;
   shift?: string;
+  examDate?: string;
   paper?: string;
   dateImported: number;
   totalDetected: number;

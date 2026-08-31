@@ -14,8 +14,89 @@ export interface ExtractedJsonMetadata {
   exam?: string;
   year?: number;
   shift?: string | null;
+  examDate?: string | null;
   tier?: string;
   paper?: string;
+}
+
+export function normalizeExamDate(rawDate: any): string | null {
+  if (!rawDate && rawDate !== 0) return null;
+  const str = String(rawDate).trim();
+  if (!str || str === 'null' || str === 'undefined' || str === 'Not Specified') return null;
+
+  const monthMap: Record<string, string> = {
+    '1': 'Jan', '01': 'Jan', 'jan': 'Jan', 'january': 'Jan',
+    '2': 'Feb', '02': 'Feb', 'feb': 'Feb', 'february': 'Feb',
+    '3': 'Mar', '03': 'Mar', 'mar': 'Mar', 'march': 'Mar',
+    '4': 'Apr', '04': 'Apr', 'apr': 'Apr', 'april': 'Apr',
+    '5': 'May', '05': 'May', 'may': 'May',
+    '6': 'Jun', '06': 'Jun', 'jun': 'Jun', 'june': 'Jun',
+    '7': 'Jul', '07': 'Jul', 'jul': 'Jul', 'july': 'Jul',
+    '8': 'Aug', '08': 'Aug', 'aug': 'Aug', 'august': 'Aug',
+    '9': 'Sept', '09': 'Sept', 'sep': 'Sept', 'sept': 'Sept', 'september': 'Sept',
+    '10': 'Oct', 'oct': 'Oct', 'october': 'Oct',
+    '11': 'Nov', 'nov': 'Nov', 'november': 'Nov',
+    '12': 'Dec', 'dec': 'Dec', 'december': 'Dec',
+  };
+
+  // Match "19 Sept" or "19 September" or "19-Sept" or "19 Sept 2024"
+  const wordMatch = str.match(/^(\d{1,2})[\s\-\/\.]+([A-Za-z]+)(?:[\s\-\/\.]+\d{2,4})?$/);
+  if (wordMatch) {
+    const day = parseInt(wordMatch[1], 10);
+    const rawMonth = wordMatch[2].toLowerCase();
+    const mon = monthMap[rawMonth] || (wordMatch[2].charAt(0).toUpperCase() + wordMatch[2].slice(1, 4).toLowerCase());
+    return `${day} ${mon}`;
+  }
+
+  // Match "Sept 19" or "September 19"
+  const revWordMatch = str.match(/^([A-Za-z]+)[\s\-\/\.]+(\d{1,2})(?:[\s\-\/\.]+\d{2,4})?$/);
+  if (revWordMatch) {
+    const day = parseInt(revWordMatch[2], 10);
+    const rawMonth = revWordMatch[1].toLowerCase();
+    const mon = monthMap[rawMonth] || (revWordMatch[1].charAt(0).toUpperCase() + revWordMatch[1].slice(1, 4).toLowerCase());
+    return `${day} ${mon}`;
+  }
+
+  // Match "19/09" or "19-09-2024" or "19/09/2024" (DD/MM/YYYY or DD/MM)
+  const numericMatch = str.match(/^(\d{1,2})[\/\-\.](\d{1,2})(?:[\/\-\.]\d{2,4})?$/);
+  if (numericMatch) {
+    const day = parseInt(numericMatch[1], 10);
+    const monthNum = numericMatch[2];
+    const mon = monthMap[monthNum] || monthMap[String(parseInt(monthNum, 10))] || monthNum;
+    return `${day} ${mon}`;
+  }
+
+  // Match ISO "2024-09-19"
+  const isoMatch = str.match(/^\d{4}[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+  if (isoMatch) {
+    const day = parseInt(isoMatch[2], 10);
+    const monthNum = isoMatch[1];
+    const mon = monthMap[monthNum] || monthMap[String(parseInt(monthNum, 10))] || monthNum;
+    return `${day} ${mon}`;
+  }
+
+  return str;
+}
+
+export function formatExamTag(
+  exam?: string, 
+  year?: number | string, 
+  examDate?: string | null, 
+  shift?: string | null
+): string {
+  const parts: string[] = [];
+  if (exam) parts.push(exam);
+  if (year) parts.push(String(year));
+
+  const subParts: string[] = [];
+  if (examDate) subParts.push(examDate);
+  if (shift && shift !== 'Not Specified' && shift !== 'null' && shift !== 'undefined') subParts.push(shift);
+
+  if (subParts.length > 0) {
+    parts.push(`(${subParts.join(' - ')})`);
+  }
+
+  return parts.join(' ') || 'Govt Exam PYQ';
 }
 
 export function extractJsonMetadata(jsonContent: string): ExtractedJsonMetadata | null {
@@ -32,6 +113,11 @@ export function extractJsonMetadata(jsonContent: string): ExtractedJsonMetadata 
     if (meta.shift !== undefined) {
       const s = String(meta.shift).trim();
       result.shift = (s && s !== 'Not Specified' && s !== 'null' && s !== 'undefined') ? s : null;
+    }
+    const rawDate = meta.examDate || meta.date || meta.examDateMonth || meta.dateMonth || meta.exam_date || meta.monthDate;
+    if (rawDate !== undefined) {
+      const norm = normalizeExamDate(rawDate);
+      if (norm) result.examDate = norm;
     }
     if (meta.tier && typeof meta.tier === 'string') result.tier = meta.tier.trim();
     if (meta.paper && typeof meta.paper === 'string') result.paper = meta.paper.trim();
@@ -191,6 +277,7 @@ export function parseAndValidatePyqJSON(
     year?: number;
     tier?: string;
     shift?: string;
+    examDate?: string | null;
     paper?: string;
   }
 ): ParseJSONResult {
@@ -242,6 +329,7 @@ export function parseAndValidatePyqJSON(
   };
 
   const defaultShift = resolveShift(metadataOverride?.shift ?? metaFromFile.shift);
+  const defaultExamDate = normalizeExamDate(metadataOverride?.examDate ?? metaFromFile.examDate ?? metaFromFile.date ?? metaFromFile.examDateMonth ?? metaFromFile.dateMonth ?? metaFromFile.exam_date ?? metaFromFile.monthDate);
   const defaultPaper = metadataOverride?.paper || metaFromFile.paper || fallbackPaper;
 
   const batchId = `batch_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
@@ -353,6 +441,8 @@ export function parseAndValidatePyqJSON(
         ? parseInt(metaFromFile.year, 10)
         : (metadataOverride?.year || fallbackYear));
     const itemShift = resolveShift(item.shift) ?? resolveShift(metaFromFile.shift) ?? resolveShift(metadataOverride?.shift);
+    const rawItemDate = item.examDate ?? item.date ?? item.examDateMonth ?? item.dateMonth ?? item.exam_date ?? item.monthDate;
+    const itemExamDate = normalizeExamDate(rawItemDate) ?? defaultExamDate;
     const itemTier = item.tier || metaFromFile.tier || metadataOverride?.tier || fallbackTier;
     const itemPaper = item.paper || metaFromFile.paper || metadataOverride?.paper || fallbackPaper;
     const itemQuestionNumber = item.questionNumber ?? item.qNo ?? item.qNumber ?? item.questionNo ?? item.number ?? (index + 1);
@@ -413,6 +503,7 @@ export function parseAndValidatePyqJSON(
       year: itemYear,
       tier: itemTier,
       shift: itemShift,
+      examDate: itemExamDate,
       questionNumber: itemQuestionNumber,
       paper: itemPaper,
       reviewStatus,
@@ -433,6 +524,7 @@ export function parseAndValidatePyqJSON(
     year: defaultYear,
     tier: defaultTier,
     shift: defaultShift || undefined,
+    examDate: defaultExamDate || undefined,
     paper: defaultPaper,
     dateImported: Date.now(),
     totalDetected: eligibleQuestions.length,

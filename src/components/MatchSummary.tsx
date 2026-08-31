@@ -689,9 +689,9 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
                               key={optIdx}
                               className={`p-2.5 sm:p-3 rounded-xl border text-xs flex items-center justify-between gap-2.5 ${optClass}`}
                             >
-                              <div className="flex items-center gap-2 min-w-0">
+                              <div className="flex items-start sm:items-center gap-2 min-w-0 flex-1">
                                 {badgeIcon}
-                                <span className="font-semibold truncate">{opt}</span>
+                                <span className="font-semibold break-words leading-snug flex-1">{opt}</span>
                               </div>
                               {isCorrectOpt && (
                                 <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wide shrink-0">

@@ -32,6 +32,7 @@ import { AdSenseUnit } from './AdSenseUnit';
 import { ADSENSE_BANNER_SLOT } from '../services/adSenseService';
 import { ReportQuestionModal } from './ReportQuestionModal';
 import { SupportModal } from './SupportModal';
+import { formatExamTag } from '../services/jsonPyqParser';
 
 interface PracticeModeProps {
   pyqScore: number;
@@ -462,8 +463,17 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
             <h3 className="text-xl font-black text-amber-400 break-words">
               "{currentQ.wordOrPhrase}"
             </h3>
-            <div className="text-[10px] text-sky-400 flex items-center justify-center gap-1 pt-1">
-              <span>{currentQ.examHistory.slice(0, 2).join(' • ')}</span>
+            <div className="text-[10px] text-sky-400 flex items-center justify-center gap-1.5 pt-1 flex-wrap">
+              <span>
+                {(() => {
+                  if (currentQ.exam || currentQ.year || currentQ.examDate || currentQ.shift) {
+                    return formatExamTag(currentQ.exam, currentQ.year, currentQ.examDate, currentQ.shift);
+                  }
+                  return (currentQ.examHistory && currentQ.examHistory.length > 0)
+                    ? currentQ.examHistory.slice(0, 2).join(' • ')
+                    : 'Govt Exam PYQ';
+                })()}
+              </span>
             </div>
           </div>
 
@@ -489,11 +499,11 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
                   onClick={() => handleSelectOption(idx)}
                   className={`w-full p-3.5 rounded-xl border text-left flex items-center justify-between text-xs sm:text-sm font-semibold transition-all shadow-sm ${style}`}
                 >
-                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                    <span className="w-6 h-6 rounded-md bg-slate-900 border border-slate-700 text-[10px] font-mono flex items-center justify-center font-bold shrink-0">
+                  <div className="flex items-start sm:items-center gap-2.5 min-w-0 flex-1">
+                    <span className="w-6 h-6 rounded-md bg-slate-900 border border-slate-700 text-[10px] font-mono flex items-center justify-center font-bold shrink-0 mt-0.5 sm:mt-0">
                       {String.fromCharCode(65 + idx)}
                     </span>
-                    <span className="truncate">{option}</span>
+                    <span className="break-words leading-snug flex-1 text-slate-100">{option}</span>
                   </div>
 
                   <div className="flex items-center gap-1.5 shrink-0 ml-2">
