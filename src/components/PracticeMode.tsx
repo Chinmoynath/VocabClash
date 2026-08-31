@@ -26,7 +26,10 @@ import {
   LifeBuoy,
   RotateCcw,
   CheckCircle,
-  Info
+  Info,
+  Timer,
+  Pause,
+  Play
 } from 'lucide-react';
 import { AdSenseUnit } from './AdSenseUnit';
 import { ADSENSE_BANNER_SLOT } from '../services/adSenseService';
@@ -81,6 +84,24 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
   const [showSupportModal, setShowSupportModal] = useState<boolean>(false);
   const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Auto-advance countdown timer settings (0 = off, 3, 5, 8 seconds)
+  const [autoAdvanceSec, setAutoAdvanceSec] = useState<number>(() => {
+    const saved = localStorage.getItem('vocabclash_pyq_autonext');
+    return saved !== null ? Number(saved) : 0;
+  });
+  const [countdown, setCountdown] = useState<number>(0);
+  const [isCountdownPaused, setIsCountdownPaused] = useState<boolean>(false);
+
+  const handleSetAutoAdvance = (sec: number) => {
+    setAutoAdvanceSec(sec);
+    localStorage.setItem('vocabclash_pyq_autonext', String(sec));
+    if (sec === 0) {
+      setCountdown(0);
+    } else if (isAnswered) {
+      setCountdown(sec);
+    }
+  };
+
   // Overall scheduler summary for top stats
   const [schedulerStats, setSchedulerStats] = useState(() => questionReviewScheduler.getStats());
 
@@ -89,13 +110,45 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     if (currentQ) {
       questionStartTimeRef.current = Date.now();
       setCurrentReviewState(questionReviewScheduler.getReviewState(currentQ.memoryKey || currentQ.wordOrPhrase) || null);
+      setIsCountdownPaused(false);
+      if (autoAdvanceSec > 0) {
+        setCountdown(autoAdvanceSec);
+      }
     }
-  }, [currentQ]);
+  }, [currentQ, autoAdvanceSec]);
 
-  // Desktop keyboard controls (1-4 for options, Space/Enter for Next question)
+  // Auto-advance countdown timer when question is answered
+  useEffect(() => {
+    if (!isAnswered || autoAdvanceSec <= 0 || isCountdownPaused) {
+      return;
+    }
+
+    setCountdown(autoAdvanceSec);
+    const interval = setInterval(() => {
+      setCountdown(prev => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          handleNextQuestion();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [isAnswered, autoAdvanceSec, isCountdownPaused, currentQ]);
+
+  // Desktop keyboard controls (1-4 for options, S/B for bookmark, Space/Enter/N for Next question)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (showReportModal || showSupportModal) return;
+
+      // Bookmark shortcut
+      if (e.key === 's' || e.key === 'S' || e.key === 'b' || e.key === 'B') {
+        e.preventDefault();
+        handleToggleBookmark();
+        return;
+      }
 
       if (!isAnswered && currentQ) {
         if (e.key === '1' || e.key === 'a' || e.key === 'A') {
@@ -117,7 +170,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isAnswered, currentQ, showReportModal, showSupportModal]);
+  }, [isAnswered, currentQ, showReportModal, showSupportModal, bookmarkedIds]);
 
   const showSaveConfirmation = (message: string) => {
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
@@ -424,7 +477,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
               )}
             </div>
 
-            {/* Right side: Transparent Red Flag Icon + Save Button */}
+            {/* Right side: Transparent Red Flag Icon + Save Symbol Only + Next Question Symbol */}
             <div className="flex items-center gap-1.5 shrink-0">
               {/* Transparent Red Flag Report Button */}
               <button
@@ -432,26 +485,38 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
                   soundManager.playTap();
                   setShowReportModal(true);
                 }}
-                className="p-1.5 rounded-lg text-rose-500/80 hover:text-rose-400 hover:bg-rose-950/40 active:scale-95 transition-all"
+                className="p-2 rounded-xl text-rose-500/80 hover:text-rose-400 hover:bg-rose-950/40 active:scale-90 transition-all border border-transparent hover:border-rose-900/40"
                 title="Report issue in this question (support@vocabclash.in)"
                 aria-label="Report Question"
               >
                 <Flag className="w-3.5 h-3.5" />
               </button>
 
-              {/* Save / Bookmark Button */}
+              {/* Save / Bookmark Button - Symbol ONLY */}
               <button
                 onClick={handleToggleBookmark}
                 id="pyq-save-button"
-                className={`flex items-center gap-1 px-2.5 py-1 rounded-lg border text-xs font-bold transition-all ${
+                className={`p-2 rounded-xl border transition-all active:scale-90 flex items-center justify-center ${
                   isBookmarked
-                    ? 'bg-amber-950 border-amber-600 text-amber-400 shadow-sm'
-                    : 'bg-slate-800 hover:bg-slate-750 border-slate-700 text-slate-300'
+                    ? 'bg-amber-950/90 border-amber-500 text-amber-400 shadow-sm ring-1 ring-amber-500/40'
+                    : 'bg-slate-800/90 hover:bg-slate-750 border-slate-700 text-slate-400 hover:text-slate-200'
                 }`}
-                title="Save to Mistake & Revision Vault"
+                title={isBookmarked ? "Saved in Revision Vault (Click to remove, or press S/B)" : "Save Question to Revision Vault (Press S/B)"}
+                aria-label={isBookmarked ? "Saved Question" : "Save Question"}
               >
-                <Bookmark className={`w-3.5 h-3.5 ${isBookmarked ? 'fill-amber-400 text-amber-400' : 'text-slate-400'}`} />
-                <span>{isBookmarked ? 'Saved' : 'Save Question'}</span>
+                <Bookmark className={`w-3.5 h-3.5 transition-transform ${isBookmarked ? 'fill-amber-400 text-amber-400 scale-105' : 'text-slate-400'}`} />
+              </button>
+
+              {/* Next Question Symbol & Quick Action in Sky-Blue Theme */}
+              <button
+                onClick={handleNextQuestion}
+                id="pyq-top-next-button"
+                className="px-2.5 py-1.5 sm:px-3 sm:py-1.5 rounded-xl border border-sky-500/60 bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 hover:text-white active:scale-90 transition-all shadow-sm flex items-center gap-1 group font-bold text-xs"
+                title="Next Question / Skip (Press Space / Enter / N)"
+                aria-label="Next Question"
+              >
+                <span className="text-[11px] font-bold hidden sm:inline">Next</span>
+                <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
               </button>
             </div>
           </div>
@@ -761,14 +826,75 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
                 )}
               </div>
 
-              {/* Next Question CTA */}
-              <button
-                onClick={handleNextQuestion}
-                className="w-full mt-2 bg-gradient-to-r from-sky-600 to-sky-500 hover:from-sky-500 hover:to-sky-400 text-white font-extrabold p-2.5 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-md active:scale-98 transition-all"
-              >
-                <span>NEXT QUESTION</span>
-                <ChevronRight className="w-4 h-4" />
-              </button>
+              {/* Next Question CTA & Auto-Advance Control in Sky-Blue Theme */}
+              <div className="space-y-2 pt-1">
+                <button
+                  onClick={handleNextQuestion}
+                  id="pyq-bottom-next-button"
+                  className="w-full bg-[#00a6f4] hover:bg-[#0096dc] active:bg-[#0086c7] text-white font-black py-3 sm:py-3.5 px-4 rounded-xl sm:rounded-2xl text-xs sm:text-sm uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-sky-500/25 active:scale-[0.99] transition-all relative overflow-hidden group"
+                >
+                  {/* Subtle timer progress bar when auto-advance active */}
+                  {autoAdvanceSec > 0 && countdown > 0 && !isCountdownPaused && (
+                    <div 
+                      className="absolute bottom-0 left-0 top-0 bg-white/20 transition-all duration-1000 ease-linear pointer-events-none"
+                      style={{ width: `${(countdown / autoAdvanceSec) * 100}%` }}
+                    />
+                  )}
+
+                  <span className="relative z-10 flex items-center gap-1.5 sm:gap-2">
+                    <span>NEXT QUESTION</span>
+                    {autoAdvanceSec > 0 && countdown > 0 && (
+                      <span className="bg-sky-950/40 border border-white/20 text-sky-100 text-[10px] sm:text-[11px] px-2 py-0.5 rounded-full font-mono font-bold">
+                        {isCountdownPaused ? 'Paused' : `${countdown}s`}
+                      </span>
+                    )}
+                    <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                  </span>
+                </button>
+
+                {/* Auto-Next Time Option Pill Selector */}
+                <div className="flex items-center justify-between bg-slate-900/90 border border-slate-800 rounded-xl px-2.5 sm:px-3 py-1.5 text-xs">
+                  <div className="flex items-center gap-1.5 text-slate-400 text-[11px] font-semibold">
+                    <Timer className="w-3.5 h-3.5 text-sky-400" />
+                    <span>Auto-Next Timer:</span>
+                  </div>
+
+                  <div className="flex items-center gap-1">
+                    {[
+                      { sec: 0, label: 'Off' },
+                      { sec: 3, label: '3s' },
+                      { sec: 5, label: '5s' },
+                      { sec: 8, label: '8s' },
+                    ].map(opt => (
+                      <button
+                        key={opt.sec}
+                        onClick={() => {
+                          soundManager.playTap();
+                          handleSetAutoAdvance(opt.sec);
+                        }}
+                        className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                          autoAdvanceSec === opt.sec
+                            ? 'bg-[#00a6f4] text-white shadow-sm font-black'
+                            : 'bg-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-750'
+                        }`}
+                        title={opt.sec === 0 ? 'Manual Next button click' : `Automatically advance to next question in ${opt.sec}s`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                    {autoAdvanceSec > 0 && isAnswered && (
+                      <button
+                        onClick={() => setIsCountdownPaused(!isCountdownPaused)}
+                        className="ml-1 p-1 sm:px-1.5 rounded-lg bg-slate-800 border border-slate-700 text-sky-400 hover:text-sky-300 text-[10px] flex items-center gap-0.5 font-bold"
+                        title={isCountdownPaused ? 'Resume auto timer' : 'Pause auto timer'}
+                      >
+                        {isCountdownPaused ? <Play className="w-3 h-3" /> : <Pause className="w-3 h-3" />}
+                        <span className="hidden sm:inline text-[9px]">{isCountdownPaused ? 'Resume' : 'Pause'}</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </div>
