@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { 
   Trophy, 
   Award, 
@@ -22,9 +22,13 @@ import {
   Brain,
   Layers,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   BookOpen,
   Eye,
-  Share2
+  Share2,
+  Info,
+  Lightbulb
 } from 'lucide-react';
 import { MatchState, PlayerProfile, Question } from '../types';
 import { soundManager } from '../utils/audio';
@@ -33,6 +37,8 @@ import { ADSENSE_BANNER_SLOT } from '../services/adSenseService';
 import { ReportQuestionModal } from './ReportQuestionModal';
 import { ShareBattleResultModal } from './ShareBattleResultModal';
 import { BattleShareData } from '../utils/shareCardGenerator';
+import { getOptionBreakdown, OptionDetail } from '../utils/optionExplanations';
+import { formatExamTag } from '../services/jsonPyqParser';
 
 import { User as FirebaseUser } from 'firebase/auth';
 import { AuthCard } from './AuthCard';
@@ -49,6 +55,483 @@ interface MatchSummaryProps {
   currentUser?: FirebaseUser | null;
   onUserChange?: (user: FirebaseUser | null) => void;
 }
+
+interface MatchQuestionReviewCardProps {
+  question: Question;
+  originalIndex: number;
+  isCorrect: boolean;
+  selectedOptionIndex: number;
+  isBookmarked: boolean;
+  onBookmark: (q: Question) => void;
+  onOpenAiDeepDive: (q: Question) => void;
+  onReport: (q: Question) => void;
+}
+
+const MatchQuestionReviewCard: React.FC<MatchQuestionReviewCardProps> = ({
+  question: q,
+  originalIndex: idx,
+  isCorrect,
+  selectedOptionIndex,
+  isBookmarked,
+  onBookmark,
+  onOpenAiDeepDive,
+  onReport,
+}) => {
+  const [showMoreDetails, setShowMoreDetails] = useState<boolean>(false);
+
+  // Compute detailed breakdowns for all 4 options
+  const optionDetails: OptionDetail[] = useMemo(() => {
+    if (Array.isArray(q.optionDetails) && q.optionDetails.length === 4) {
+      return q.optionDetails.map((od, optIdx) => ({
+        option: od.option || q.options[optIdx] || `Option ${String.fromCharCode(65 + optIdx)}`,
+        englishMeaning: od.englishMeaning || 'Option explanation',
+        hindiMeaning: od.hindiMeaning || '',
+        isCorrect: optIdx === q.correctIndex,
+        mnemonicHook: od.mnemonicHook,
+      }));
+    }
+    return getOptionBreakdown(
+      q.options,
+      q.correctIndex,
+      q.category,
+      q.wordOrPhrase,
+      q.meaning,
+      q.hindiMeaning
+    );
+  }, [q]);
+
+  // Guaranteed educational fields resolution
+  const eduDetails = useMemo(() => {
+    const targetWord = (q.wordOrPhrase || '').trim();
+    const correctOpt = q.options[q.correctIndex] || 'Option';
+    const lower = targetWord.toLowerCase();
+
+    let root = q.rootWordInfo?.trim() || '';
+    if (!root) {
+      if (lower.startsWith('pan')) {
+        root = 'Greek pan- ("all, whole") -> formal speech of praise delivered in a public gathering.';
+      } else if (lower.startsWith('castig') || lower.startsWith('chast')) {
+        root = 'Latin castigare (castus "pure" + agere "to drive") -> to discipline or severely criticize.';
+      } else if (lower.startsWith('fastid')) {
+        root = 'Latin fastidium ("loathing, distaste") -> difficult to please; excessively particular.';
+      } else if (lower.startsWith('bene') || lower.startsWith('bon')) {
+        root = 'Latin bene ("well, good") -> expressing kindness or favorable disposition.';
+      } else if (lower.startsWith('mal')) {
+        root = 'Latin malus ("bad, ill") -> denoting harmful, defective, or hostile state.';
+      } else if (lower.startsWith('equ')) {
+        root = 'Latin aequus ("even, equal") -> denoting calmness, balance, or fair proportion.';
+      } else if (lower.startsWith('tacit')) {
+        root = 'Latin tacere ("to be silent") -> expressing quietness or habitual lack of speech.';
+      } else if (lower.startsWith('loqu') || lower.startsWith('locu')) {
+        root = 'Latin loqui ("to speak") -> tending to speak fluently or at great length.';
+      } else {
+        root = `Root and morphological structure of "${targetWord}" tested frequently in competitive examinations.`;
+      }
+    }
+
+    let meaning = q.meaning?.trim() || '';
+    let hindiMeaning = q.hindiMeaning?.trim() || '';
+
+    if (!meaning) {
+      if (q.category === 'synonyms') {
+        meaning = `Shows characteristics or qualities closely corresponding to "${correctOpt}".`;
+        hindiMeaning = `"${targetWord}" का यथार्थ शब्दार्थ एवं भावार्थ`;
+      } else if (q.category === 'antonyms') {
+        meaning = `Denotes a state or quality in direct contrast to "${correctOpt}".`;
+        hindiMeaning = `"${targetWord}" का सटीक विलोमार्थी भाव`;
+      } else if (q.category === 'ows') {
+        meaning = `One who or that which corresponds to: "${targetWord}".`;
+        hindiMeaning = `"${correctOpt}" का एक शब्द में सटीक अर्थ`;
+      } else {
+        meaning = `Figurative meaning: Denotes "${correctOpt}".`;
+        hindiMeaning = `मुहावरे "${targetWord}" का लाक्षणिक अर्थ`;
+      }
+    }
+
+    const mnemonic = q.mnemonic?.trim() || `Memory Hook: Connect "${targetWord}" with "${correctOpt}" for rapid recall during revision.`;
+    const example = q.exampleSentence?.trim() || `The examination sentence tested the precise contextual nuance of "${targetWord}".`;
+
+    return {
+      meaning,
+      hindiMeaning,
+      rootWordInfo: root,
+      mnemonic,
+      exampleSentence: example,
+    };
+  }, [q]);
+
+  const examTagText = (() => {
+    if (q.exam || q.year || q.examDate || q.shift) {
+      return formatExamTag(q.exam, q.year, q.examDate, q.shift);
+    }
+    return (q.examHistory && q.examHistory.length > 0)
+      ? q.examHistory.slice(0, 2).join(' • ')
+      : 'Govt Exam PYQ';
+  })();
+
+  return (
+    <div
+      className={`rounded-2xl border p-4 sm:p-5 space-y-3.5 shadow-lg transition-all ${
+        isCorrect
+          ? 'bg-slate-900/90 border-slate-800 hover:border-emerald-500/40'
+          : 'bg-gradient-to-br from-slate-900 via-slate-900 to-rose-950/30 border-rose-900/40 hover:border-rose-600/60'
+      }`}
+    >
+      {/* Header row */}
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Outcome badge */}
+          <div
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-black ${
+              isCorrect
+                ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800/60'
+                : 'bg-rose-950/80 text-rose-300 border border-rose-800/60'
+            }`}
+          >
+            {isCorrect ? (
+              <>
+                <Check className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Q{idx + 1} • Correct</span>
+              </>
+            ) : (
+              <>
+                <X className="w-3.5 h-3.5 text-rose-400" />
+                <span>Q{idx + 1} • Missed</span>
+              </>
+            )}
+          </div>
+
+          {/* Category Badge */}
+          <span className="text-[11px] font-mono uppercase bg-slate-800 text-amber-400 px-2.5 py-0.5 rounded-md border border-slate-700 font-bold">
+            {q.category}
+          </span>
+
+          {/* Repeat Frequency */}
+          <span className="text-[10px] font-bold bg-amber-950/60 text-amber-300 border border-amber-700/50 px-2 py-0.5 rounded-md">
+            🔥 {q.repeatCount}x in SSC
+          </span>
+        </div>
+
+        {/* Action Buttons: Star/Save, AI Tutor, Report */}
+        <div className="flex items-center gap-1.5">
+          {/* Bookmark/Star to Vault */}
+          <button
+            onClick={() => {
+              soundManager.playTap();
+              onBookmark(q);
+            }}
+            className={`p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+              isBookmarked
+                ? 'bg-amber-950 border-amber-600 text-amber-300'
+                : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300'
+            }`}
+            title={isBookmarked ? 'Saved in Vault' : 'Save to Mistake Vault'}
+          >
+            {isBookmarked ? (
+              <BookmarkCheck className="w-3.5 h-3.5 text-amber-400" />
+            ) : (
+              <Bookmark className="w-3.5 h-3.5 text-slate-400" />
+            )}
+            <span className="hidden sm:inline text-[11px]">
+              {isBookmarked ? 'Saved' : 'Save'}
+            </span>
+          </button>
+
+          {/* Ask AI Deep Dive */}
+          <button
+            onClick={() => {
+              soundManager.playTap();
+              onOpenAiDeepDive(q);
+            }}
+            className="px-2.5 py-1.5 rounded-xl bg-purple-950/80 hover:bg-purple-900 border border-purple-700/60 text-purple-300 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+            title="AI Root Word & Mnemonic Breakdown"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+            <span className="text-[11px]">AI Tutor</span>
+          </button>
+
+          {/* Report Question */}
+          <button
+            onClick={() => {
+              soundManager.playTap();
+              onReport(q);
+            }}
+            className="p-1.5 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-rose-950/40 hover:border-rose-700/60 text-slate-400 hover:text-rose-300 transition-all cursor-pointer"
+            title="Report discrepancy in question"
+          >
+            <Flag className="w-3.5 h-3.5 text-slate-400" />
+          </button>
+        </div>
+      </div>
+
+      {/* Question Statement Box */}
+      <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 sm:p-4 space-y-1">
+        <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+          {q.instruction || 'Select the most appropriate option:'}
+        </div>
+        <h3 className="text-base sm:text-lg font-black text-amber-300 tracking-wide">
+          "{q.wordOrPhrase}"
+        </h3>
+      </div>
+
+      {/* 4 Options Grid (Clearly shows what was picked vs correct) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {q.options.map((opt, optIdx) => {
+          const isCorrectOpt = optIdx === q.correctIndex;
+          const isUserChoice = optIdx === selectedOptionIndex;
+
+          let optClass = 'bg-slate-950/50 border-slate-800 text-slate-400';
+          let badgeIcon = (
+            <span className="w-5 h-5 rounded-md bg-slate-800 border border-slate-700 text-[10px] font-mono font-bold text-slate-400 flex items-center justify-center shrink-0">
+              {String.fromCharCode(65 + optIdx)}
+            </span>
+          );
+
+          if (isCorrectOpt) {
+            optClass = 'bg-emerald-950/70 border-emerald-500/80 text-emerald-200 font-bold ring-1 ring-emerald-500/50';
+            badgeIcon = (
+              <span className="w-5 h-5 rounded-md bg-emerald-600 text-slate-950 flex items-center justify-center shrink-0">
+                <Check className="w-3.5 h-3.5 stroke-[3]" />
+              </span>
+            );
+          } else if (isUserChoice && !isCorrectOpt) {
+            optClass = 'bg-rose-950/70 border-rose-500/80 text-rose-200 font-bold ring-1 ring-rose-500/50';
+            badgeIcon = (
+              <span className="w-5 h-5 rounded-md bg-rose-600 text-white flex items-center justify-center shrink-0">
+                <X className="w-3.5 h-3.5 stroke-[3]" />
+              </span>
+            );
+          }
+
+          return (
+            <div
+              key={optIdx}
+              className={`p-2.5 sm:p-3 rounded-xl border text-xs flex items-center justify-between gap-2.5 ${optClass}`}
+            >
+              <div className="flex items-start sm:items-center gap-2 min-w-0 flex-1">
+                {badgeIcon}
+                <span className="font-semibold break-words leading-snug flex-1">{opt}</span>
+              </div>
+              {isCorrectOpt && (
+                <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wide shrink-0">
+                  Correct
+                </span>
+              )}
+              {isUserChoice && !isCorrectOpt && (
+                <span className="text-[10px] font-bold text-rose-400 uppercase tracking-wide shrink-0">
+                  Your Choice
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Hindi Explanation & Memory Hook Mnemonics Box */}
+      <div className="bg-slate-950/90 rounded-xl p-3 sm:p-3.5 border border-slate-800 text-xs space-y-2">
+        <div className="flex items-start gap-2">
+          <span className="font-black text-amber-400 shrink-0">हिन्दी अर्थ:</span>
+          <span className="text-slate-200 font-medium">{q.hindiMeaning || eduDetails.hindiMeaning}</span>
+        </div>
+
+        {(q.mnemonic || eduDetails.mnemonic) && (
+          <div className="text-[11px] text-sky-200 bg-sky-950/40 border border-sky-800/40 p-2.5 rounded-lg flex items-start gap-2">
+            <span className="font-black text-sky-400 shrink-0">💡 Memory Hook:</span>
+            <span className="leading-relaxed">{q.mnemonic || eduDetails.mnemonic}</span>
+          </div>
+        )}
+
+        {/* Exam Occurrences */}
+        <div className="flex items-center gap-1.5 flex-wrap pt-1 text-[10px] text-slate-400">
+          <span className="font-bold text-slate-400">Past SSC Papers:</span>
+          {q.examHistory && q.examHistory.length > 0 ? (
+            q.examHistory.map((ex, i) => (
+              <span
+                key={i}
+                className="bg-slate-850 border border-slate-700/80 px-2 py-0.5 rounded text-sky-300 font-medium"
+              >
+                🏛️ {ex}
+              </span>
+            ))
+          ) : (
+            <span className="bg-slate-850 border border-slate-700/80 px-2 py-0.5 rounded text-sky-300 font-medium">
+              🏛️ {examTagText}
+            </span>
+          )}
+        </div>
+
+        {/* Interactive "More" Toggle Button */}
+        <button
+          onClick={() => {
+            soundManager.playTap();
+            setShowMoreDetails(prev => !prev);
+          }}
+          className={`w-full mt-2 pt-2 border-t border-slate-800/80 flex items-center justify-between text-xs transition-colors group cursor-pointer ${
+            showMoreDetails ? 'text-sky-300' : 'text-slate-400 hover:text-slate-200'
+          }`}
+          aria-expanded={showMoreDetails}
+        >
+          <div className="flex items-center gap-1.5 font-bold text-[11px]">
+            <BookOpen className={`w-3.5 h-3.5 ${showMoreDetails ? 'text-sky-400' : 'text-amber-400'}`} />
+            <span>
+              {showMoreDetails 
+                ? 'Hide Word Meaning & 4 Options Details' 
+                : 'More: Word Meaning & All 4 Options Breakdown'}
+            </span>
+          </div>
+          <div className="flex items-center gap-1 text-[10px] font-semibold">
+            <span className="hidden sm:inline">{showMoreDetails ? 'Less' : 'View Deep Details'}</span>
+            {showMoreDetails ? (
+              <ChevronUp className="w-3.5 h-3.5 text-sky-400 group-hover:-translate-y-0.5 transition-transform" />
+            ) : (
+              <ChevronDown className="w-3.5 h-3.5 group-hover:translate-y-0.5 transition-transform" />
+            )}
+          </div>
+        </button>
+      </div>
+
+      {/* Expandable Rich Educational Breakdown (Same as PYQ Drill) */}
+      {showMoreDetails && (
+        <div className="space-y-3 pt-1 animate-fadeIn">
+          {/* Word Meaning & Etymology Details */}
+          <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-3 sm:p-3.5 space-y-2 text-xs">
+            <div className="flex items-center justify-between border-b border-slate-800/80 pb-1.5">
+              <div className="flex items-center gap-1.5 font-black text-amber-300 uppercase tracking-wider text-[11px]">
+                <BookOpen className="w-3.5 h-3.5 text-amber-400" />
+                <span>
+                  {q.category === 'idioms' 
+                    ? 'Idiom Meaning & Usage' 
+                    : q.category === 'ows' 
+                    ? 'One Word Substitution Concept' 
+                    : 'Word Meaning & Morphological Insight (शब्दार्थ)'}
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-1.5 bg-slate-900/70 p-2.5 rounded-lg border border-slate-800/60">
+              {eduDetails.meaning && (
+                <div className="text-xs text-slate-100 font-medium">
+                  <span className="font-bold text-sky-400">English: </span>
+                  <span>{eduDetails.meaning}</span>
+                </div>
+              )}
+              {eduDetails.hindiMeaning && (
+                <div className="text-xs text-amber-300/90 font-medium">
+                  <span className="font-bold text-amber-400">हिन्दी भावार्थ: </span>
+                  <span>{eduDetails.hindiMeaning}</span>
+                </div>
+              )}
+              {eduDetails.rootWordInfo && (
+                <div className="text-[11px] text-teal-300/90 pt-1 border-t border-slate-800/60">
+                  <span className="font-bold text-teal-400">Root & Etymology: </span>
+                  <span>{eduDetails.rootWordInfo}</span>
+                </div>
+              )}
+              {eduDetails.exampleSentence && (
+                <div className="text-[11px] text-slate-400 italic pt-1 border-t border-slate-800/60">
+                  <span className="font-semibold text-slate-500 not-italic">Example: </span>
+                  "{eduDetails.exampleSentence}"
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Exam Rationale / Explanation if available */}
+          {q.explanation && (
+            <div className="bg-sky-950/40 border border-sky-800/60 rounded-xl p-2.5 sm:p-3 text-xs space-y-1 text-slate-200">
+              <div className="text-[10px] font-bold text-sky-400 uppercase tracking-wider flex items-center gap-1">
+                <Info className="w-3.5 h-3.5" />
+                <span>Why this answer (Exam Rationale):</span>
+              </div>
+              <div className="leading-relaxed pl-4 text-[12px] text-sky-100">
+                {q.explanation}
+              </div>
+            </div>
+          )}
+
+          {/* All 4 Options Meaning & Explanation */}
+          <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-3 sm:p-3.5 space-y-2.5 text-xs">
+            <div className="flex items-center gap-1.5 border-b border-slate-800 pb-1.5">
+              <Layers className="w-3.5 h-3.5 text-amber-400" />
+              <span className="text-xs font-black uppercase tracking-wider text-slate-200">
+                All 4 Options Meaning & Explanation:
+              </span>
+            </div>
+
+            <div className="space-y-2">
+              {optionDetails.map((detail, optIdx) => {
+                const letter = String.fromCharCode(65 + optIdx);
+                const isCorrect = detail.isCorrect;
+                const isUserChoice = selectedOptionIndex === optIdx;
+
+                return (
+                  <div
+                    key={optIdx}
+                    className={`p-2.5 rounded-xl border text-xs space-y-1 transition-all ${
+                      isCorrect
+                        ? 'bg-emerald-950/70 border-emerald-500/80 text-emerald-100 shadow-sm ring-1 ring-emerald-500/30'
+                        : isUserChoice
+                        ? 'bg-rose-950/60 border-rose-600/70 text-slate-200'
+                        : 'bg-slate-900/80 border-slate-800 text-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          className={`w-5 h-5 rounded-md font-mono text-[10px] font-black flex items-center justify-center border shrink-0 ${
+                            isCorrect
+                              ? 'bg-emerald-800 border-emerald-400 text-emerald-100'
+                              : isUserChoice
+                              ? 'bg-rose-800 border-rose-400 text-rose-100'
+                              : 'bg-slate-800 border-slate-700 text-slate-300'
+                          }`}
+                        >
+                          {letter}
+                        </span>
+                        <span className="font-extrabold text-slate-100 text-xs sm:text-[13px] break-words">
+                          {detail.option}
+                        </span>
+                      </div>
+
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full border shrink-0 ${
+                          isCorrect
+                            ? 'bg-emerald-900/90 text-emerald-300 border-emerald-600'
+                            : 'bg-slate-800 text-slate-400 border-slate-700'
+                        }`}
+                      >
+                        {isCorrect ? '✓ Correct Option' : 'Option Meaning'}
+                      </span>
+                    </div>
+
+                    <div className="pl-7 space-y-0.5">
+                      {detail.hindiMeaning && (
+                        <div className="text-amber-300 font-semibold text-[11px]">
+                          {detail.hindiMeaning}
+                        </div>
+                      )}
+                      {detail.englishMeaning && (
+                        <div className="text-slate-300 text-[11px] leading-relaxed">
+                          {detail.englishMeaning}
+                        </div>
+                      )}
+                      {detail.mnemonicHook && (
+                        <div className="text-[10px] text-sky-400 flex items-center gap-1 pt-0.5">
+                          <Lightbulb className="w-3 h-3 text-sky-400 shrink-0" />
+                          <span><b>Hook:</b> {detail.mnemonicHook}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 export const MatchSummary: React.FC<MatchSummaryProps> = ({
   player,
@@ -546,198 +1029,19 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
                   </button>
                 </div>
               ) : (
-                filteredQuestions.map(({ question: q, originalIndex: idx, isCorrect, selectedOptionIndex }) => {
-                  const isBookmarked = bookmarkedIds.includes(q.id);
-
-                  return (
-                    <div
-                      key={q.id}
-                      className={`rounded-2xl border p-4 sm:p-5 space-y-3.5 shadow-lg transition-all ${
-                        isCorrect
-                          ? 'bg-slate-900/90 border-slate-800 hover:border-emerald-500/40'
-                          : 'bg-gradient-to-br from-slate-900 via-slate-900 to-rose-950/30 border-rose-900/40 hover:border-rose-600/60'
-                      }`}
-                    >
-                      {/* Header row */}
-                      <div className="flex items-center justify-between gap-2 flex-wrap">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          {/* Outcome badge */}
-                          <div
-                            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-black ${
-                              isCorrect
-                                ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800/60'
-                                : 'bg-rose-950/80 text-rose-300 border border-rose-800/60'
-                            }`}
-                          >
-                            {isCorrect ? (
-                              <>
-                                <Check className="w-3.5 h-3.5 text-emerald-400" />
-                                <span>Q{idx + 1} • Correct</span>
-                              </>
-                            ) : (
-                              <>
-                                <X className="w-3.5 h-3.5 text-rose-400" />
-                                <span>Q{idx + 1} • Missed</span>
-                              </>
-                            )}
-                          </div>
-
-                          {/* Category Badge */}
-                          <span className="text-[11px] font-mono uppercase bg-slate-800 text-amber-400 px-2.5 py-0.5 rounded-md border border-slate-700 font-bold">
-                            {q.category}
-                          </span>
-
-                          {/* Repeat Frequency */}
-                          <span className="text-[10px] font-bold bg-amber-950/60 text-amber-300 border border-amber-700/50 px-2 py-0.5 rounded-md">
-                            🔥 {q.repeatCount}x in SSC
-                          </span>
-                        </div>
-
-                        {/* Action Buttons: Star/Save, AI Tutor, Report */}
-                        <div className="flex items-center gap-1.5">
-                          {/* Bookmark/Star to Vault */}
-                          <button
-                            onClick={() => {
-                              soundManager.playTap();
-                              onBookmarkQuestion(q);
-                            }}
-                            className={`p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                              isBookmarked
-                                ? 'bg-amber-950 border-amber-600 text-amber-300'
-                                : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300'
-                            }`}
-                            title={isBookmarked ? 'Saved in Vault' : 'Save to Mistake Vault'}
-                          >
-                            {isBookmarked ? (
-                              <BookmarkCheck className="w-3.5 h-3.5 text-amber-400" />
-                            ) : (
-                              <Bookmark className="w-3.5 h-3.5 text-slate-400" />
-                            )}
-                            <span className="hidden sm:inline text-[11px]">
-                              {isBookmarked ? 'Saved' : 'Save'}
-                            </span>
-                          </button>
-
-                          {/* Ask AI Deep Dive */}
-                          <button
-                            onClick={() => {
-                              soundManager.playTap();
-                              onOpenAiDeepDive(q);
-                            }}
-                            className="px-2.5 py-1.5 rounded-xl bg-purple-950/80 hover:bg-purple-900 border border-purple-700/60 text-purple-300 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
-                            title="AI Root Word & Mnemonic Breakdown"
-                          >
-                            <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-                            <span className="text-[11px]">AI Tutor</span>
-                          </button>
-
-                          {/* Report Question */}
-                          <button
-                            onClick={() => {
-                              soundManager.playTap();
-                              setReportingQuestion(q);
-                            }}
-                            className="p-1.5 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-rose-950/40 hover:border-rose-700/60 text-slate-400 hover:text-rose-300 transition-all cursor-pointer"
-                            title="Report discrepancy in question"
-                          >
-                            <Flag className="w-3.5 h-3.5 text-slate-400" />
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Question Statement Box */}
-                      <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 sm:p-4 space-y-1">
-                        <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                          {q.instruction || 'Select the most appropriate option:'}
-                        </div>
-                        <h3 className="text-base sm:text-lg font-black text-amber-300 tracking-wide">
-                          "{q.wordOrPhrase}"
-                        </h3>
-                      </div>
-
-                      {/* 4 Options Grid (Clearly shows what was picked vs correct) */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        {q.options.map((opt, optIdx) => {
-                          const isCorrectOpt = optIdx === q.correctIndex;
-                          const isUserChoice = optIdx === selectedOptionIndex;
-
-                          let optClass = 'bg-slate-950/50 border-slate-800 text-slate-400';
-                          let badgeIcon = (
-                            <span className="w-5 h-5 rounded-md bg-slate-800 border border-slate-700 text-[10px] font-mono font-bold text-slate-400 flex items-center justify-center shrink-0">
-                              {String.fromCharCode(65 + optIdx)}
-                            </span>
-                          );
-
-                          if (isCorrectOpt) {
-                            optClass = 'bg-emerald-950/70 border-emerald-500/80 text-emerald-200 font-bold ring-1 ring-emerald-500/50';
-                            badgeIcon = (
-                              <span className="w-5 h-5 rounded-md bg-emerald-600 text-slate-950 flex items-center justify-center shrink-0">
-                                <Check className="w-3.5 h-3.5 stroke-[3]" />
-                              </span>
-                            );
-                          } else if (isUserChoice && !isCorrectOpt) {
-                            optClass = 'bg-rose-950/70 border-rose-500/80 text-rose-200 font-bold ring-1 ring-rose-500/50';
-                            badgeIcon = (
-                              <span className="w-5 h-5 rounded-md bg-rose-600 text-white flex items-center justify-center shrink-0">
-                                <X className="w-3.5 h-3.5 stroke-[3]" />
-                              </span>
-                            );
-                          }
-
-                          return (
-                            <div
-                              key={optIdx}
-                              className={`p-2.5 sm:p-3 rounded-xl border text-xs flex items-center justify-between gap-2.5 ${optClass}`}
-                            >
-                              <div className="flex items-start sm:items-center gap-2 min-w-0 flex-1">
-                                {badgeIcon}
-                                <span className="font-semibold break-words leading-snug flex-1">{opt}</span>
-                              </div>
-                              {isCorrectOpt && (
-                                <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wide shrink-0">
-                                  Correct
-                                </span>
-                              )}
-                              {isUserChoice && !isCorrectOpt && (
-                                <span className="text-[10px] font-bold text-rose-400 uppercase tracking-wide shrink-0">
-                                  Your Choice
-                                </span>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      {/* Hindi Explanation & Memory Hook Mnemonics */}
-                      <div className="bg-slate-950/90 rounded-xl p-3 sm:p-3.5 border border-slate-800 text-xs space-y-2">
-                        <div className="flex items-start gap-2">
-                          <span className="font-black text-amber-400 shrink-0">हिन्दी अर्थ:</span>
-                          <span className="text-slate-200 font-medium">{q.hindiMeaning}</span>
-                        </div>
-
-                        {q.mnemonic && (
-                          <div className="text-[11px] text-sky-200 bg-sky-950/40 border border-sky-800/40 p-2.5 rounded-lg flex items-start gap-2">
-                            <span className="font-black text-sky-400 shrink-0">💡 Memory Hook:</span>
-                            <span className="leading-relaxed">{q.mnemonic}</span>
-                          </div>
-                        )}
-
-                        {/* Exam Occurrences */}
-                        <div className="flex items-center gap-1.5 flex-wrap pt-1 text-[10px] text-slate-400">
-                          <span className="font-bold text-slate-400">Past SSC Papers:</span>
-                          {q.examHistory.map((ex, i) => (
-                            <span
-                              key={i}
-                              className="bg-slate-850 border border-slate-700/80 px-2 py-0.5 rounded text-sky-300 font-medium"
-                            >
-                              🏛️ {ex}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })
+                filteredQuestions.map(({ question: q, originalIndex: idx, isCorrect, selectedOptionIndex }) => (
+                  <MatchQuestionReviewCard
+                    key={q.id || `match-q-${idx}`}
+                    question={q}
+                    originalIndex={idx}
+                    isCorrect={isCorrect}
+                    selectedOptionIndex={selectedOptionIndex}
+                    isBookmarked={bookmarkedIds.includes(q.id)}
+                    onBookmark={onBookmarkQuestion}
+                    onOpenAiDeepDive={onOpenAiDeepDive}
+                    onReport={(questionToReport) => setReportingQuestion(questionToReport)}
+                  />
+                ))
               )}
             </div>
 
