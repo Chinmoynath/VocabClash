@@ -50,5 +50,10 @@ service cloud.firestore {
     match /pyq_import_batches/{batchId} {
       allow read, write: if isPyqAdmin();
     }
+
+    // PYQ Import Conflicts: Admin-only read/write
+    match /pyq_import_conflicts/{conflictId} {
+      allow read, write: if isPyqAdmin();
+    }
   }
 }

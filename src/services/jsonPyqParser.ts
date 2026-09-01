@@ -4,7 +4,10 @@ import { questionBankEngine } from './questionBankEngine';
 import { normalizeTier } from '../config/examMetadataConfig';
 import { 
   computeQuestionFingerprint, 
+  computeQuestionIdentityKey,
+  generateCanonicalQuestionId,
   getAppearanceKey, 
+  getCoarseAppearanceKey,
   mergeAppearances, 
   ExamAppearance 
 } from '../utils/questionFingerprint';
@@ -384,9 +387,11 @@ export function parseAndValidatePyqJSON(
 
   const batchId = `batch_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
-  // Existing questions indexed by deterministic fingerprint for canonical matching
+  // Existing questions indexed by deterministic fingerprint & identity key for canonical matching
   const existingQuestions = questionBankEngine.getAllAvailableQuestions();
   const existingFingerprintMap = new Map<string, Question>();
+  const existingIdentityMap = new Map<string, Question>();
+
   existingQuestions.forEach(q => {
     const fp = q.fingerprint || computeQuestionFingerprint(
       q.category,
@@ -395,13 +400,23 @@ export function parseAndValidatePyqJSON(
       q.correctIndex,
       q.instruction || q.question
     );
+    const idKey = q.identityKey || computeQuestionIdentityKey(
+      q.category,
+      q.wordOrPhrase,
+      q.options,
+      q.instruction || q.question
+    );
     if (!existingFingerprintMap.has(fp)) {
       existingFingerprintMap.set(fp, q);
+    }
+    if (!existingIdentityMap.has(idKey)) {
+      existingIdentityMap.set(idKey, q);
     }
   });
 
   // Track questions within the current batch to merge multiple appearances within the same JSON file
   const inBatchFingerprintMap = new Map<string, ExtractedQuestion>();
+  const inBatchIdentityMap = new Map<string, ExtractedQuestion>();
 
   const eligibleQuestions: ExtractedQuestion[] = [];
   const skippedItems: SkippedQuestionItem[] = [];
@@ -409,6 +424,9 @@ export function parseAndValidatePyqJSON(
   let duplicateCount = 0;
   let answerRequiredCount = 0;
   let approvedCount = 0;
+  let mergedAppearancesCount = 0;
+  let conflictsCount = 0;
+  let newQuestionsCount = 0;
 
   rawList.forEach((item, index) => {
     if (!item || typeof item !== 'object') {
@@ -518,7 +536,7 @@ export function parseAndValidatePyqJSON(
       questionNumber: itemQuestionNumber,
     };
 
-    // Calculate deterministic canonical fingerprint
+    // Calculate deterministic canonical fingerprint & identity key
     const fingerprint = computeQuestionFingerprint(
       category,
       targetWord,
@@ -527,23 +545,43 @@ export function parseAndValidatePyqJSON(
       questionPrompt
     );
 
+    const identityKey = computeQuestionIdentityKey(
+      category,
+      targetWord,
+      finalOptions,
+      questionPrompt
+    );
+
+    const canonicalQuestionId = generateCanonicalQuestionId(
+      category,
+      targetWord,
+      finalOptions,
+      correctIdx
+    );
+
     // Deduplication and Multiple Appearances Matching
     let reviewStatus: ReviewStatus = 'approved';
     let duplicateConfidence: 'exact' | 'high' | 'none' = 'none';
     let duplicateOfId: string | undefined = undefined;
     let duplicateOfQuestion: string | undefined = undefined;
     let isNewAppearance: boolean = false;
+    let isAnswerConflict: boolean = false;
+    let conflictDetails: any = undefined;
+    let importAction: 'create' | 'merge_appearance' | 'answer_conflict' | 'identical_skip' = 'create';
     let matchedExistingQuestion: Question | undefined = undefined;
     let appearances: ExamAppearance[] = [currentAppearance];
 
     const matchedExisting = existingFingerprintMap.get(fingerprint);
+    const matchedExistingIdentity = existingIdentityMap.get(identityKey);
     const matchedInBatch = inBatchFingerprintMap.get(fingerprint);
+    const matchedInBatchIdentity = inBatchIdentityMap.get(identityKey);
 
     if (matchedExisting) {
+      // 1. Exact canonical question match in question_bank
       matchedExistingQuestion = matchedExisting;
       duplicateOfId = matchedExisting.id;
 
-      // Extract existing appearances from matched question (with fallback if legacy doc)
+      // Extract existing appearances from matched question
       const existingApps: ExamAppearance[] = Array.isArray(matchedExisting.appearances) && matchedExisting.appearances.length > 0
         ? matchedExisting.appearances
         : [
@@ -559,52 +597,112 @@ export function parseAndValidatePyqJSON(
           ];
 
       const currentAppKey = getAppearanceKey(currentAppearance);
-      const isAlreadyContained = existingApps.some(app => getAppearanceKey(app) === currentAppKey);
+      const currentCoarseKey = getCoarseAppearanceKey(currentAppearance);
+      const isAlreadyContained = existingApps.some(app => 
+        getAppearanceKey(app) === currentAppKey || 
+        (getCoarseAppearanceKey(app) === currentCoarseKey && (!app.shift || app.shift === currentAppearance.shift))
+      );
 
       if (isAlreadyContained) {
         // Exact duplicate occurrence already published
         reviewStatus = 'duplicate';
         duplicateConfidence = 'exact';
         isNewAppearance = false;
+        importAction = 'identical_skip';
         duplicateOfQuestion = `Exact Duplicate (${formatExamTag(currentAppearance.exam, currentAppearance.year, currentAppearance.tier)})`;
         duplicateCount++;
         appearances = existingApps;
       } else {
-        // Canonical question matches, but this is a NEW exam appearance
+        // Canonical question matches, but this is a NEW cross-exam appearance!
         reviewStatus = 'approved';
         duplicateConfidence = 'high';
         isNewAppearance = true;
-        duplicateOfQuestion = 'New Exam Appearance';
+        importAction = 'merge_appearance';
+        duplicateOfQuestion = `Cross-Exam Appearance Merged (${formatExamTag(currentAppearance.exam, currentAppearance.year, currentAppearance.tier)})`;
         const { merged } = mergeAppearances(existingApps, currentAppearance);
         appearances = merged;
         approvedCount++;
+        mergedAppearancesCount++;
       }
+    } else if (matchedExistingIdentity && correctIdx !== null) {
+      // 2. Question Prompt + Options match, but Answer Conflicts with Firestore question!
+      isAnswerConflict = true;
+      importAction = 'answer_conflict';
+      reviewStatus = 'needs_review';
+      duplicateConfidence = 'none';
+      duplicateOfId = matchedExistingIdentity.id;
+      duplicateOfQuestion = `Answer Key Conflict with existing question (${matchedExistingIdentity.id})`;
+      conflictsCount++;
+
+      const existingCorrectAns = typeof matchedExistingIdentity.correctIndex === 'number' 
+        ? matchedExistingIdentity.options[matchedExistingIdentity.correctIndex] 
+        : 'Unknown';
+      const incomingCorrectAns = finalOptions[correctIdx] || 'Unknown';
+
+      conflictDetails = {
+        existingQuestionId: matchedExistingIdentity.id,
+        existingCorrectAnswer: existingCorrectAns,
+        incomingCorrectAnswer: incomingCorrectAns,
+        existingOptions: matchedExistingIdentity.options,
+        incomingOptions: finalOptions,
+      };
     } else if (matchedInBatch) {
-      // Duplicate occurrence within the same JSON file
+      // 3. Duplicate occurrence within the same JSON file
       duplicateOfId = matchedInBatch.tempId;
       const inBatchApps = matchedInBatch.appearances || [];
       const currentAppKey = getAppearanceKey(currentAppearance);
-      const isAlreadyInBatch = inBatchApps.some(app => getAppearanceKey(app) === currentAppKey);
+      const currentCoarseKey = getCoarseAppearanceKey(currentAppearance);
+      const isAlreadyInBatch = inBatchApps.some(app => 
+        getAppearanceKey(app) === currentAppKey || 
+        (getCoarseAppearanceKey(app) === currentCoarseKey && (!app.shift || app.shift === currentAppearance.shift))
+      );
 
       if (isAlreadyInBatch) {
         reviewStatus = 'duplicate';
         duplicateConfidence = 'exact';
         isNewAppearance = false;
+        importAction = 'identical_skip';
         duplicateOfQuestion = `Exact Duplicate in File (${formatExamTag(currentAppearance.exam, currentAppearance.year, currentAppearance.tier)})`;
         duplicateCount++;
       } else {
-        // Merge appearance onto earlier batch item and mark current item
+        // Merge appearance onto earlier batch item and mark current item as merged
         const { merged } = mergeAppearances(inBatchApps, currentAppearance);
         matchedInBatch.appearances = merged;
         reviewStatus = 'duplicate';
         duplicateConfidence = 'high';
         isNewAppearance = true;
-        duplicateOfQuestion = 'Merged into earlier item in file';
+        importAction = 'merge_appearance';
+        duplicateOfQuestion = `Merged into earlier item #${matchedInBatch.tempId}`;
         duplicateCount++;
+        mergedAppearancesCount++;
       }
       appearances = inBatchApps;
+    } else if (matchedInBatchIdentity && correctIdx !== null) {
+      // 4. In-file answer conflict
+      isAnswerConflict = true;
+      importAction = 'answer_conflict';
+      reviewStatus = 'needs_review';
+      duplicateConfidence = 'none';
+      duplicateOfId = matchedInBatchIdentity.tempId;
+      duplicateOfQuestion = `In-file answer conflict with item #${matchedInBatchIdentity.tempId}`;
+      conflictsCount++;
+
+      const existingCorrectAns = typeof matchedInBatchIdentity.correctIndex === 'number' 
+        ? matchedInBatchIdentity.options[matchedInBatchIdentity.correctIndex] 
+        : 'Unknown';
+      const incomingCorrectAns = finalOptions[correctIdx] || 'Unknown';
+
+      conflictDetails = {
+        existingQuestionId: matchedInBatchIdentity.tempId,
+        existingCorrectAnswer: existingCorrectAns,
+        incomingCorrectAnswer: incomingCorrectAns,
+        existingOptions: matchedInBatchIdentity.options,
+        incomingOptions: finalOptions,
+      };
     } else {
-      // Brand new question
+      // 5. Brand new question
+      importAction = 'create';
+      newQuestionsCount++;
       if (correctIdx === null) {
         reviewStatus = 'answer_required';
         answerRequiredCount++;
@@ -614,7 +712,7 @@ export function parseAndValidatePyqJSON(
       }
     }
 
-    // Similar Paper & Flag Integrity (Do NOT blindly convert unverified/third-party papers into verified PYQs)
+    // Similar Paper & Flag Integrity
     const itemIsPYQ = typeof item.isPYQ === 'boolean'
       ? item.isPYQ
       : (item.is_pyq !== undefined ? Boolean(item.is_pyq) : true);
@@ -660,6 +758,7 @@ export function parseAndValidatePyqJSON(
 
     const extractedItem: ExtractedQuestion = {
       tempId,
+      canonicalQuestionId,
       question: questionPrompt,
       wordOrPhrase: targetWord,
       options: finalOptions,
@@ -683,8 +782,12 @@ export function parseAndValidatePyqJSON(
       questionNumber: itemQuestionNumber,
       paper: itemPaper,
       fingerprint,
+      identityKey,
       appearances,
       isNewAppearance,
+      isAnswerConflict,
+      conflictDetails,
+      importAction,
       matchedExistingQuestion,
       reviewStatus,
       duplicateConfidence,
@@ -699,6 +802,7 @@ export function parseAndValidatePyqJSON(
 
     if (!matchedExisting && !matchedInBatch) {
       inBatchFingerprintMap.set(fingerprint, extractedItem);
+      inBatchIdentityMap.set(identityKey, extractedItem);
     }
 
     eligibleQuestions.push(extractedItem);
@@ -717,9 +821,12 @@ export function parseAndValidatePyqJSON(
     dateImported: Date.now(),
     totalDetected: eligibleQuestions.length,
     approvedCount,
-    needsReviewCount: answerRequiredCount,
+    needsReviewCount: answerRequiredCount + conflictsCount,
     duplicateCount,
     rejectedCount: 0,
+    mergedAppearancesCount,
+    conflictsCount,
+    newQuestionsCount,
     status: 'pending_review',
   };
 

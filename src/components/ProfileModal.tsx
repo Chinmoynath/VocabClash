@@ -22,7 +22,8 @@ import {
   LifeBuoy,
   Mail,
   Scale,
-  BarChart3
+  BarChart3,
+  BookOpen
 } from 'lucide-react';
 import { SupportModal } from './SupportModal';
 import { LegalAccountModal } from './LegalAccountModal';
@@ -102,6 +103,7 @@ interface ProfileModalProps {
   onOpenStreak: () => void;
   onOpenStats?: () => void;
   onOpenTour?: () => void;
+  onNavigateToMistakes?: () => void;
   onUserChange?: (user: FirebaseUser | null) => void;
   onManualSync?: () => void;
   onSignOut?: () => Promise<void>;
@@ -120,6 +122,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   onOpenStreak,
   onOpenStats,
   onOpenTour,
+  onNavigateToMistakes,
   onUserChange,
   onManualSync,
   onSignOut,
@@ -445,6 +448,33 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
               </div>
             </div>
             <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-amber-400 group-hover:translate-x-0.5 transition-all" />
+          </button>
+        )}
+
+        {/* Mistake Vault & Saved Vocab Shortcut */}
+        {onNavigateToMistakes && (
+          <button
+            onClick={() => {
+              soundManager.playTap();
+              onClose();
+              onNavigateToMistakes();
+            }}
+            className="w-full bg-slate-850 hover:bg-slate-800 border border-rose-500/30 hover:border-rose-400/60 p-2.5 rounded-2xl flex items-center justify-between text-left transition-all group shadow-sm"
+          >
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-xl bg-rose-500/15 text-rose-300 flex items-center justify-center border border-rose-500/30 group-hover:scale-105 transition-transform">
+                <BookOpen className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="text-xs font-black text-slate-100 group-hover:text-rose-300">
+                  Mistake Vault & Saved PYQs
+                </div>
+                <div className="text-[10px] text-slate-400">
+                  Review incorrect match questions with spaced repetition
+                </div>
+              </div>
+            </div>
+            <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-rose-400 group-hover:translate-x-0.5 transition-all" />
           </button>
         )}
 

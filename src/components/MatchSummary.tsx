@@ -51,6 +51,7 @@ interface MatchSummaryProps {
   onBackToLobby: () => void;
   onBookmarkQuestion: (question: Question) => void;
   onOpenAiDeepDive: (question: Question) => void;
+  onNavigateToMistakes?: () => void;
   bookmarkedIds: string[];
   isPremium?: boolean;
   currentUser?: FirebaseUser | null;
@@ -553,6 +554,7 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
   onBackToLobby,
   onBookmarkQuestion,
   onOpenAiDeepDive,
+  onNavigateToMistakes,
   bookmarkedIds,
   isPremium = false,
   currentUser = null,
@@ -857,6 +859,25 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
               </button>
             </div>
 
+            {/* Quick Link to Mistake Vault if mistakes were made */}
+            {mistakeCount > 0 && onNavigateToMistakes && (
+              <div className="max-w-xl mx-auto">
+                <button
+                  onClick={() => {
+                    soundManager.playTap();
+                    onNavigateToMistakes();
+                  }}
+                  className="w-full bg-rose-950/40 hover:bg-rose-950/70 border border-rose-500/40 hover:border-rose-400/80 text-rose-200 font-bold p-3 rounded-2xl flex items-center justify-between text-xs transition-all shadow-sm group"
+                >
+                  <div className="flex items-center gap-2">
+                    <BookOpen className="w-4 h-4 text-rose-400 group-hover:scale-110 transition-transform" />
+                    <span>Review {mistakeCount} Mistake{mistakeCount > 1 ? 's' : ''} in Spaced-Repetition Vault</span>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-rose-400 group-hover:translate-x-0.5 transition-transform" />
+                </button>
+              </div>
+            )}
+
             {/* POST-MATCH SIGNUP/SAVE CARD (If guest) */}
             {!currentUser && showSignupCard && (
               <div className="bg-gradient-to-r from-purple-950/90 via-slate-900 to-indigo-950/90 border-2 border-purple-500/60 rounded-3xl p-5 sm:p-6 shadow-2xl relative overflow-hidden animate-fadeIn max-w-xl mx-auto">
@@ -1070,6 +1091,19 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
                 <RotateCcw className="w-4 h-4" />
                 <span>PLAY NEXT MATCH</span>
               </button>
+
+              {mistakeCount > 0 && onNavigateToMistakes && (
+                <button
+                  onClick={() => {
+                    soundManager.playTap();
+                    onNavigateToMistakes();
+                  }}
+                  className="w-full sm:w-auto bg-rose-950/80 hover:bg-rose-900 text-rose-200 font-extrabold px-6 py-3.5 rounded-2xl border border-rose-600/70 flex items-center justify-center gap-2 text-sm transition-all active:scale-95 cursor-pointer shadow-md"
+                >
+                  <BookOpen className="w-4 h-4 text-rose-400" />
+                  <span>MISTAKE VAULT ({mistakeCount})</span>
+                </button>
+              )}
 
               <button
                 onClick={() => {

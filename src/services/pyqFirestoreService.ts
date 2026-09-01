@@ -2,6 +2,7 @@ import {
   collection, 
   doc, 
   getDocs, 
+  getDoc,
   writeBatch, 
   setDoc, 
   deleteDoc, 
@@ -18,10 +19,15 @@ import {
   markFirestoreQuotaExhausted 
 } from './firebaseService';
 import { Question, QuestionCategory, QuestionOptionDetail, ExamAppearance } from '../types';
-import { ImportBatch } from '../types/pyqImport';
+import { ImportBatch, AnswerConflictDetails } from '../types/pyqImport';
 import { formatExamTag, normalizeExamDate } from './jsonPyqParser';
 import { 
   computeQuestionFingerprint, 
+  computeQuestionIdentityKey,
+  generateCanonicalQuestionId,
+  computeImportanceLevel,
+  computeRepeatCount,
+  mergeAppearances,
   sortAppearances 
 } from '../utils/questionFingerprint';
 
@@ -78,6 +84,7 @@ export async function fetchPublishedQuestionBank(): Promise<Question[]> {
             option: String(od.option || ''),
             englishMeaning: String(od.englishMeaning || od.meaning || ''),
             hindiMeaning: String(od.hindiMeaning || od.hindi || ''),
+            explanation: od.explanation ? String(od.explanation) : undefined,
             shortExplanation: od.shortExplanation ? String(od.shortExplanation) : undefined,
             mnemonicHook: od.mnemonicHook ? String(od.mnemonicHook) : undefined,
           }));
@@ -94,6 +101,13 @@ export async function fetchPublishedQuestionBank(): Promise<Question[]> {
           wordOrPhrase,
           options,
           correctIndex,
+          instruction
+        );
+
+        const identityKey = data.identityKey || computeQuestionIdentityKey(
+          category,
+          wordOrPhrase,
+          options,
           instruction
         );
 
@@ -128,10 +142,8 @@ export async function fetchPublishedQuestionBank(): Promise<Question[]> {
           ? data.examHistory
           : appearances.map(app => formatExamTag(app.exam, app.year, app.tier));
 
-        const repeatCount = Math.max(
-          typeof data.repeatCount === 'number' ? data.repeatCount : 1,
-          appearances.length
-        );
+        const repeatCount = computeRepeatCount(appearances, typeof data.repeatCount === 'number' ? data.repeatCount : 1);
+        const importanceLevel = computeImportanceLevel(repeatCount);
 
         questions.push({
           id: docSnap.id,
@@ -149,10 +161,11 @@ export async function fetchPublishedQuestionBank(): Promise<Question[]> {
           optionDetails: validOptionDetails,
           enrichment: data.enrichment || undefined,
           fingerprint,
+          identityKey,
           appearances,
           examHistory,
           repeatCount,
-          importanceLevel: data.importanceLevel || 'ultra-high',
+          importanceLevel: data.importanceLevel || importanceLevel,
           difficulty: data.difficulty || 'medium',
           isPYQ: data.isPYQ !== undefined ? Boolean(data.isPYQ) : true,
           verified: data.verified !== undefined ? Boolean(data.verified) : true,
@@ -176,13 +189,61 @@ export async function fetchPublishedQuestionBank(): Promise<Question[]> {
 }
 
 /**
- * Publish approved questions to Firestore in batches (with quota limit detection)
+ * Record answer key conflicts to Firestore `pyq_import_conflicts` collection
+ */
+export async function recordAnswerConflicts(
+  batchId: string,
+  conflicts: {
+    questionPrompt: string;
+    targetWord: string;
+    category: string;
+    details: AnswerConflictDetails;
+    sourceFileName?: string;
+  }[]
+): Promise<void> {
+  if (conflicts.length === 0) return;
+  try {
+    const batchInstance = writeBatch(db);
+    for (const conf of conflicts) {
+      const conflictDocId = `conflict_${batchId}_${Math.random().toString(36).substring(2, 8)}`;
+      const docRef = doc(db, 'pyq_import_conflicts', conflictDocId);
+      batchInstance.set(docRef, sanitizeForFirestore({
+        conflictId: conflictDocId,
+        batchId,
+        questionPrompt: conf.questionPrompt,
+        targetWord: conf.targetWord,
+        category: conf.category,
+        existingQuestionId: conf.details.existingQuestionId,
+        existingCorrectAnswer: conf.details.existingCorrectAnswer,
+        incomingCorrectAnswer: conf.details.incomingCorrectAnswer,
+        existingOptions: conf.details.existingOptions,
+        incomingOptions: conf.details.incomingOptions,
+        sourceFileName: conf.sourceFileName,
+        status: 'unresolved',
+        detectedAt: Date.now(),
+      }));
+    }
+    await batchInstance.commit();
+  } catch (err) {
+    console.warn('Could not record import conflicts to Firestore:', err);
+  }
+}
+
+/**
+ * Publish approved questions to Firestore in batches (with cross-exam appearance merging and quota limit detection)
  */
 export async function publishApprovedQuestionsToFirestore(
   batch: ImportBatch,
-  questions: Question[]
+  questions: Question[],
+  conflictsToRecord?: {
+    questionPrompt: string;
+    targetWord: string;
+    category: string;
+    details: AnswerConflictDetails;
+    sourceFileName?: string;
+  }[]
 ): Promise<{ success: boolean; publishedCount: number; isQuotaExhausted?: boolean; error?: string }> {
-  if (questions.length === 0) {
+  if (questions.length === 0 && (!conflictsToRecord || conflictsToRecord.length === 0)) {
     return { success: true, publishedCount: 0 };
   }
 
@@ -225,14 +286,26 @@ export async function publishApprovedQuestionsToFirestore(
 
     await setDoc(batchDocRef, sanitizedBatch, { merge: true });
 
-    // 2. Commit questions to `question_bank` in safe chunks with stream drain delay
-    const CHUNK_SIZE = 20; // Safe chunk size to avoid write stream queue exhaustion
+    // 2. Record any detected answer conflicts
+    if (conflictsToRecord && conflictsToRecord.length > 0) {
+      await recordAnswerConflicts(batch.batchId, conflictsToRecord);
+    }
+
+    // 3. Commit questions to `question_bank` in safe chunks with stream drain delay
+    const CHUNK_SIZE = 20;
     for (let i = 0; i < questions.length; i += CHUNK_SIZE) {
       const chunk = questions.slice(i, i + CHUNK_SIZE);
       const writeBatchInstance = writeBatch(db);
 
       for (const q of chunk) {
-        const docRef = doc(db, 'question_bank', q.id);
+        const targetDocId = q.canonicalQuestionId || q.id || generateCanonicalQuestionId(
+          q.category,
+          q.wordOrPhrase,
+          q.options,
+          q.correctIndex
+        );
+        const docRef = doc(db, 'question_bank', targetDocId);
+
         const resolvedShift = (q.shift && q.shift !== 'Not Specified' && q.shift !== 'null' && q.shift !== 'undefined') 
           ? q.shift 
           : resolvedBatchShift;
@@ -266,11 +339,20 @@ export async function publishApprovedQuestionsToFirestore(
           q.instruction || q.question
         );
 
+        const identityKey = q.identityKey || computeQuestionIdentityKey(
+          q.category,
+          q.wordOrPhrase,
+          q.options,
+          q.instruction || q.question
+        );
+
         const examHistoryTags = appearances.map(app => formatExamTag(app.exam, app.year, app.tier));
-        const repeatCount = Math.max(q.repeatCount || 1, appearances.length);
+        const repeatCount = computeRepeatCount(appearances, q.repeatCount);
+        const importanceLevel = computeImportanceLevel(repeatCount);
 
         const payload: any = sanitizeForFirestore({
-          id: q.id,
+          id: targetDocId,
+          canonicalQuestionId: targetDocId,
           category: q.category,
           wordOrPhrase: q.wordOrPhrase,
           instruction: q.instruction || `Select the most appropriate ${q.category.toUpperCase()} of the given word:`,
@@ -285,6 +367,7 @@ export async function publishApprovedQuestionsToFirestore(
           optionDetails: validOptionDetails,
           enrichment: q.enrichment || null,
           fingerprint,
+          identityKey,
           appearances,
           examFamily: primaryApp.examFamily || 'SSC',
           exam: primaryApp.exam || 'SSC CGL',
@@ -295,7 +378,7 @@ export async function publishApprovedQuestionsToFirestore(
           questionNumber: primaryApp.questionNumber || (q.questionNumber !== undefined ? q.questionNumber : null),
           examHistory: examHistoryTags,
           repeatCount,
-          importanceLevel: q.importanceLevel || 'ultra-high',
+          importanceLevel,
           difficulty: q.difficulty || 'medium',
           isPYQ: q.isPYQ !== undefined ? q.isPYQ : true,
           verified: q.verified !== undefined ? q.verified : true,
@@ -304,6 +387,7 @@ export async function publishApprovedQuestionsToFirestore(
           createdAt: Date.now(),
           updatedAt: Date.now(),
         });
+
         writeBatchInstance.set(docRef, payload, { merge: true });
       }
 
@@ -343,6 +427,198 @@ export async function publishApprovedQuestionsToFirestore(
       error: errMsg || 'Failed to commit questions to Firestore.' 
     };
   }
+}
+
+export interface DeduplicationResult {
+  totalScanned: number;
+  originalCount: number;
+  canonicalCount: number;
+  duplicateGroupsFound: number;
+  mergedCount: number;
+  deletedDocCount: number;
+  conflictsFound: number;
+  conflictCount: number;
+  sampleMerged: { targetWord: string; category: string; appearancesCount: number; docIds: string[] }[];
+}
+
+/**
+ * Migration Tool: Scans existing question bank, merges redundant duplicate documents
+ * into canonical records with consolidated appearances, and cleans up redundant duplicates.
+ */
+export async function deduplicateAndMigrateQuestionBank(
+  onProgress?: (progress: { current: number; total: number; stage: string }) => void,
+  dryRun: boolean = false
+): Promise<DeduplicationResult> {
+  onProgress?.({ current: 0, total: 100, stage: 'Fetching published questions...' });
+  const questions = await fetchPublishedQuestionBank();
+  const fingerprintGroups = new Map<string, Question[]>();
+  const identityGroups = new Map<string, Question[]>();
+
+  onProgress?.({ current: 20, total: 100, stage: `Analyzing ${questions.length} questions across exams...` });
+
+  questions.forEach(q => {
+    const fp = q.fingerprint || computeQuestionFingerprint(
+      q.category,
+      q.wordOrPhrase,
+      q.options,
+      q.correctIndex,
+      q.instruction || q.question
+    );
+    const idKey = q.identityKey || computeQuestionIdentityKey(
+      q.category,
+      q.wordOrPhrase,
+      q.options,
+      q.instruction || q.question
+    );
+
+    if (!fingerprintGroups.has(fp)) fingerprintGroups.set(fp, []);
+    fingerprintGroups.get(fp)!.push(q);
+
+    if (!identityGroups.has(idKey)) identityGroups.set(idKey, []);
+    identityGroups.get(idKey)!.push(q);
+  });
+
+  let duplicateGroupsFound = 0;
+  let mergedCount = 0;
+  let deletedDocCount = 0;
+  let conflictsFound = 0;
+  const sampleMerged: { targetWord: string; category: string; appearancesCount: number; docIds: string[] }[] = [];
+
+  // Check identity conflicts
+  identityGroups.forEach((group) => {
+    const answers = new Set(group.map(q => q.options[q.correctIndex]));
+    if (answers.size > 1) {
+      conflictsFound += group.length;
+    }
+  });
+
+  const totalGroups = fingerprintGroups.size;
+  let processedGroups = 0;
+
+  for (const [fp, group] of fingerprintGroups.entries()) {
+    processedGroups++;
+    if (processedGroups % 20 === 0 || processedGroups === totalGroups) {
+      onProgress?.({
+        current: processedGroups,
+        total: totalGroups,
+        stage: `Consolidating group ${processedGroups}/${totalGroups} (${group[0]?.wordOrPhrase})...`,
+      });
+    }
+
+    if (group.length <= 1) continue;
+
+    duplicateGroupsFound++;
+    mergedCount += group.length;
+
+    // Consolidate appearances across all questions in the group
+    let consolidatedAppearances: ExamAppearance[] = [];
+    let bestOptionDetails = group.find(q => Array.isArray(q.optionDetails) && q.optionDetails.length === 4)?.optionDetails;
+    let bestEnrichment = group.find(q => q.enrichment?.status === 'complete')?.enrichment;
+    let bestMeaning = group.find(q => q.meaning && q.meaning.trim() !== '')?.meaning || group[0].meaning;
+    let bestHindi = group.find(q => q.hindiMeaning && q.hindiMeaning.trim() !== '')?.hindiMeaning || group[0].hindiMeaning;
+    let bestMnemonic = group.find(q => q.mnemonic && q.mnemonic.trim() !== '')?.mnemonic || group[0].mnemonic;
+    let bestSentence = group.find(q => q.exampleSentence && q.exampleSentence.trim() !== '')?.exampleSentence || group[0].exampleSentence;
+    let bestRoot = group.find(q => q.rootWordInfo && q.rootWordInfo.trim() !== '')?.rootWordInfo || group[0].rootWordInfo;
+    let bestExpl = group.find(q => q.explanation && q.explanation.trim() !== '')?.explanation || group[0].explanation;
+
+    for (const q of group) {
+      if (Array.isArray(q.appearances) && q.appearances.length > 0) {
+        const { merged } = mergeAppearances(consolidatedAppearances, q.appearances);
+        consolidatedAppearances = merged;
+      } else {
+        const { merged } = mergeAppearances(consolidatedAppearances, {
+          examFamily: q.examFamily || 'SSC',
+          exam: q.exam || 'SSC CGL',
+          year: q.year || 2024,
+          tier: q.tier || '',
+          shift: q.shift || null,
+          examDate: q.examDate || null,
+          questionNumber: q.questionNumber,
+        });
+        consolidatedAppearances = merged;
+      }
+    }
+
+    const primaryDoc = group[0];
+    const canonicalId = generateCanonicalQuestionId(
+      primaryDoc.category,
+      primaryDoc.wordOrPhrase,
+      primaryDoc.options,
+      primaryDoc.correctIndex
+    );
+
+    const docIds = group.map(g => g.id);
+    if (sampleMerged.length < 10) {
+      sampleMerged.push({
+        targetWord: primaryDoc.wordOrPhrase,
+        category: primaryDoc.category,
+        appearancesCount: consolidatedAppearances.length,
+        docIds,
+      });
+    }
+
+    if (!dryRun) {
+      const repeatCount = computeRepeatCount(consolidatedAppearances);
+      const importanceLevel = computeImportanceLevel(repeatCount);
+      const examHistoryTags = consolidatedAppearances.map(a => formatExamTag(a.exam, a.year, a.tier));
+      const primaryApp = consolidatedAppearances[0];
+
+      // 1. Write the consolidated canonical document
+      const canonicalDocRef = doc(db, 'question_bank', canonicalId);
+      const canonicalPayload = sanitizeForFirestore({
+        ...primaryDoc,
+        id: canonicalId,
+        canonicalQuestionId: canonicalId,
+        meaning: bestMeaning,
+        hindiMeaning: bestHindi,
+        mnemonic: bestMnemonic,
+        exampleSentence: bestSentence,
+        rootWordInfo: bestRoot,
+        explanation: bestExpl,
+        optionDetails: bestOptionDetails,
+        enrichment: bestEnrichment || null,
+        appearances: consolidatedAppearances,
+        repeatCount,
+        importanceLevel,
+        examHistory: examHistoryTags,
+        examFamily: primaryApp?.examFamily || primaryDoc.examFamily || 'SSC',
+        exam: primaryApp?.exam || primaryDoc.exam || 'SSC CGL',
+        year: primaryApp?.year || primaryDoc.year || 2024,
+        tier: primaryApp?.tier || primaryDoc.tier || '',
+        shift: primaryApp?.shift || primaryDoc.shift || null,
+        examDate: primaryApp?.examDate || primaryDoc.examDate || null,
+        updatedAt: Date.now(),
+      });
+
+      await setDoc(canonicalDocRef, canonicalPayload, { merge: true });
+
+      // 2. Delete redundant duplicate docs if different from canonicalId
+      for (const oldDoc of group) {
+        if (oldDoc.id !== canonicalId) {
+          try {
+            await deleteDoc(doc(db, 'question_bank', oldDoc.id));
+            deletedDocCount++;
+          } catch (e) {
+            console.warn(`Failed to delete redundant duplicate doc ${oldDoc.id}:`, e);
+          }
+        }
+      }
+    }
+  }
+
+  const canonicalCount = fingerprintGroups.size;
+
+  return {
+    totalScanned: questions.length,
+    originalCount: questions.length,
+    canonicalCount,
+    duplicateGroupsFound,
+    mergedCount,
+    deletedDocCount,
+    conflictsFound,
+    conflictCount: conflictsFound,
+    sampleMerged,
+  };
 }
 
 /**
@@ -458,3 +734,4 @@ export async function deleteQuestionFromFirestore(questionId: string): Promise<b
     return false;
   }
 }
+

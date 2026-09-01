@@ -31,7 +31,7 @@ import {
 import { ExtractedQuestion, ImportBatch, ReviewStatus } from '../types/pyqImport';
 import { parseAndValidatePyqJSON, SkippedQuestionItem, extractJsonMetadata, formatExamTag, normalizeExamDate } from '../services/jsonPyqParser';
 import { questionBankEngine } from '../services/questionBankEngine';
-import { publishApprovedQuestionsToFirestore, isUserAdmin, ADMIN_EMAIL } from '../services/pyqFirestoreService';
+import { publishApprovedQuestionsToFirestore, deduplicateAndMigrateQuestionBank, isUserAdmin, ADMIN_EMAIL } from '../services/pyqFirestoreService';
 import { 
   enrichQuestionBatch, 
   enrichSingleQuestion, 
@@ -39,9 +39,18 @@ import {
   backfillQuestionBankEnrichment,
   needsEnrichment 
 } from '../services/pyqEnrichmentService';
-import { Question, QuestionCategory } from '../types';
+import { Question, QuestionCategory, ExamAppearance } from '../types';
 import { EXAMS_BY_FAMILY, EXAM_STAGE_OPTIONS, getStageOptionsForExam, normalizeTier } from '../config/examMetadataConfig';
 import { ExamAppearancesBadge } from './ExamAppearancesBadge';
+import {
+  computeQuestionFingerprint,
+  computeQuestionIdentityKey,
+  generateCanonicalQuestionId,
+  computeImportanceLevel,
+  computeRepeatCount,
+  mergeAppearances,
+  sortAppearances,
+} from '../utils/questionFingerprint';
 
 interface AdminPyqImporterProps {
   userEmail?: string | null;
@@ -86,6 +95,17 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
   const [isBackfilling, setIsBackfilling] = useState<boolean>(false);
   const [backfillProgress, setBackfillProgress] = useState<{ processed: number; total: number; updated: number; currentExam?: string } | null>(null);
   const [backfillSummary, setBackfillSummary] = useState<{ totalChecked: number; totalUpdated: number; durationMs: number } | null>(null);
+
+  // Deduplication migration state
+  const [isDeduplicating, setIsDeduplicating] = useState<boolean>(false);
+  const [deduplicationProgress, setDeduplicationProgress] = useState<{ processed: number; total: number; stage: string } | null>(null);
+  const [deduplicationSummary, setDeduplicationSummary] = useState<{
+    originalCount: number;
+    canonicalCount: number;
+    mergedCount: number;
+    conflictCount: number;
+  } | null>(null);
+
   const [expandedOptionDetails, setExpandedOptionDetails] = useState<Record<string, boolean>>({});
 
   const [extractedQuestions, setExtractedQuestions] = useState<ExtractedQuestion[]>([]);
@@ -313,6 +333,38 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
     }
   };
 
+  const handleRunDeduplicationMigration = async () => {
+    setIsDeduplicating(true);
+    setErrorMessage(null);
+    setDeduplicationSummary(null);
+
+    try {
+      const result = await deduplicateAndMigrateQuestionBank((prog) => {
+        setDeduplicationProgress({
+          processed: prog.current,
+          total: prog.total,
+          stage: prog.stage,
+        });
+      });
+
+      setDeduplicationSummary({
+        originalCount: result.originalCount,
+        canonicalCount: result.canonicalCount,
+        mergedCount: result.mergedCount,
+        conflictCount: result.conflictCount,
+      });
+
+      // Refresh runtime cache
+      await questionBankEngine.refreshFromFirestore(true);
+      setHealthData(questionBankEngine.getCloudVsRuntimeCounts());
+    } catch (err: any) {
+      setErrorMessage(`Deduplication migration error: ${err?.message || 'Failed to deduplicate.'}`);
+    } finally {
+      setIsDeduplicating(false);
+      setDeduplicationProgress(null);
+    }
+  };
+
   const handleParseJSON = async () => {
     setErrorMessage(null);
     setImportSummary(null);
@@ -427,10 +479,50 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
         const resolvedTier = q.tier || metadata.tier || '';
         const resolvedQNo = q.questionNumber !== undefined ? q.questionNumber : (qIndex + 1);
 
-        const examHistoryItem = formatExamTag(resolvedExam, resolvedYear, resolvedExamDate, resolvedShift, resolvedTier);
+        const canonicalId = q.canonicalQuestionId || generateCanonicalQuestionId(
+          q.category,
+          q.wordOrPhrase,
+          q.options,
+          q.correctIndex ?? 0
+        );
+        const fingerprint = q.fingerprint || computeQuestionFingerprint(
+          q.category,
+          q.wordOrPhrase,
+          q.options,
+          q.correctIndex ?? 0,
+          q.instruction || q.question
+        );
+        const identityKey = q.identityKey || computeQuestionIdentityKey(
+          q.category,
+          q.wordOrPhrase,
+          q.options,
+          q.instruction || q.question
+        );
+
+        const currentAppearance: ExamAppearance = {
+          examFamily: resolvedFamily,
+          exam: resolvedExam,
+          year: resolvedYear,
+          tier: resolvedTier,
+          shift: resolvedShift,
+          examDate: resolvedExamDate,
+          questionNumber: resolvedQNo,
+        };
+
+        const existingApps = Array.isArray(q.appearances) && q.appearances.length > 0 ? q.appearances : [];
+        const { merged: mergedApps } = mergeAppearances(existingApps, [currentAppearance]);
+        const sortedApps = sortAppearances(mergedApps);
+
+        const dynamicTags = sortedApps.map(a => formatExamTag(a.exam, a.year, a.tier));
+        const examHistoryTags = Array.from(new Set([...(q.examHistory || []), ...dynamicTags]));
+        const repeatCount = computeRepeatCount(sortedApps, q.repeatCount || 1);
+        const importanceLevel = computeImportanceLevel(repeatCount);
 
         return {
-          id: `pyq-${q.category}-${resolvedYear}-${q.wordOrPhrase.toLowerCase().replace(/[^a-z0-9]/g, '_')}-${Math.random().toString(36).slice(2, 6)}`,
+          id: canonicalId,
+          canonicalQuestionId: canonicalId,
+          fingerprint,
+          identityKey,
           category: q.category,
           wordOrPhrase: q.wordOrPhrase,
           instruction: q.instruction || (
@@ -449,16 +541,17 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
           explanation: q.explanation || '',
           optionDetails: q.optionDetails && q.optionDetails.length === 4 ? q.optionDetails : undefined,
           enrichment: q.enrichment || undefined,
-          examFamily: resolvedFamily,
-          exam: resolvedExam,
-          year: resolvedYear,
-          tier: resolvedTier,
-          shift: resolvedShift,
-          examDate: resolvedExamDate,
+          examFamily: sortedApps[0]?.examFamily || resolvedFamily,
+          exam: sortedApps[0]?.exam || resolvedExam,
+          year: sortedApps[0]?.year || resolvedYear,
+          tier: sortedApps[0]?.tier || resolvedTier,
+          shift: sortedApps[0]?.shift || resolvedShift,
+          examDate: sortedApps[0]?.examDate || resolvedExamDate,
           questionNumber: resolvedQNo,
-          examHistory: q.examHistory && q.examHistory.length > 0 ? q.examHistory : [examHistoryItem],
-          repeatCount: q.repeatCount || 1,
-          importanceLevel: q.importanceLevel || 'high',
+          appearances: sortedApps,
+          examHistory: examHistoryTags,
+          repeatCount,
+          importanceLevel,
           difficulty: q.difficulty || 'medium',
           verified: q.verified !== undefined ? q.verified : true,
           sourceType: q.sourceType || (q.isPYQ === false ? 'generated_practice' : 'verified_pyq'),
@@ -1081,7 +1174,13 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
                                     </span>
                                   )}
 
-                                  {q.duplicateConfidence && q.duplicateConfidence !== 'none' && !q.matchedExistingQuestion && (
+                                  {q.isAnswerConflict && (
+                                    <span className="text-[10px] bg-rose-500/20 text-rose-300 px-2 py-0.5 rounded font-bold border border-rose-500/40 flex items-center gap-1">
+                                      <AlertTriangle className="w-3 h-3 text-rose-400" /> Answer Conflict Flagged
+                                    </span>
+                                  )}
+
+                                  {q.duplicateConfidence && q.duplicateConfidence !== 'none' && !q.matchedExistingQuestion && !q.isAnswerConflict && (
                                     <span className="text-[10px] bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded font-medium border border-purple-500/30 flex items-center gap-1">
                                       <AlertTriangle className="w-3 h-3" /> Duplicate ({q.duplicateOfQuestion})
                                     </span>
@@ -1093,6 +1192,18 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
                                     </span>
                                   )}
                                 </div>
+
+                                {q.conflictDetails && (
+                                  <div className="bg-rose-950/40 border border-rose-500/30 rounded-lg p-2.5 text-xs text-rose-200 space-y-1">
+                                    <div className="font-bold flex items-center gap-1.5 text-rose-300">
+                                      <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                                      <span>{q.conflictDetails.message || 'Answer Key Conflict Detected'}</span>
+                                    </div>
+                                    <div className="text-[11px] text-rose-300/80">
+                                      Incoming import answer: <b className="text-white">Option {q.conflictDetails.incomingCorrectIndex + 1} ({q.conflictDetails.incomingCorrectAnswer})</b> vs Existing canonical answer: <b className="text-white">Option {q.conflictDetails.existingCorrectIndex + 1} ({q.conflictDetails.existingCorrectAnswer})</b>
+                                    </div>
+                                  </div>
+                                )}
 
                                 {q.appearances && q.appearances.length > 0 && (
                                   <div className="pt-1">
@@ -1444,6 +1555,61 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
                     <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                     <span>
                       Backfill finished in {Math.round(backfillSummary.durationMs / 1000)}s! Checked {backfillSummary.totalChecked} questions, successfully enriched & updated <b>{backfillSummary.totalUpdated}</b> questions.
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Cross-Exam Deduplication & Canonical Appearance Consolidation Tool */}
+            <div className="bg-slate-900 border border-sky-500/30 rounded-2xl p-6 shadow-xl space-y-4">
+              <div className="flex items-center justify-between flex-wrap gap-4">
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <Layers className="w-4 h-4 text-sky-400" />
+                    Cross-Exam Question Deduplication & Appearance Consolidation
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Scans entire Firestore <code>question_bank</code>, identifies questions appearing across multiple exams (e.g. SSC CGL + RRB NTPC), merges them into unified canonical records with merged <code>appearances</code> array, recalculates authentic repeat counts, and logs any answer key conflicts.
+                  </p>
+                </div>
+
+                <button
+                  onClick={handleRunDeduplicationMigration}
+                  disabled={isDeduplicating}
+                  className="px-5 py-2.5 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 disabled:opacity-50 text-white font-extrabold text-xs rounded-xl shadow-lg shadow-sky-500/20 flex items-center gap-2 transition"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isDeduplicating ? 'animate-spin' : ''}`} />
+                  {isDeduplicating ? 'Consolidating Canonical Questions...' : 'Run Question Deduplication & Migration'}
+                </button>
+              </div>
+
+              {isDeduplicating && deduplicationProgress && (
+                <div className="bg-sky-950/40 border border-sky-500/30 rounded-xl p-4 space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-bold text-sky-200 flex items-center gap-2">
+                      <Layers className="w-4 h-4 text-sky-400 animate-spin" />
+                      {deduplicationProgress.stage}
+                    </span>
+                    <span className="font-mono text-sky-300 font-bold">
+                      {deduplicationProgress.processed} / {deduplicationProgress.total}
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-950 rounded-full h-2 overflow-hidden border border-sky-500/20">
+                    <div 
+                      className="bg-gradient-to-r from-sky-500 to-indigo-400 h-full transition-all duration-300 rounded-full"
+                      style={{ width: `${Math.round((deduplicationProgress.processed / (deduplicationProgress.total || 1)) * 100)}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {deduplicationSummary && (
+                <div className="bg-emerald-950/40 border border-emerald-500/40 rounded-xl p-4 flex items-center justify-between text-xs text-emerald-200">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>
+                      Deduplication complete! Scanned <b>{deduplicationSummary.originalCount}</b> questions. Consolidated into <b>{deduplicationSummary.canonicalCount}</b> canonical questions with <b>{deduplicationSummary.mergedCount}</b> cross-exam appearances merged. {deduplicationSummary.conflictCount > 0 && <span className="text-amber-300 font-bold">({deduplicationSummary.conflictCount} answer key conflicts logged).</span>}
                     </span>
                   </div>
                 </div>

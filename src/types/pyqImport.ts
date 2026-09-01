@@ -2,8 +2,19 @@ import { Question, QuestionCategory, QuestionOptionDetail, ExamAppearance } from
 
 export type ReviewStatus = 'approved' | 'needs_review' | 'answer_required' | 'duplicate' | 'rejected';
 
+export type ImportAction = 'create' | 'merge_appearance' | 'answer_conflict' | 'identical_skip';
+
+export interface AnswerConflictDetails {
+  existingQuestionId: string;
+  existingCorrectAnswer: string;
+  incomingCorrectAnswer: string;
+  existingOptions: string[];
+  incomingOptions: string[];
+}
+
 export interface ExtractedQuestion {
   tempId: string;
+  canonicalQuestionId?: string;
   question: string;
   wordOrPhrase: string;
   options: string[];
@@ -32,9 +43,13 @@ export interface ExtractedQuestion {
   examDate?: string | null; // e.g. "19 Sept", "18 Oct"
   questionNumber?: number | string;
   paper?: string;
-  fingerprint?: string;
+  fingerprint?: string; // includes correct answer
+  identityKey?: string; // excludes correct answer
   appearances?: ExamAppearance[];
   isNewAppearance?: boolean;
+  isAnswerConflict?: boolean;
+  conflictDetails?: AnswerConflictDetails;
+  importAction?: ImportAction;
   matchedExistingQuestion?: Question;
   reviewStatus: ReviewStatus;
   duplicateConfidence?: 'exact' | 'high' | 'none';
@@ -65,6 +80,9 @@ export interface ImportBatch {
   needsReviewCount: number;
   duplicateCount: number;
   rejectedCount: number;
+  mergedAppearancesCount?: number;
+  conflictsCount?: number;
+  newQuestionsCount?: number;
   status: 'pending_review' | 'completed' | 'discarded';
 }
 

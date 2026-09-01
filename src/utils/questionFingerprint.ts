@@ -1,19 +1,11 @@
-import { QuestionCategory, ExamType } from '../types';
+import { QuestionCategory, ExamType, ImportanceLevel, ExamAppearance } from '../types';
 import { formatExamTag } from '../services/jsonPyqParser';
 
-export interface ExamAppearance {
-  examFamily?: string;
-  exam: string;
-  year: number;
-  tier?: string;
-  shift?: string | null;
-  examDate?: string | null;
-  questionNumber?: number | string;
-}
+export type { ExamAppearance };
 
 /**
  * Normalizes text for deterministic fingerprinting by lowercasing,
- * converting smart quotes/symbols, and collapsing extra whitespace.
+ * converting smart quotes/symbols, stripping non-alphanumerics, and collapsing extra whitespace.
  */
 export function normalizeTextForFingerprint(text?: string | null): string {
   if (!text) return '';
@@ -32,7 +24,7 @@ export function normalizeTextForFingerprint(text?: string | null): string {
  * Rules:
  * - Differentiates between Synonyms and Antonyms of the same word (category is included).
  * - Differentiates questions that have different answer options or correct answers.
- * - Ignores exam, year, tier, appearances, and shift metadata.
+ * - Ignores exam, year, tier, appearances, date, and shift metadata.
  */
 export function computeQuestionFingerprint(
   category: string,
@@ -63,9 +55,76 @@ export function computeQuestionFingerprint(
 }
 
 /**
+ * Computes a question identity key that excludes the correct answer.
+ * Used to detect answer conflicts (i.e. identical category, prompt, and options,
+ * but conflicting correct answer keys).
+ */
+export function computeQuestionIdentityKey(
+  category: string,
+  wordOrPhrase: string,
+  options: string[],
+  _questionPrompt?: string
+): string {
+  const normCat = (category || '').toLowerCase().trim();
+  const normWord = normalizeTextForFingerprint(wordOrPhrase);
+
+  const normOptions = options
+    .map(opt => normalizeTextForFingerprint(opt))
+    .filter(Boolean)
+    .sort()
+    .join('|');
+
+  return `${normCat}:::${normWord}:::${normOptions}`;
+}
+
+/**
+ * Fast deterministic hash for generating canonical Firestore document IDs
+ */
+function fnv1a32(str: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    hash ^= str.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+/**
+ * Generates a stable canonical question document ID from a fingerprint.
+ */
+export function generateCanonicalQuestionId(
+  category: string,
+  wordOrPhrase: string,
+  options: string[],
+  correctIndexOrAnswer: number | string | null | undefined
+): string {
+  const fp = computeQuestionFingerprint(category, wordOrPhrase, options, correctIndexOrAnswer);
+  const normWord = normalizeTextForFingerprint(wordOrPhrase).replace(/\s+/g, '_').slice(0, 24);
+  const catPrefix = (category || 'pyq').toLowerCase().slice(0, 3);
+  const hash = fnv1a32(fp);
+  return `pyq_${catPrefix}_${normWord || 'item'}_${hash}`;
+}
+
+/**
  * Generates a unique key for an individual exam appearance (exam + year + tier).
  */
 export function getAppearanceKey(app: ExamAppearance): string {
+  const normEx = (app.exam || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const yr = app.year || 0;
+  const normTr = (app.tier || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const normShift = (app.shift || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const normDate = (app.examDate || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  if (normShift || normDate) {
+    return `${normEx}_${yr}_${normTr}_${normShift}_${normDate}`;
+  }
+  return `${normEx}_${yr}_${normTr}`;
+}
+
+/**
+ * Generates a coarse exam key (exam + year + tier) for deduplicating repeated batch occurrences.
+ */
+export function getCoarseAppearanceKey(app: ExamAppearance): string {
   const normEx = (app.exam || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   const yr = app.year || 0;
   const normTr = (app.tier || '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -77,6 +136,7 @@ export function getAppearanceKey(app: ExamAppearance): string {
  * 1. Newest year first
  * 2. Exam name alphabetically
  * 3. Tier/stage name
+ * 4. Shift/Date
  */
 export function sortAppearances(appearances: ExamAppearance[]): ExamAppearance[] {
   return [...appearances].sort((a, b) => {
@@ -84,12 +144,14 @@ export function sortAppearances(appearances: ExamAppearance[]): ExamAppearance[]
     if (yearDiff !== 0) return yearDiff;
     const examDiff = (a.exam || '').localeCompare(b.exam || '');
     if (examDiff !== 0) return examDiff;
-    return (a.tier || '').localeCompare(b.tier || '');
+    const tierDiff = (a.tier || '').localeCompare(b.tier || '');
+    if (tierDiff !== 0) return tierDiff;
+    return (a.shift || '').localeCompare(b.shift || '');
   });
 }
 
 /**
- * Merges new appearances into an existing appearance array without duplicate (exam + year + tier).
+ * Merges new appearances into an existing appearance array without duplicates.
  */
 export function mergeAppearances(
   existingList: ExamAppearance[] | undefined,
@@ -119,6 +181,29 @@ export function mergeAppearances(
 
   const merged = sortAppearances(Array.from(existingMap.values()));
   return { merged, addedCount };
+}
+
+/**
+ * Computes the dynamic importance level based on verified appearances count:
+ * - 1 appearance: high
+ * - 2-3 appearances: very-high
+ * - 4+ appearances: ultra-high
+ */
+export function computeImportanceLevel(repeatCount: number): ImportanceLevel {
+  if (repeatCount >= 4) return 'ultra-high';
+  if (repeatCount >= 2) return 'very-high';
+  return 'high';
+}
+
+/**
+ * Computes repeat count based on actual appearances and optional base repeats.
+ */
+export function computeRepeatCount(
+  appearances?: ExamAppearance[], 
+  baseRepeatCount?: number
+): number {
+  const appCount = Array.isArray(appearances) ? appearances.length : 0;
+  return Math.max(appCount, baseRepeatCount || 1, 1);
 }
 
 /**
@@ -167,6 +252,7 @@ function matchSingleExamName(examName: string, filter: ExamType | string): boole
 export function matchesExamFilter(
   question: {
     exam?: string;
+    examFamily?: string;
     examHistory?: string[];
     appearances?: ExamAppearance[];
   },

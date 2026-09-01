@@ -1,9 +1,19 @@
-import { Question, QuestionCategory, ExamType, Difficulty, ImportanceLevel } from '../types';
+import { Question, QuestionCategory, ExamType, Difficulty, ImportanceLevel, ExamAppearance } from '../types';
 import { questionReviewScheduler, ReviewState } from './questionReviewScheduler';
 import { VOCAB_MASTER_EXTENDED, WordEntry } from '../data/vocabMasterData';
 import { OWS_MASTER_EXTENDED, OWSEntry } from '../data/owsMasterData';
 import { IDIOM_MASTER_EXTENDED, IdiomEntry } from '../data/idiomMasterData';
 import { fetchPublishedQuestionBank } from './pyqFirestoreService';
+import { formatExamTag } from './jsonPyqParser';
+import {
+  computeQuestionFingerprint,
+  computeQuestionIdentityKey,
+  generateCanonicalQuestionId,
+  computeImportanceLevel,
+  computeRepeatCount,
+  mergeAppearances,
+  sortAppearances,
+} from '../utils/questionFingerprint';
 
 // Authentic Govt Exam Years and Shifts for realistic attribution
 const EXAM_YEARS = [
@@ -374,8 +384,32 @@ export class QuestionBankEngine {
 
     for (const raw of questions) {
       const memoryKey = raw.memoryKey || buildMemoryKey(raw.category, raw.wordOrPhrase, raw.options, raw.correctIndex);
+      const canonicalId = raw.canonicalQuestionId || raw.id || generateCanonicalQuestionId(
+        raw.category,
+        raw.wordOrPhrase,
+        raw.options,
+        raw.correctIndex
+      );
+      const fingerprint = raw.fingerprint || computeQuestionFingerprint(
+        raw.category,
+        raw.wordOrPhrase,
+        raw.options,
+        raw.correctIndex,
+        raw.instruction || raw.question
+      );
+      const identityKey = raw.identityKey || computeQuestionIdentityKey(
+        raw.category,
+        raw.wordOrPhrase,
+        raw.options,
+        raw.instruction || raw.question
+      );
+
       const q: Question = {
         ...raw,
+        id: canonicalId,
+        canonicalQuestionId: canonicalId,
+        fingerprint,
+        identityKey,
         isPYQ: true,
         verified: true,
         sourceType: 'verified_pyq',
@@ -384,14 +418,48 @@ export class QuestionBankEngine {
       };
 
       const existingIdx = this.importedPool.findIndex(
-        item => item.id === q.id || (item.category === q.category && item.wordOrPhrase.toLowerCase() === q.wordOrPhrase.toLowerCase())
+        item => item.id === q.id || 
+                item.canonicalQuestionId === q.canonicalQuestionId || 
+                (item.fingerprint && item.fingerprint === q.fingerprint) ||
+                (item.category === q.category && item.wordOrPhrase.toLowerCase() === q.wordOrPhrase.toLowerCase())
       );
 
       if (existingIdx >= 0) {
         const existing = this.importedPool[existingIdx];
-        const combinedHistory = Array.from(new Set([...(existing.examHistory || []), ...(q.examHistory || [])]));
+        
+        // Merge appearances
+        const incomingApps = Array.isArray(q.appearances) && q.appearances.length > 0
+          ? q.appearances
+          : [{
+              examFamily: q.examFamily || 'SSC',
+              exam: q.exam || 'SSC CGL',
+              year: q.year || 2024,
+              tier: q.tier || '',
+              shift: q.shift || null,
+              examDate: q.examDate || null,
+              questionNumber: q.questionNumber,
+            }];
+
+        const { merged: mergedApps } = mergeAppearances(existing.appearances || [], incomingApps);
+        existing.appearances = mergedApps;
+
+        const dynamicTags = mergedApps.map(a => formatExamTag(a.exam, a.year, a.tier));
+        const combinedHistory = Array.from(new Set([...(existing.examHistory || []), ...dynamicTags]));
         existing.examHistory = combinedHistory;
-        existing.repeatCount = Math.max(existing.repeatCount || 1, q.repeatCount || 1);
+
+        existing.repeatCount = computeRepeatCount(mergedApps, Math.max(existing.repeatCount || 1, q.repeatCount || 1));
+        existing.importanceLevel = computeImportanceLevel(existing.repeatCount);
+
+        const primaryApp = mergedApps[0];
+        if (primaryApp) {
+          existing.examFamily = primaryApp.examFamily || existing.examFamily;
+          existing.exam = primaryApp.exam || existing.exam;
+          existing.year = primaryApp.year || existing.year;
+          existing.tier = primaryApp.tier || existing.tier;
+          existing.shift = primaryApp.shift || existing.shift;
+          existing.examDate = primaryApp.examDate || existing.examDate;
+        }
+
         existing.options = q.options;
         existing.correctIndex = q.correctIndex;
         existing.meaning = q.meaning || existing.meaning;
@@ -412,6 +480,22 @@ export class QuestionBankEngine {
         existing.conceptKey = memoryKey;
         merged++;
       } else {
+        const rawApps = Array.isArray(q.appearances) && q.appearances.length > 0
+          ? q.appearances
+          : [{
+              examFamily: q.examFamily || 'SSC',
+              exam: q.exam || 'SSC CGL',
+              year: q.year || 2024,
+              tier: q.tier || '',
+              shift: q.shift || null,
+              examDate: q.examDate || null,
+              questionNumber: q.questionNumber,
+            }];
+        q.appearances = sortAppearances(rawApps);
+        q.repeatCount = computeRepeatCount(q.appearances, q.repeatCount);
+        q.importanceLevel = computeImportanceLevel(q.repeatCount);
+        q.examHistory = q.appearances.map(a => formatExamTag(a.exam, a.year, a.tier));
+
         this.importedPool.push(q);
         added++;
       }
@@ -428,6 +512,43 @@ export class QuestionBankEngine {
 
     this.rebuildConceptMap();
     return { addedCount: added, mergedCount: merged };
+  }
+
+  /**
+   * Helper: Check if a question matches a selected Exam target
+   */
+  public matchesExam(question: Question, targetExam: ExamType | string): boolean {
+    if (!targetExam || targetExam === 'ALL') return true;
+    const cleanTarget = targetExam.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+    // Check all appearances first (canonical multi-exam matching)
+    if (Array.isArray(question.appearances) && question.appearances.length > 0) {
+      for (const app of question.appearances) {
+        const appExam = (app.exam || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const appFam = (app.examFamily || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (appExam.includes(cleanTarget) || cleanTarget.includes(appExam) || appFam.includes(cleanTarget)) {
+          return true;
+        }
+      }
+    }
+
+    // Check direct properties
+    if (question.exam) {
+      const qExam = question.exam.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (qExam.includes(cleanTarget) || cleanTarget.includes(qExam)) return true;
+    }
+    if (question.examFamily) {
+      const qFam = question.examFamily.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (qFam.includes(cleanTarget) || cleanTarget.includes(qFam)) return true;
+    }
+    if (Array.isArray(question.examHistory)) {
+      for (const tag of question.examHistory) {
+        const cleanTag = tag.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (cleanTag.includes(cleanTarget) || cleanTarget.includes(cleanTag)) return true;
+      }
+    }
+
+    return false;
   }
 
   // Retrieve all available questions

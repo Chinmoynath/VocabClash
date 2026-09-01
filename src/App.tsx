@@ -1118,6 +1118,11 @@ export default function App() {
               }}
               onBookmarkQuestion={handleBookmarkQuestion}
               onOpenAiDeepDive={handleOpenAiTutor}
+              onNavigateToMistakes={() => {
+                setMatchState(null);
+                setIsMatchCompleted(false);
+                setCurrentTab('mistakes');
+              }}
               bookmarkedIds={bookmarkedIds}
               isPremium={subscription.isPremium}
               currentUser={currentUser}
@@ -1287,6 +1292,10 @@ export default function App() {
             setShowProfileModal(false);
             setShowTourModal(true);
           }}
+          onNavigateToMistakes={() => {
+            setShowProfileModal(false);
+            setCurrentTab('mistakes');
+          }}
           onUserChange={user => setCurrentUser(user)}
           onManualSync={handleManualSync}
           onSignOut={handleSignOutUser}
@@ -1311,7 +1320,7 @@ export default function App() {
           }}
           onNavigateToMistakes={() => {
             setShowStatsModal(false);
-            setCurrentTab('vault');
+            setCurrentTab('mistakes');
           }}
         />
       )}
