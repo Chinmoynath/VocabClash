@@ -1,4 +1,4 @@
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, Type } from '@google/genai';
 
 export interface EnrichmentQuestionInput {
   tempId?: string;
@@ -44,6 +44,67 @@ export interface EnrichedQuestionOutput {
   optionDetails: EnrichedOptionDetail[];
 }
 
+/**
+ * Robust JSON extraction helper that handles markdown code blocks,
+ * trailing text/characters after JSON, and minor formatting errors.
+ */
+function extractJsonArray(raw: string): any[] | null {
+  if (!raw || typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+
+  // 1. Direct JSON parse
+  try {
+    const direct = JSON.parse(trimmed);
+    if (Array.isArray(direct)) return direct;
+    if (direct && typeof direct === 'object') {
+      for (const val of Object.values(direct)) {
+        if (Array.isArray(val)) return val as any[];
+      }
+    }
+  } catch {}
+
+  // 2. Strip code fences
+  const cleaned = trimmed.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  try {
+    const cleanedParsed = JSON.parse(cleaned);
+    if (Array.isArray(cleanedParsed)) return cleanedParsed;
+  } catch {}
+
+  // 3. Extract substring between first '[' and last ']'
+  const firstBracket = cleaned.indexOf('[');
+  const lastBracket = cleaned.lastIndexOf(']');
+  if (firstBracket !== -1 && lastBracket > firstBracket) {
+    const arraySubstring = cleaned.substring(firstBracket, lastBracket + 1);
+    try {
+      const parsedSlice = JSON.parse(arraySubstring);
+      if (Array.isArray(parsedSlice)) return parsedSlice;
+    } catch {}
+
+    // Clean trailing commas before closing braces/brackets: ,] -> ] or ,} -> }
+    try {
+      const sanitized = arraySubstring.replace(/,\s*([\]}])/g, '$1');
+      const sanitizedParsed = JSON.parse(sanitized);
+      if (Array.isArray(sanitizedParsed)) return sanitizedParsed;
+    } catch {}
+  }
+
+  // 4. Single JSON object fallback if returned as single item instead of array
+  const firstBrace = cleaned.indexOf('{');
+  const lastBrace = cleaned.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    try {
+      const obj = JSON.parse(cleaned.substring(firstBrace, lastBrace + 1));
+      if (obj && typeof obj === 'object') {
+        if (Array.isArray((obj as any).questions)) return (obj as any).questions;
+        if (Array.isArray((obj as any).data)) return (obj as any).data;
+        return [obj];
+      }
+    } catch {}
+  }
+
+  return null;
+}
+
 export async function processPyqEnrichmentBatch(
   batch: EnrichmentQuestionInput[],
   ai: GoogleGenAI | null
@@ -79,135 +140,141 @@ ${JSON.stringify(
 STRICT EDUCATIONAL MANDATE (EVERY SINGLE QUESTION MUST BE FULLY ENRICHED):
 1. NEVER leave meaning, hindiMeaning, rootWordInfo, mnemonic, exampleSentence, or optionDetails empty.
 2. Word Meaning (Main target word/phrase):
-   - "meaning": Accurate, concise English dictionary definition (e.g., "Very attentive to and concerned about accuracy and detail; difficult to please.").
-   - "hindiMeaning": 2 to 4 natural Hindi synonyms separated by slashes (e.g., "तुनकमिजाज / जिसे संतुष्ट करना कठिन हो" or "प्रशंसा / स्तुति / गुणगान").
+   - "meaning": Accurate, concise English dictionary definition.
+   - "hindiMeaning": 2 to 4 natural Hindi synonyms separated by slashes (e.g., "तुनकमिजाज / जिसे संतुष्ट करना कठिन हो").
 3. Root & Etymology:
    - Provide genuine Latin, Greek, French, or Sanskrit roots, prefixes, and suffixes.
-   - Format example: 'Latin fastidium ("loathing, distaste")' or 'Greek panegyrikos (pan "all" + agyris "assembly")' or 'Prefix mal- (bad) + diction (speaking)'.
-   - If exact ancient etymology is obscure, provide clear morphological breakdown (prefix/suffix/core meaning) or authentic historical origin. Never leave blank.
+   - Format example: 'Latin fastidium ("loathing, distaste")' or 'Greek panegyrikos (pan "all" + agyris "assembly")'.
 4. Mnemonic Hook:
-   - Must be high-retention Hinglish/visual hooks tailored for Indian aspirants.
-   - Use word-splitting, phonetic rhymes, situational Hindi imagery, or root associations.
-   - Good examples:
-     * FASTIDIOUS: "Fast + Hideous: Jo fast khana khane walo se chidh jaye aur ultra particular ho."
-     * EQUANIMITY: "Equal + Enemy: Dushman ke saamne bhi equanimity (calmness) banaye rakhna."
-     * PANEGYRIC: "Pan + Gym: Pan khakar gym jane wale bodybuilders ki sab panegyric (high praise) karte hain."
-     * CASTIGATION: "Caste + Gate: Gate par caste ko lekar kisi ko castigate (severely criticize/punish) karna galat hai."
-   - STRICTLY BANNED: Generic filler like "Associate this word with...", "Memory hook for X", "Remember this by...".
+   - Must be high-retention Hinglish/visual hooks tailored for Indian aspirants (e.g., "Fast + Hideous: Jo fast khana khane walo se chidh jaye aur ultra particular ho.").
 5. Example Sentence:
-   - Natural, high-standard competitive examination usage sentence in quotes (e.g., "The editor is extremely fastidious about grammatical punctuation and formatting.").
+   - Natural, high-standard competitive examination usage sentence in quotes.
 6. Exam Rationale ("explanation"):
-   - 1 to 2 clear sentences explaining why the correct option is right (Synonym nuance, Antonym direct contrast, OWS fit, or Idiom figurative sense).
+   - 1 to 2 clear sentences explaining why the correct option is right.
 7. ALL 4 Options Breakdown ("optionDetails"):
    - EXACTLY 4 items matching input options IN EXACT ORDER.
    - Every single option MUST have:
      * "option": Exact string of option.
      * "englishMeaning": Real dictionary definition of what that option actually means.
-     * "hindiMeaning": Real Hindi meaning for that word (e.g., "प्रशंसा", "कठोर आलोचना", "श्रद्धांजलि").
+     * "hindiMeaning": Real Hindi meaning for that word.
      * "explanation": Why it is the correct answer, or why it differs as a distractor.
      * "mnemonicHook": Optional brief hook.
      * "isCorrect": true if index === correctIndex, else false.
 
-Respond strictly with a JSON array matching this exact structure:
-[
-  {
-    "tempId": "string",
-    "meaning": "string",
-    "hindiMeaning": "string",
-    "rootWordInfo": "string",
-    "mnemonic": "string",
-    "exampleSentence": "string",
-    "explanation": "string",
-    "enrichmentWarning": "string (optional)",
-    "optionDetails": [
-      {
-        "option": "string",
-        "englishMeaning": "string",
-        "hindiMeaning": "string",
-        "explanation": "string",
-        "mnemonicHook": "string",
-        "isCorrect": boolean
-      }
-    ]
-  }
-]`;
+Respond strictly with a JSON array.`;
 
-    const modelCandidates = ['gemini-2.5-flash', 'gemini-3.7-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+    // Candidate models ordered for maximum availability and rapid throughput
+    const modelCandidates = ['gemini-3.1-flash-lite', 'gemini-3.7-flash', 'gemini-flash-latest'];
+    
     for (const modelName of modelCandidates) {
-      try {
-        const response = await ai.models.generateContent({
-          model: modelName,
-          contents: prompt,
-          config: {
-            responseMimeType: 'application/json',
-          },
-        });
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          const response = await ai.models.generateContent({
+            model: modelName,
+            contents: prompt,
+            config: {
+              responseMimeType: 'application/json',
+              responseSchema: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    tempId: { type: Type.STRING },
+                    meaning: { type: Type.STRING },
+                    hindiMeaning: { type: Type.STRING },
+                    rootWordInfo: { type: Type.STRING },
+                    mnemonic: { type: Type.STRING },
+                    exampleSentence: { type: Type.STRING },
+                    explanation: { type: Type.STRING },
+                    enrichmentWarning: { type: Type.STRING },
+                    optionDetails: {
+                      type: Type.ARRAY,
+                      items: {
+                        type: Type.OBJECT,
+                        properties: {
+                          option: { type: Type.STRING },
+                          englishMeaning: { type: Type.STRING },
+                          hindiMeaning: { type: Type.STRING },
+                          explanation: { type: Type.STRING },
+                          mnemonicHook: { type: Type.STRING },
+                          isCorrect: { type: Type.BOOLEAN },
+                        },
+                        required: ['option', 'englishMeaning', 'hindiMeaning', 'explanation', 'isCorrect'],
+                      },
+                    },
+                  },
+                  required: ['tempId', 'meaning', 'hindiMeaning', 'rootWordInfo', 'mnemonic', 'exampleSentence', 'explanation', 'optionDetails'],
+                },
+              },
+            },
+          });
 
-        const responseText = response.text || '';
-        if (responseText) {
-          let parsedData: any = null;
-          try {
-            parsedData = JSON.parse(responseText);
-          } catch {
-            const cleaned = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
-            parsedData = JSON.parse(cleaned);
-          }
+          const responseText = response.text || '';
+          if (responseText) {
+            const parsedData = extractJsonArray(responseText);
 
-          if (Array.isArray(parsedData) && parsedData.length > 0) {
-            // Validate and sanitize each item
-            return safeBatch.map(q => {
-              const qId = q.tempId || q.id || 'q_temp';
-              const match = parsedData.find((p: any) => p.tempId === qId);
-              const correctIdx = typeof q.correctIndex === 'number' ? q.correctIndex : 0;
-              const options = Array.isArray(q.options) ? q.options : ['A', 'B', 'C', 'D'];
+            if (Array.isArray(parsedData) && parsedData.length > 0) {
+              // Validate and sanitize each item
+              return safeBatch.map(q => {
+                const qId = q.tempId || q.id || 'q_temp';
+                const match = parsedData.find((p: any) => p.tempId === qId || p.id === qId);
+                const correctIdx = typeof q.correctIndex === 'number' ? q.correctIndex : 0;
+                const options = Array.isArray(q.options) ? q.options : ['A', 'B', 'C', 'D'];
 
-              if (match && match.meaning && match.hindiMeaning) {
-                // Ensure optionDetails has 4 items
-                let optDetails: EnrichedOptionDetail[] = [];
-                if (Array.isArray(match.optionDetails) && match.optionDetails.length === options.length) {
-                  optDetails = options.map((opt, idx) => {
-                    const od = match.optionDetails[idx] || {};
-                    return {
+                if (match && match.meaning && match.hindiMeaning) {
+                  // Ensure optionDetails has 4 items
+                  let optDetails: EnrichedOptionDetail[] = [];
+                  if (Array.isArray(match.optionDetails) && match.optionDetails.length === options.length) {
+                    optDetails = options.map((opt, idx) => {
+                      const od = match.optionDetails[idx] || {};
+                      return {
+                        option: opt,
+                        englishMeaning: od.englishMeaning?.trim() || `Definition of "${opt}"`,
+                        hindiMeaning: od.hindiMeaning?.trim() || `अर्थ: "${opt}"`,
+                        explanation: od.explanation?.trim() || (idx === correctIdx ? 'Correct Answer' : 'Distractor'),
+                        shortExplanation: od.explanation?.trim() || (idx === correctIdx ? 'Correct Answer' : undefined),
+                        mnemonicHook: od.mnemonicHook?.trim() || undefined,
+                        isCorrect: idx === correctIdx,
+                      };
+                    });
+                  } else {
+                    optDetails = options.map((opt, idx) => ({
                       option: opt,
-                      englishMeaning: od.englishMeaning?.trim() || `Definition of "${opt}"`,
-                      hindiMeaning: od.hindiMeaning?.trim() || `अर्थ: "${opt}"`,
-                      explanation: od.explanation?.trim() || (idx === correctIdx ? 'Correct Answer' : 'Distractor'),
-                      shortExplanation: od.explanation?.trim() || (idx === correctIdx ? 'Correct Answer' : undefined),
-                      mnemonicHook: od.mnemonicHook?.trim() || undefined,
+                      englishMeaning: idx === correctIdx ? match.meaning : `Meaning of "${opt}"`,
+                      hindiMeaning: idx === correctIdx ? match.hindiMeaning : `अर्थ: "${opt}"`,
+                      explanation: idx === correctIdx ? 'Correct Answer' : 'Distractor option',
+                      shortExplanation: idx === correctIdx ? 'Correct Answer' : undefined,
                       isCorrect: idx === correctIdx,
-                    };
-                  });
-                } else {
-                  optDetails = options.map((opt, idx) => ({
-                    option: opt,
-                    englishMeaning: idx === correctIdx ? match.meaning : `Meaning of "${opt}"`,
-                    hindiMeaning: idx === correctIdx ? match.hindiMeaning : `अर्थ: "${opt}"`,
-                    explanation: idx === correctIdx ? 'Correct Answer' : 'Distractor option',
-                    shortExplanation: idx === correctIdx ? 'Correct Answer' : undefined,
-                    isCorrect: idx === correctIdx,
-                  }));
+                    }));
+                  }
+
+                  return {
+                    tempId: qId,
+                    meaning: match.meaning.trim(),
+                    hindiMeaning: match.hindiMeaning.trim(),
+                    rootWordInfo: match.rootWordInfo?.trim() || '',
+                    mnemonic: match.mnemonic?.trim() || '',
+                    exampleSentence: match.exampleSentence?.trim() || '',
+                    explanation: match.explanation?.trim() || '',
+                    enrichmentWarning: match.enrichmentWarning?.trim() || undefined,
+                    optionDetails: optDetails,
+                  };
                 }
 
-                return {
-                  tempId: qId,
-                  meaning: match.meaning.trim(),
-                  hindiMeaning: match.hindiMeaning.trim(),
-                  rootWordInfo: match.rootWordInfo?.trim() || '',
-                  mnemonic: match.mnemonic?.trim() || '',
-                  exampleSentence: match.exampleSentence?.trim() || '',
-                  explanation: match.explanation?.trim() || '',
-                  enrichmentWarning: match.enrichmentWarning?.trim() || undefined,
-                  optionDetails: optDetails,
-                };
-              }
-
-              // Fallback for this single item
-              return createFallbackOutput(q);
-            });
+                // Fallback for this single item
+                return createFallbackOutput(q);
+              });
+            }
           }
+        } catch (err: any) {
+          const isTransient = err?.status === 503 || err?.status === 429 || err?.message?.includes('503') || err?.message?.includes('429');
+          if (attempt === 1 && isTransient) {
+            await new Promise(resolve => setTimeout(resolve, 600));
+            continue;
+          }
+          console.warn(`[GEMINI ENRICHMENT] Model ${modelName} attempt ${attempt} failed (${err?.status || err?.message || 'Error'}).`);
+          break;
         }
-      } catch (err: any) {
-        console.warn(`[GEMINI ENRICHMENT] Model ${modelName} attempt failed (${err?.status || err?.message}), checking next...`);
       }
     }
   }

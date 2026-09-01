@@ -227,6 +227,46 @@ export type FriendLobbyStatus =
   | 'cancelled' 
   | 'expired';
 
+export interface DailyAccuracyRecord {
+  date: string; // YYYY-MM-DD
+  solved: number;
+  correct: number;
+  wrong: number;
+  accuracy: number; // 0 - 100 percentage
+  avgResponseMs?: number;
+  pyqPointsGained?: number;
+}
+
+export interface CategoryStatsRecord {
+  category: QuestionCategory;
+  solved: number;
+  correct: number;
+  wrong: number;
+  accuracy: number;
+  masteredCount: number;
+}
+
+export interface UserStatsSummary {
+  totalSolved: number;
+  totalCorrect: number;
+  totalWrong: number;
+  overallAccuracy: number;
+  currentMonthSolved: number;
+  currentMonthAccuracy: number;
+  lastMonthSolved: number;
+  lastMonthAccuracy: number;
+  monthOverMonthAccuracyDelta: number; // e.g. +5.2% or -1.4%
+  bestCategory: QuestionCategory;
+  averageResponseTimeMs: number;
+  currentStreak: number;
+  longestStreak: number;
+  pyqScore: number;
+  examReadinessScore: number; // 0 - 100 benchmark
+  dailyHistory: DailyAccuracyRecord[]; // Array of last 14-30 days
+  categoryBreakdown: Record<QuestionCategory, CategoryStatsRecord>;
+  lastUpdated: number;
+}
+
 export interface FriendLobby {
   code: string; // 6-digit numeric room code (e.g. "492810")
   roomId: string; // Unique shared match room ID

@@ -5,6 +5,7 @@ import { questionReviewScheduler, ReviewState } from '../services/questionReview
 import { getPersistentSeenWords } from '../utils/questionHistoryManager';
 import { getOptionBreakdown, OptionDetail } from '../utils/optionExplanations';
 import { soundManager } from '../utils/audio';
+import { recordQuestionAttempt } from '../utils/userStatsManager';
 import { 
   Target, 
   Check, 
@@ -29,7 +30,8 @@ import {
   Info,
   Timer,
   Pause,
-  Play
+  Play,
+  BarChart3
 } from 'lucide-react';
 import { AdSenseUnit } from './AdSenseUnit';
 import { ADSENSE_BANNER_SLOT } from '../services/adSenseService';
@@ -43,17 +45,58 @@ interface PracticeModeProps {
   onUpdatePyqScore: (delta: number) => void;
   onBookmarkQuestion: (question: Question) => void;
   onOpenAiTutor: (question: Question) => void;
+  onOpenStats?: () => void;
   onBatchComplete?: () => void;
   onSolveQuestion?: () => void;
   bookmarkedIds: string[];
   isPremium?: boolean;
 }
 
+const getTodayStrKey = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+};
+
+const STORAGE_KEY_DAILY_DRILL = 'vocabclash_pyq_daily_progress_v2';
+
+interface DailyDrillProgress {
+  date: string;
+  questionNumber: number;
+  sessionSolvedCount: number;
+  streak: number;
+}
+
+const getStoredDailyProgress = (): DailyDrillProgress => {
+  const today = getTodayStrKey();
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_DAILY_DRILL);
+    if (raw) {
+      const parsed: DailyDrillProgress = JSON.parse(raw);
+      if (parsed && parsed.date === today && typeof parsed.questionNumber === 'number') {
+        return parsed;
+      }
+    }
+  } catch {}
+  return {
+    date: today,
+    questionNumber: 1,
+    sessionSolvedCount: 0,
+    streak: 0,
+  };
+};
+
+const saveDailyProgress = (progress: DailyDrillProgress) => {
+  try {
+    localStorage.setItem(STORAGE_KEY_DAILY_DRILL, JSON.stringify(progress));
+  } catch {}
+};
+
 export const PracticeMode: React.FC<PracticeModeProps> = ({
   pyqScore,
   onUpdatePyqScore,
   onBookmarkQuestion,
   onOpenAiTutor,
+  onOpenStats,
   onBatchComplete,
   onSolveQuestion,
   bookmarkedIds,
@@ -62,8 +105,11 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
   const [category, setCategory] = useState<QuestionCategory | 'mixed'>('mixed');
   const [exam, setExam] = useState<ExamType>('ALL');
   
-  // Continuous drill session state (no 20 question limit)
-  const [questionNumber, setQuestionNumber] = useState<number>(1);
+  // Continuous drill session state - persists across tab switches for today and resets on a new day
+  const [questionNumber, setQuestionNumber] = useState<number>(() => getStoredDailyProgress().questionNumber);
+  const [sessionSolvedCount, setSessionSolvedCount] = useState<number>(() => getStoredDailyProgress().sessionSolvedCount);
+  const [streak, setStreak] = useState<number>(() => getStoredDailyProgress().streak);
+
   const [recentWordsHistory, setRecentWordsHistory] = useState<string[]>(() => getPersistentSeenWords().slice(-100));
   const [currentQ, setCurrentQ] = useState<Question>(() => {
     const initHistory = getPersistentSeenWords().slice(-100);
@@ -71,14 +117,13 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
   });
 
   const questionStartTimeRef = useRef<number>(Date.now());
+  const isAdvancingRef = useRef<boolean>(false);
   const [currentReviewState, setCurrentReviewState] = useState<ReviewState | null>(() => 
     currentQ ? questionReviewScheduler.getReviewState(currentQ.memoryKey || currentQ.wordOrPhrase) || null : null
   );
 
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
   const [isAnswered, setIsAnswered] = useState<boolean>(false);
-  const [streak, setStreak] = useState<number>(0);
-  const [sessionSolvedCount, setSessionSolvedCount] = useState<number>(0);
   const [saveToast, setSaveToast] = useState<string | null>(null);
   const [showAllOptionBreakdown, setShowAllOptionBreakdown] = useState<boolean>(true);
   const [showReportModal, setShowReportModal] = useState<boolean>(false);
@@ -112,32 +157,40 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
       questionStartTimeRef.current = Date.now();
       setCurrentReviewState(questionReviewScheduler.getReviewState(currentQ.memoryKey || currentQ.wordOrPhrase) || null);
       setIsCountdownPaused(false);
-      if (autoAdvanceSec > 0) {
-        setCountdown(autoAdvanceSec);
-      }
+      isAdvancingRef.current = false;
     }
-  }, [currentQ, autoAdvanceSec]);
+  }, [currentQ]);
 
-  // Auto-advance countdown timer when question is answered
+  // Auto-advance countdown timer when question is answered (clean interval + single-trigger timeout)
   useEffect(() => {
     if (!isAnswered || autoAdvanceSec <= 0 || isCountdownPaused) {
+      setCountdown(0);
       return;
     }
 
     setCountdown(autoAdvanceSec);
-    const interval = setInterval(() => {
+
+    // Visual countdown ticker (strictly UI-only, no side effects in state updater)
+    const intervalId = setInterval(() => {
       setCountdown(prev => {
         if (prev <= 1) {
-          clearInterval(interval);
-          handleNextQuestion();
+          clearInterval(intervalId);
           return 0;
         }
         return prev - 1;
       });
     }, 1000);
 
-    return () => clearInterval(interval);
-  }, [isAnswered, autoAdvanceSec, isCountdownPaused, currentQ]);
+    // Dedicated single-shot advance timer
+    const timeoutId = setTimeout(() => {
+      handleNextQuestion();
+    }, autoAdvanceSec * 1000);
+
+    return () => {
+      clearInterval(intervalId);
+      clearTimeout(timeoutId);
+    };
+  }, [isAnswered, autoAdvanceSec, isCountdownPaused, currentQ?.id]);
 
   // Desktop keyboard controls (1-4 for options, S/B for bookmark, Space/Enter/N for Next question)
   useEffect(() => {
@@ -210,20 +263,40 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
 
     // Add to session word history
     setRecentWordsHistory(prev => [...prev.slice(-50), currentQ.wordOrPhrase]);
-    setSessionSolvedCount(prev => prev + 1);
+    const nextSolvedCount = sessionSolvedCount + 1;
+    setSessionSolvedCount(nextSolvedCount);
 
+    // Record in global daily stats & accuracy manager
+    recordQuestionAttempt({
+      isCorrect,
+      responseTimeMs: elapsedMs,
+      category: currentQ.category,
+      pyqPoints: isCorrect ? 10 : -2,
+    });
+
+    const nextStreak = isCorrect ? streak + 1 : 0;
     if (isCorrect) {
       soundManager.playCorrect();
-      setStreak(prev => prev + 1);
+      setStreak(nextStreak);
       onUpdatePyqScore(10);
     } else {
       soundManager.playWrong();
       setStreak(0);
       onUpdatePyqScore(-2);
     }
+
+    saveDailyProgress({
+      date: getTodayStrKey(),
+      questionNumber: questionNumber,
+      sessionSolvedCount: nextSolvedCount,
+      streak: nextStreak,
+    });
   };
 
   const handleNextQuestion = () => {
+    if (isAdvancingRef.current) return;
+    isAdvancingRef.current = true;
+
     soundManager.playTap();
     
     // Batch interval ad trigger (every 15 questions solved)
@@ -234,9 +307,26 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     // Pull next adaptive repetition question
     const nextQ = getNextDrillQuestion(category, exam, [...recentWordsHistory, currentQ.wordOrPhrase]);
     setCurrentQ(nextQ);
-    setQuestionNumber(prev => prev + 1);
+    
+    setQuestionNumber(prev => {
+      const nextNum = prev + 1;
+      saveDailyProgress({
+        date: getTodayStrKey(),
+        questionNumber: nextNum,
+        sessionSolvedCount: sessionSolvedCount,
+        streak: streak,
+      });
+      return nextNum;
+    });
+
     setSelectedOption(null);
     setIsAnswered(false);
+    setCountdown(0);
+    setIsCountdownPaused(false);
+
+    setTimeout(() => {
+      isAdvancingRef.current = false;
+    }, 400);
   };
 
   const handleToggleBookmark = () => {
@@ -366,12 +456,29 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
               <span>{streak}x</span>
             </div>
           )}
-          <div className="flex items-center gap-1.5 bg-slate-850 border border-amber-500/30 px-2.5 py-1 rounded-xl shadow-sm">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">PYQ Score</span>
-            <span className="text-xs font-mono font-black text-amber-400">
-              {pyqScore} pts
-            </span>
-          </div>
+          {/* PYQ Score & Stats Symbol */}
+          <button
+            onClick={() => {
+              if (onOpenStats) {
+                soundManager.playTap();
+                onOpenStats();
+              }
+            }}
+            id="practice-stats-button"
+            className="flex items-center gap-1.5 bg-slate-850 hover:bg-slate-800 border border-amber-500/35 hover:border-amber-400 px-2.5 py-1 rounded-xl shadow-sm transition-all group active:scale-95 cursor-pointer"
+            title="View Solved Questions, Right/Wrong Counts & Daily Accuracy Graph"
+            aria-label="View Performance Statistics"
+          >
+            <div className="w-4 h-4 rounded bg-amber-500/15 text-amber-400 flex items-center justify-center group-hover:scale-110 transition-transform">
+              <BarChart3 className="w-3 h-3" />
+            </div>
+            <div className="flex items-baseline gap-1">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider hidden xs:inline">PYQ</span>
+              <span className="text-xs font-mono font-black text-amber-400">
+                {pyqScore} pts
+              </span>
+            </div>
+          </button>
         </div>
       </div>
 

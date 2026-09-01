@@ -21,7 +21,8 @@ import {
   ShieldCheck,
   LifeBuoy,
   Mail,
-  Scale
+  Scale,
+  BarChart3
 } from 'lucide-react';
 import { SupportModal } from './SupportModal';
 import { LegalAccountModal } from './LegalAccountModal';
@@ -99,6 +100,7 @@ interface ProfileModalProps {
   onResetStats?: () => void;
   onOpenPremium: () => void;
   onOpenStreak: () => void;
+  onOpenStats?: () => void;
   onOpenTour?: () => void;
   onUserChange?: (user: FirebaseUser | null) => void;
   onManualSync?: () => void;
@@ -116,6 +118,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   onResetStats,
   onOpenPremium,
   onOpenStreak,
+  onOpenStats,
   onOpenTour,
   onUserChange,
   onManualSync,
@@ -376,12 +379,25 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
             </div>
           </div>
 
-          <div className="bg-slate-800/80 p-2 rounded-xl border border-slate-700">
-            <div className="text-[9px] text-slate-400">PYQ Score</div>
-            <div className="font-mono font-extrabold text-sky-400 text-xs mt-0.5">
+          <button
+            onClick={() => {
+              if (onOpenStats) {
+                soundManager.playTap();
+                onClose();
+                onOpenStats();
+              }
+            }}
+            className="bg-slate-800/80 hover:bg-slate-750 p-2 rounded-xl border border-amber-500/30 hover:border-amber-400/80 transition-all text-left group"
+            title="Click to view full accuracy & performance analytics"
+          >
+            <div className="text-[9px] text-slate-400 flex items-center justify-between">
+              <span>PYQ Score</span>
+              <BarChart3 className="w-2.5 h-2.5 text-amber-400 group-hover:scale-110 transition-transform" />
+            </div>
+            <div className="font-mono font-extrabold text-sky-400 text-xs mt-0.5 text-center">
               {player.pyqScore || 0}
             </div>
-          </div>
+          </button>
 
           <div className="bg-slate-800/80 p-2 rounded-xl border border-slate-700">
             <div className="text-[9px] text-slate-400">Matches</div>
@@ -404,6 +420,33 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
             </div>
           </button>
         </div>
+
+        {/* Detailed Performance Analytics Shortcut */}
+        {onOpenStats && (
+          <button
+            onClick={() => {
+              soundManager.playTap();
+              onClose();
+              onOpenStats();
+            }}
+            className="w-full bg-slate-850 hover:bg-slate-800 border border-amber-500/30 hover:border-amber-400/60 p-2.5 rounded-2xl flex items-center justify-between text-left transition-all group shadow-sm"
+          >
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-xl bg-amber-500/15 text-amber-400 flex items-center justify-center border border-amber-500/30 group-hover:scale-105 transition-transform">
+                <BarChart3 className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="text-xs font-black text-slate-100 group-hover:text-amber-300">
+                  Performance & Daily Accuracy Graph
+                </div>
+                <div className="text-[10px] text-slate-400">
+                  Total Solved, Right/Wrong counts & monthly trend
+                </div>
+              </div>
+            </div>
+            <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-amber-400 group-hover:translate-x-0.5 transition-all" />
+          </button>
+        )}
 
         {/* Badges Earned */}
         <div className="space-y-1.5">

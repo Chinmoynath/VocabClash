@@ -67,6 +67,8 @@ import { OnboardingTourModal } from './components/OnboardingTourModal';
 import { PlayModeSelectorModal } from './components/PlayModeSelectorModal';
 import { FriendLobbyModal } from './components/FriendLobbyModal';
 import { AdminPyqImporter } from './components/AdminPyqImporter';
+import { UserStatsModal } from './components/UserStatsModal';
+import { recordQuestionAttempt } from './utils/userStatsManager';
 
 const STORAGE_KEY_PLAYER = 'vocabclash_player_v5';
 const STORAGE_KEY_VAULT = 'vocabclash_vault_v2';
@@ -257,6 +259,7 @@ export default function App() {
   const [showPremiumModal, setShowPremiumModal] = useState<boolean>(false);
   const [showAdModal, setShowAdModal] = useState<boolean>(false);
   const [showStreakModal, setShowStreakModal] = useState<boolean>(false);
+  const [showStatsModal, setShowStatsModal] = useState<boolean>(false);
   const [showTourModal, setShowTourModal] = useState<boolean>(false);
   const [showPlayModeModal, setShowPlayModeModal] = useState<boolean>(false);
   const [showFriendLobbyModal, setShowFriendLobbyModal] = useState<boolean>(false);
@@ -690,12 +693,19 @@ export default function App() {
     // Automatically count question towards today's daily streak and daily target
     handleRecordQuestionSolved();
 
+    const currentQ = matchState.questions[matchState.currentQuestionIndex];
+    if (currentQ) {
+      recordQuestionAttempt({
+        isCorrect: playerAns.isCorrect,
+        responseTimeMs: playerAns.timeTakenMs,
+        category: currentQ.category,
+        pyqPoints: playerAns.isCorrect ? 10 : 0,
+      });
+    }
+
     // Automatically add incorrect questions to Mistake Vault (WITHOUT marking as Saved)
-    if (!playerAns.isCorrect) {
-      const currentQ = matchState.questions[matchState.currentQuestionIndex];
-      if (currentQ) {
-        handleRecordMistake(currentQ);
-      }
+    if (!playerAns.isCorrect && currentQ) {
+      handleRecordMistake(currentQ);
     }
 
     setMatchState(prev => {
@@ -1023,6 +1033,10 @@ export default function App() {
             soundManager.playTap();
             setShowStreakModal(true);
           }}
+          onOpenStats={() => {
+            soundManager.playTap();
+            setShowStatsModal(true);
+          }}
           onOpenTour={() => {
             soundManager.playTap();
             setShowTourModal(true);
@@ -1050,6 +1064,10 @@ export default function App() {
           onOpenStreak={() => {
             soundManager.playTap();
             setShowStreakModal(true);
+          }}
+          onOpenStats={() => {
+            soundManager.playTap();
+            setShowStatsModal(true);
           }}
           onOpenTour={() => {
             soundManager.playTap();
@@ -1141,6 +1159,10 @@ export default function App() {
                 onUpdatePyqScore={handleUpdatePyqScore}
                 onBookmarkQuestion={handleBookmarkQuestion}
                 onOpenAiTutor={handleOpenAiTutor}
+                onOpenStats={() => {
+                  soundManager.playTap();
+                  setShowStatsModal(true);
+                }}
                 onBatchComplete={triggerAdIfDue}
                 onSolveQuestion={handleRecordQuestionSolved}
                 bookmarkedIds={bookmarkedIds}
@@ -1257,6 +1279,10 @@ export default function App() {
             setShowProfileModal(false);
             setShowStreakModal(true);
           }}
+          onOpenStats={() => {
+            setShowProfileModal(false);
+            setShowStatsModal(true);
+          }}
           onOpenTour={() => {
             setShowProfileModal(false);
             setShowTourModal(true);
@@ -1264,6 +1290,29 @@ export default function App() {
           onUserChange={user => setCurrentUser(user)}
           onManualSync={handleManualSync}
           onSignOut={handleSignOutUser}
+        />
+      )}
+
+      {/* Performance & Daily Accuracy Analytics Dashboard Modal */}
+      {showStatsModal && (
+        <UserStatsModal
+          isOpen={showStatsModal}
+          onClose={() => setShowStatsModal(false)}
+          player={player}
+          dailyStreak={streak}
+          subscription={subscription}
+          onOpenAuth={() => {
+            setShowStatsModal(false);
+            setShowProfileModal(true);
+          }}
+          onNavigateToPractice={() => {
+            setShowStatsModal(false);
+            setCurrentTab('practice');
+          }}
+          onNavigateToMistakes={() => {
+            setShowStatsModal(false);
+            setCurrentTab('vault');
+          }}
         />
       )}
 

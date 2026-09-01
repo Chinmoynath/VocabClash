@@ -13,6 +13,7 @@ interface TopBarProps {
   onOpenProfile: () => void;
   onOpenPremium: () => void;
   onOpenStreak: () => void;
+  onOpenStats?: () => void;
   onOpenTour?: () => void;
   onOpenAdminImporter?: () => void;
   isAdmin?: boolean;
@@ -27,6 +28,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenProfile,
   onOpenPremium,
   onOpenStreak,
+  onOpenStats,
   onOpenAdminImporter,
   isAdmin = false,
 }) => {
@@ -57,10 +59,10 @@ export const TopBar: React.FC<TopBarProps> = ({
 
         <div>
           <div className="flex items-center gap-1">
-            <span className="font-bold text-xs text-slate-100 group-hover:text-amber-400 transition-colors truncate max-w-[120px] sm:max-w-[160px]">
+            <span className="font-bold text-xs text-slate-100 group-hover:text-amber-400 transition-colors truncate max-w-[110px] sm:max-w-[150px]">
               {extractCleanUserName(player.name, player.email)}
             </span>
-            <span className="text-[10px] bg-slate-800 text-slate-300 px-1 py-0.2 rounded font-mono">
+            <span className="text-[10px] bg-slate-800 text-slate-300 px-1 py-0.2 rounded font-mono hidden xs:inline">
               🇮🇳 IN
             </span>
           </div>
@@ -68,12 +70,12 @@ export const TopBar: React.FC<TopBarProps> = ({
             <Shield className="w-3 h-3 text-amber-400 shrink-0" />
             <span>{player.rankPoints} LP</span>
             <span className="text-slate-500">•</span>
-            <span className="text-slate-400 truncate max-w-[80px]">{player.tierTitle.replace(/[^\w\s]/gi, '')}</span>
+            <span className="text-slate-400 truncate max-w-[70px] sm:max-w-[100px]">{player.tierTitle.replace(/[^\w\s]/gi, '')}</span>
           </div>
         </div>
       </button>
 
-      {/* Streak, Premium Button & Sound Controls */}
+      {/* Center/Right Stats, Streak, Premium Button & Sound Controls */}
       <div className="flex items-center gap-1.5 sm:gap-2">
         {/* Daily Streak Indicator */}
         <button

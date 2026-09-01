@@ -11,7 +11,8 @@ import {
   User, 
   HelpCircle,
   Zap,
-  LogIn
+  LogIn,
+  BarChart3
 } from 'lucide-react';
 import { TabType } from './BottomNavBar';
 import { PlayerProfile, UserSubscription, DailyStreakState } from '../types';
@@ -31,6 +32,7 @@ interface DesktopSidebarProps {
   onOpenProfile: () => void;
   onOpenPremium: () => void;
   onOpenStreak: () => void;
+  onOpenStats?: () => void;
   onOpenTour?: () => void;
 }
 
@@ -45,6 +47,7 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
   onOpenProfile,
   onOpenPremium,
   onOpenStreak,
+  onOpenStats,
   onOpenTour,
 }) => {
   const navItems = [
@@ -164,7 +167,7 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
       {/* Bottom: Quick Stats & User Profile Box */}
       <div className="space-y-3 pt-4 border-t border-slate-800/80">
         
-        {/* Quick Streak & Tour trigger */}
+        {/* Quick Streak, Stats & Tour trigger */}
         <div className="grid grid-cols-2 gap-2">
           <button
             onClick={() => {
@@ -184,7 +187,21 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
             </div>
           </button>
 
-          {onOpenTour && (
+          {onOpenStats ? (
+            <button
+              onClick={() => {
+                soundManager.playTap();
+                onOpenStats();
+              }}
+              className="flex items-center gap-1.5 p-2 rounded-xl bg-slate-900/80 hover:bg-slate-850 border border-amber-500/30 hover:border-amber-400/70 text-xs font-bold text-slate-200 transition-all text-left"
+              title="View Daily Solved Questions, Accuracy & Graph"
+            >
+              <BarChart3 className="w-4 h-4 text-amber-400 shrink-0" />
+              <div className="text-left leading-tight truncate">
+                <span className="text-amber-400 font-mono font-black">{player.pyqScore || 0}</span> Stats
+              </div>
+            </button>
+          ) : onOpenTour ? (
             <button
               onClick={() => {
                 soundManager.playTap();
@@ -196,7 +213,7 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
               <HelpCircle className="w-4 h-4 text-sky-400 shrink-0" />
               <span className="truncate">Guide</span>
             </button>
-          )}
+          ) : null}
         </div>
 
         {/* Premium VIP Banner if not VIP */}

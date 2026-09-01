@@ -21,7 +21,14 @@ function getGenAI(): GoogleGenAI | null {
     return null;
   }
   if (!genAIClient) {
-    genAIClient = new GoogleGenAI({ apiKey });
+    genAIClient = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
+      },
+    });
   }
   return genAIClient;
 }
@@ -766,33 +773,50 @@ Respond strictly with a JSON object in this exact schema without markdown format
   const ai = getGenAI();
   if (ai) {
     // Model candidates with fallback if a model experiences high traffic (503)
-    const modelCandidates = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-3.7-flash'];
+    const modelCandidates = ['gemini-3.1-flash-lite', 'gemini-3.7-flash', 'gemini-flash-latest'];
     for (const modelName of modelCandidates) {
-      try {
-        const response = await ai.models.generateContent({
-          model: modelName,
-          contents: prompt,
-          config: {
-            responseMimeType: 'application/json',
-          },
-        });
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          const response = await ai.models.generateContent({
+            model: modelName,
+            contents: prompt,
+            config: {
+              responseMimeType: 'application/json',
+            },
+          });
 
-        const responseText = response.text || '';
-        if (responseText) {
-          let parsedData = null;
-          try {
-            parsedData = JSON.parse(responseText);
-          } catch {
-            const cleaned = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
-            parsedData = JSON.parse(cleaned);
+          const responseText = response.text || '';
+          if (responseText) {
+            let parsedData: any = null;
+            try {
+              parsedData = JSON.parse(responseText.trim());
+            } catch {
+              const cleaned = responseText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+              try {
+                parsedData = JSON.parse(cleaned);
+              } catch {
+                const firstBrace = cleaned.indexOf('{');
+                const lastBrace = cleaned.lastIndexOf('}');
+                if (firstBrace !== -1 && lastBrace > firstBrace) {
+                  try {
+                    parsedData = JSON.parse(cleaned.substring(firstBrace, lastBrace + 1));
+                  } catch {}
+                }
+              }
+            }
+            if (parsedData && (parsedData.mnemonicHook || parsedData.rootEtymology)) {
+              return res.json({ analysis: parsedData });
+            }
           }
-          if (parsedData && parsedData.mnemonicHook) {
-            return res.json({ analysis: parsedData });
+        } catch (err: any) {
+          const isTransient = err?.status === 503 || err?.status === 429 || err?.message?.includes('503') || err?.message?.includes('429');
+          if (attempt === 1 && isTransient) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+            continue;
           }
+          console.warn(`[GEMINI EXPLAIN] Model ${modelName} unavailable (${err?.status || err?.message}), trying next candidate...`);
+          break;
         }
-      } catch (err: any) {
-        // If 503 or transient error, continue to next model candidate
-        console.warn(`Model ${modelName} unavailable (${err?.status || err?.message}), trying fallback...`);
       }
     }
   }
