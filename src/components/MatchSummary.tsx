@@ -38,6 +38,7 @@ import { ReportQuestionModal } from './ReportQuestionModal';
 import { ShareBattleResultModal } from './ShareBattleResultModal';
 import { BattleShareData } from '../utils/shareCardGenerator';
 import { getOptionBreakdown, OptionDetail } from '../utils/optionExplanations';
+import { ExamAppearancesBadge } from './ExamAppearancesBadge';
 import { formatExamTag } from '../services/jsonPyqParser';
 
 import { User as FirebaseUser } from 'firebase/auth';
@@ -161,8 +162,8 @@ const MatchQuestionReviewCard: React.FC<MatchQuestionReviewCardProps> = ({
   }, [q]);
 
   const examTagText = (() => {
-    if (q.exam || q.year || q.examDate || q.shift) {
-      return formatExamTag(q.exam, q.year, q.examDate, q.shift);
+    if (q.exam || q.year || q.tier) {
+      return formatExamTag(q.exam, q.year, q.tier);
     }
     return (q.examHistory && q.examHistory.length > 0)
       ? q.examHistory.slice(0, 2).join(' • ')
@@ -272,6 +273,18 @@ const MatchQuestionReviewCard: React.FC<MatchQuestionReviewCardProps> = ({
         <h3 className="text-base sm:text-lg font-black text-amber-300 tracking-wide">
           "{q.wordOrPhrase}"
         </h3>
+        <div className="pt-1">
+          <ExamAppearancesBadge
+            appearances={q.appearances}
+            exam={q.exam}
+            year={q.year}
+            tier={q.tier}
+            examHistory={q.examHistory}
+            repeatCount={q.repeatCount}
+            showRepeatCount={false}
+            size="xs"
+          />
+        </div>
       </div>
 
       {/* 4 Options Grid (Clearly shows what was picked vs correct) */}

@@ -1,4 +1,4 @@
-import { Question, QuestionCategory, QuestionOptionDetail } from './index';
+import { Question, QuestionCategory, QuestionOptionDetail, ExamAppearance } from './index';
 
 export type ReviewStatus = 'approved' | 'needs_review' | 'answer_required' | 'duplicate' | 'rejected';
 
@@ -27,11 +27,15 @@ export interface ExtractedQuestion {
   examFamily: string; // e.g. "SSC", "Banking", "Defence", "Railways"
   exam: string;       // e.g. "SSC CGL", "IBPS PO", "CDS"
   year: number;
-  tier?: string;      // e.g. "Tier 1", "Prelims", "Shift 2"
+  tier?: string;      // e.g. "Tier-I", "Mains", "CBT-1"
   shift?: string | null;
   examDate?: string | null; // e.g. "19 Sept", "18 Oct"
   questionNumber?: number | string;
   paper?: string;
+  fingerprint?: string;
+  appearances?: ExamAppearance[];
+  isNewAppearance?: boolean;
+  matchedExistingQuestion?: Question;
   reviewStatus: ReviewStatus;
   duplicateConfidence?: 'exact' | 'high' | 'none';
   duplicateOfId?: string;
@@ -41,6 +45,8 @@ export interface ExtractedQuestion {
   pageNumber?: number;
   rawText?: string;
   isOCR?: boolean;
+  isPYQ?: boolean;
+  verified?: boolean;
 }
 
 export interface ImportBatch {

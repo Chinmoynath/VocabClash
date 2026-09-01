@@ -1,6 +1,13 @@
-import { QuestionCategory } from '../types';
+import { Question, QuestionCategory } from '../types';
 import { ExtractedQuestion, ImportBatch, ReviewStatus } from '../types/pyqImport';
 import { questionBankEngine } from './questionBankEngine';
+import { normalizeTier } from '../config/examMetadataConfig';
+import { 
+  computeQuestionFingerprint, 
+  getAppearanceKey, 
+  mergeAppearances, 
+  ExamAppearance 
+} from '../utils/questionFingerprint';
 
 export interface SkippedQuestionItem {
   index: number;
@@ -78,22 +85,51 @@ export function normalizeExamDate(rawDate: any): string | null {
   return str;
 }
 
+function extractRawTier(obj: any): any {
+  if (!obj || typeof obj !== 'object') return undefined;
+  return obj.tier !== undefined
+    ? obj.tier
+    : obj.stage !== undefined
+    ? obj.stage
+    : obj.phase !== undefined
+    ? obj.phase
+    : obj.examStage !== undefined
+    ? obj.examStage
+    : obj.exam_stage !== undefined
+    ? obj.exam_stage
+    : undefined;
+}
+
 export function formatExamTag(
   exam?: string, 
   year?: number | string, 
-  examDate?: string | null, 
-  shift?: string | null
+  tierOrDate?: string | null, 
+  shiftLegacy?: string | null,
+  tierLegacy?: string | null
 ): string {
   const parts: string[] = [];
-  if (exam) parts.push(exam);
-  if (year) parts.push(String(year));
+  if (exam && exam.trim() && exam !== 'null' && exam !== 'undefined') {
+    parts.push(exam.trim());
+  }
+  if (year && String(year).trim() && String(year) !== 'null' && String(year) !== 'undefined') {
+    parts.push(String(year).trim());
+  }
 
-  const subParts: string[] = [];
-  if (examDate) subParts.push(examDate);
-  if (shift && shift !== 'Not Specified' && shift !== 'null' && shift !== 'undefined') subParts.push(shift);
+  let resolvedTier = '';
+  if (tierLegacy && tierLegacy.trim()) {
+    resolvedTier = tierLegacy.trim();
+  } else if (tierOrDate && tierOrDate.trim()) {
+    resolvedTier = tierOrDate.trim();
+  }
 
-  if (subParts.length > 0) {
-    parts.push(`(${subParts.join(' - ')})`);
+  if (
+    resolvedTier &&
+    resolvedTier !== 'Not Specified' &&
+    resolvedTier !== 'null' &&
+    resolvedTier !== 'undefined' &&
+    resolvedTier !== '-'
+  ) {
+    parts.push(resolvedTier);
   }
 
   return parts.join(' ') || 'Govt Exam PYQ';
@@ -119,7 +155,11 @@ export function extractJsonMetadata(jsonContent: string): ExtractedJsonMetadata 
       const norm = normalizeExamDate(rawDate);
       if (norm) result.examDate = norm;
     }
-    if (meta.tier && typeof meta.tier === 'string') result.tier = meta.tier.trim();
+    const rawTier = extractRawTier(meta);
+    if (rawTier !== undefined && rawTier !== null) {
+      const norm = normalizeTier(rawTier);
+      if (norm) result.tier = norm;
+    }
     if (meta.paper && typeof meta.paper === 'string') result.paper = meta.paper.trim();
 
     return Object.keys(result).length > 0 ? result : null;
@@ -312,13 +352,23 @@ export function parseAndValidatePyqJSON(
   const fallbackExamFamily = 'SSC';
   const fallbackExam = 'SSC CGL';
   const fallbackYear = 2024;
-  const fallbackTier = 'Tier 1';
+  const fallbackTier = '';
   const fallbackPaper = 'English';
 
   const defaultExamFamily = metadataOverride?.examFamily || metaFromFile.examFamily || fallbackExamFamily;
   const defaultExam = metadataOverride?.exam || metaFromFile.exam || fallbackExam;
-  const defaultYear = metadataOverride?.year || (metaFromFile.year ? parseInt(metaFromFile.year, 10) : undefined) || fallbackYear;
-  const defaultTier = metadataOverride?.tier || metaFromFile.tier || fallbackTier;
+  const defaultYear = (metadataOverride?.year !== undefined && !isNaN(parseInt(String(metadataOverride.year), 10)))
+    ? parseInt(String(metadataOverride.year), 10)
+    : (metaFromFile.year && !isNaN(parseInt(metaFromFile.year, 10)))
+    ? parseInt(metaFromFile.year, 10)
+    : fallbackYear;
+
+  const rawFileTier = extractRawTier(metaFromFile);
+  const defaultTier = normalizeTier(
+    (metadataOverride?.tier && metadataOverride.tier.trim())
+      ? metadataOverride.tier
+      : (rawFileTier ?? fallbackTier)
+  );
   
   // Shift priority: override -> file metadata -> null (do NOT invent a shift)
   const resolveShift = (val?: any): string | null => {
@@ -334,13 +384,24 @@ export function parseAndValidatePyqJSON(
 
   const batchId = `batch_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
-  // Existing questions for deduplication check
+  // Existing questions indexed by deterministic fingerprint for canonical matching
   const existingQuestions = questionBankEngine.getAllAvailableQuestions();
-  const existingMap = new Map<string, string>(); // key -> question id/word
+  const existingFingerprintMap = new Map<string, Question>();
   existingQuestions.forEach(q => {
-    const key = `${q.category}:${q.wordOrPhrase.trim().toUpperCase()}`;
-    existingMap.set(key, q.id);
+    const fp = q.fingerprint || computeQuestionFingerprint(
+      q.category,
+      q.wordOrPhrase,
+      q.options,
+      q.correctIndex,
+      q.instruction || q.question
+    );
+    if (!existingFingerprintMap.has(fp)) {
+      existingFingerprintMap.set(fp, q);
+    }
   });
+
+  // Track questions within the current batch to merge multiple appearances within the same JSON file
+  const inBatchFingerprintMap = new Map<string, ExtractedQuestion>();
 
   const eligibleQuestions: ExtractedQuestion[] = [];
   const skippedItems: SkippedQuestionItem[] = [];
@@ -411,41 +472,156 @@ export function parseAndValidatePyqJSON(
       finalOptions
     );
 
-    // Deduplication check
-    const dedupKey = `${category}:${targetWord.toUpperCase()}`;
-    const duplicateOfId = existingMap.get(dedupKey);
-
-    let reviewStatus: ReviewStatus = 'approved';
-    let duplicateConfidence: 'exact' | 'high' | 'none' = 'none';
-
-    if (duplicateOfId) {
-      reviewStatus = 'duplicate';
-      duplicateConfidence = 'exact';
-      duplicateCount++;
-    } else if (correctIdx === null) {
-      reviewStatus = 'answer_required';
-      answerRequiredCount++;
-    } else {
-      reviewStatus = 'approved';
-      approvedCount++;
-    }
-
     const tempId = `json_${batchId}_${index + 1}`;
 
-    // Metadata Priority: QUESTION-LEVEL VALUE -> JSON METADATA VALUE -> ADMIN FORM VALUE
-    const itemExamFamily = item.examFamily || metaFromFile.examFamily || metadataOverride?.examFamily || fallbackExamFamily;
-    const itemExam = item.exam || metaFromFile.exam || metadataOverride?.exam || fallbackExam;
-    const itemYear = (item.year !== undefined && !isNaN(parseInt(item.year, 10))) 
-      ? parseInt(item.year, 10) 
-      : ((metaFromFile.year !== undefined && !isNaN(parseInt(metaFromFile.year, 10)))
-        ? parseInt(metaFromFile.year, 10)
-        : (metadataOverride?.year || fallbackYear));
-    const itemShift = resolveShift(item.shift) ?? resolveShift(metaFromFile.shift) ?? resolveShift(metadataOverride?.shift);
+    // Metadata Priority:
+    // 1. Explicit question-level value
+    // 2. Admin-selected value (metadataOverride)
+    // 3. JSON metadata value (metaFromFile)
+    // 4. Default / Blank fallback
+    const itemExamFamily = item.examFamily || metadataOverride?.examFamily || metaFromFile.examFamily || fallbackExamFamily;
+    const itemExam = item.exam || metadataOverride?.exam || metaFromFile.exam || fallbackExam;
+    
+    // Resolve year
+    const itemYear = (item.year !== undefined && !isNaN(parseInt(String(item.year), 10))) 
+      ? parseInt(String(item.year), 10) 
+      : (metadataOverride?.year !== undefined && !isNaN(parseInt(String(metadataOverride.year), 10)))
+      ? parseInt(String(metadataOverride.year), 10)
+      : ((metaFromFile.year !== undefined && !isNaN(parseInt(String(metaFromFile.year), 10)))
+        ? parseInt(String(metaFromFile.year), 10)
+        : fallbackYear);
+
+    // Resolve tier
+    const rawItemTier = extractRawTier(item);
+    const itemTier = (rawItemTier !== undefined && rawItemTier !== null && String(rawItemTier).trim() !== '')
+      ? (normalizeTier(rawItemTier) || '')
+      : (metadataOverride?.tier !== undefined && metadataOverride.tier.trim() !== '')
+      ? normalizeTier(metadataOverride.tier)
+      : (rawFileTier !== undefined && rawFileTier !== null && String(rawFileTier).trim() !== '')
+      ? (normalizeTier(rawFileTier) || '')
+      : '';
+
+    const itemShift = resolveShift(item.shift) ?? resolveShift(metadataOverride?.shift) ?? resolveShift(metaFromFile.shift);
     const rawItemDate = item.examDate ?? item.date ?? item.examDateMonth ?? item.dateMonth ?? item.exam_date ?? item.monthDate;
     const itemExamDate = normalizeExamDate(rawItemDate) ?? defaultExamDate;
-    const itemTier = item.tier || metaFromFile.tier || metadataOverride?.tier || fallbackTier;
-    const itemPaper = item.paper || metaFromFile.paper || metadataOverride?.paper || fallbackPaper;
+    const itemPaper = item.paper || metadataOverride?.paper || metaFromFile.paper || fallbackPaper;
     const itemQuestionNumber = item.questionNumber ?? item.qNo ?? item.qNumber ?? item.questionNo ?? item.number ?? (index + 1);
+
+    // Build incoming exam appearance object
+    const currentAppearance: ExamAppearance = {
+      examFamily: itemExamFamily,
+      exam: itemExam,
+      year: itemYear,
+      tier: itemTier,
+      shift: itemShift,
+      examDate: itemExamDate,
+      questionNumber: itemQuestionNumber,
+    };
+
+    // Calculate deterministic canonical fingerprint
+    const fingerprint = computeQuestionFingerprint(
+      category,
+      targetWord,
+      finalOptions,
+      correctIdx,
+      questionPrompt
+    );
+
+    // Deduplication and Multiple Appearances Matching
+    let reviewStatus: ReviewStatus = 'approved';
+    let duplicateConfidence: 'exact' | 'high' | 'none' = 'none';
+    let duplicateOfId: string | undefined = undefined;
+    let duplicateOfQuestion: string | undefined = undefined;
+    let isNewAppearance: boolean = false;
+    let matchedExistingQuestion: Question | undefined = undefined;
+    let appearances: ExamAppearance[] = [currentAppearance];
+
+    const matchedExisting = existingFingerprintMap.get(fingerprint);
+    const matchedInBatch = inBatchFingerprintMap.get(fingerprint);
+
+    if (matchedExisting) {
+      matchedExistingQuestion = matchedExisting;
+      duplicateOfId = matchedExisting.id;
+
+      // Extract existing appearances from matched question (with fallback if legacy doc)
+      const existingApps: ExamAppearance[] = Array.isArray(matchedExisting.appearances) && matchedExisting.appearances.length > 0
+        ? matchedExisting.appearances
+        : [
+            {
+              examFamily: matchedExisting.examFamily || 'SSC',
+              exam: matchedExisting.exam || 'SSC CGL',
+              year: matchedExisting.year || 2024,
+              tier: matchedExisting.tier || '',
+              shift: matchedExisting.shift || null,
+              examDate: matchedExisting.examDate || null,
+              questionNumber: matchedExisting.questionNumber,
+            },
+          ];
+
+      const currentAppKey = getAppearanceKey(currentAppearance);
+      const isAlreadyContained = existingApps.some(app => getAppearanceKey(app) === currentAppKey);
+
+      if (isAlreadyContained) {
+        // Exact duplicate occurrence already published
+        reviewStatus = 'duplicate';
+        duplicateConfidence = 'exact';
+        isNewAppearance = false;
+        duplicateOfQuestion = `Exact Duplicate (${formatExamTag(currentAppearance.exam, currentAppearance.year, currentAppearance.tier)})`;
+        duplicateCount++;
+        appearances = existingApps;
+      } else {
+        // Canonical question matches, but this is a NEW exam appearance
+        reviewStatus = 'approved';
+        duplicateConfidence = 'high';
+        isNewAppearance = true;
+        duplicateOfQuestion = 'New Exam Appearance';
+        const { merged } = mergeAppearances(existingApps, currentAppearance);
+        appearances = merged;
+        approvedCount++;
+      }
+    } else if (matchedInBatch) {
+      // Duplicate occurrence within the same JSON file
+      duplicateOfId = matchedInBatch.tempId;
+      const inBatchApps = matchedInBatch.appearances || [];
+      const currentAppKey = getAppearanceKey(currentAppearance);
+      const isAlreadyInBatch = inBatchApps.some(app => getAppearanceKey(app) === currentAppKey);
+
+      if (isAlreadyInBatch) {
+        reviewStatus = 'duplicate';
+        duplicateConfidence = 'exact';
+        isNewAppearance = false;
+        duplicateOfQuestion = `Exact Duplicate in File (${formatExamTag(currentAppearance.exam, currentAppearance.year, currentAppearance.tier)})`;
+        duplicateCount++;
+      } else {
+        // Merge appearance onto earlier batch item and mark current item
+        const { merged } = mergeAppearances(inBatchApps, currentAppearance);
+        matchedInBatch.appearances = merged;
+        reviewStatus = 'duplicate';
+        duplicateConfidence = 'high';
+        isNewAppearance = true;
+        duplicateOfQuestion = 'Merged into earlier item in file';
+        duplicateCount++;
+      }
+      appearances = inBatchApps;
+    } else {
+      // Brand new question
+      if (correctIdx === null) {
+        reviewStatus = 'answer_required';
+        answerRequiredCount++;
+      } else {
+        reviewStatus = 'approved';
+        approvedCount++;
+      }
+    }
+
+    // Similar Paper & Flag Integrity (Do NOT blindly convert unverified/third-party papers into verified PYQs)
+    const itemIsPYQ = typeof item.isPYQ === 'boolean'
+      ? item.isPYQ
+      : (item.is_pyq !== undefined ? Boolean(item.is_pyq) : true);
+    const itemVerified = typeof item.verified === 'boolean'
+      ? item.verified
+      : (item.is_verified !== undefined ? Boolean(item.is_verified) : true);
+    const itemSourceType = (item.sourceType || item.source_type || (itemIsPYQ === false ? 'generated_practice' : 'json_import')) as any;
 
     // Validate and preserve incoming optionDetails if 4 valid items provided
     let incomingOptionDetails: any = undefined;
@@ -482,7 +658,7 @@ export function parseAndValidatePyqJSON(
       };
     }
 
-    eligibleQuestions.push({
+    const extractedItem: ExtractedQuestion = {
       tempId,
       question: questionPrompt,
       wordOrPhrase: targetWord,
@@ -490,14 +666,14 @@ export function parseAndValidatePyqJSON(
       correctIndex: correctIdx,
       category,
       instruction: item.instruction ? String(item.instruction).trim() : undefined,
-      meaning: itemMeaning,
-      hindiMeaning: itemHindiMeaning,
-      mnemonic: itemMnemonic,
-      exampleSentence: itemExampleSentence,
-      rootWordInfo: itemRootWordInfo,
-      explanation: itemExplanation,
-      optionDetails: incomingOptionDetails,
-      enrichment: incomingEnrichment,
+      meaning: itemMeaning || (matchedExisting?.meaning || ''),
+      hindiMeaning: itemHindiMeaning || (matchedExisting?.hindiMeaning || ''),
+      mnemonic: itemMnemonic || (matchedExisting?.mnemonic || ''),
+      exampleSentence: itemExampleSentence || (matchedExisting?.exampleSentence || ''),
+      rootWordInfo: itemRootWordInfo || (matchedExisting?.rootWordInfo || ''),
+      explanation: itemExplanation || (matchedExisting?.explanation || ''),
+      optionDetails: incomingOptionDetails || matchedExisting?.optionDetails,
+      enrichment: incomingEnrichment || matchedExisting?.enrichment,
       examFamily: itemExamFamily,
       exam: itemExam,
       year: itemYear,
@@ -506,14 +682,26 @@ export function parseAndValidatePyqJSON(
       examDate: itemExamDate,
       questionNumber: itemQuestionNumber,
       paper: itemPaper,
+      fingerprint,
+      appearances,
+      isNewAppearance,
+      matchedExistingQuestion,
       reviewStatus,
       duplicateConfidence,
       duplicateOfId,
-      duplicateOfQuestion: duplicateOfId ? targetWord : undefined,
-      sourceType: 'json_import',
+      duplicateOfQuestion,
+      sourceType: itemSourceType,
+      isPYQ: itemIsPYQ,
+      verified: itemVerified,
       sourceFileName: fileName,
       rawText: JSON.stringify(item),
-    });
+    };
+
+    if (!matchedExisting && !matchedInBatch) {
+      inBatchFingerprintMap.set(fingerprint, extractedItem);
+    }
+
+    eligibleQuestions.push(extractedItem);
   });
 
   const batch: ImportBatch = {
@@ -522,7 +710,7 @@ export function parseAndValidatePyqJSON(
     examFamily: defaultExamFamily,
     exam: defaultExam,
     year: defaultYear,
-    tier: defaultTier,
+    tier: defaultTier || undefined,
     shift: defaultShift || undefined,
     examDate: defaultExamDate || undefined,
     paper: defaultPaper,

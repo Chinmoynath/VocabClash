@@ -36,6 +36,7 @@ import { ADSENSE_BANNER_SLOT } from '../services/adSenseService';
 import { ReportQuestionModal } from './ReportQuestionModal';
 import { SupportModal } from './SupportModal';
 import { formatExamTag } from '../services/jsonPyqParser';
+import { ExamAppearancesBadge } from './ExamAppearancesBadge';
 
 interface PracticeModeProps {
   pyqScore: number;
@@ -528,17 +529,17 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
             <h3 className="text-xl font-black text-amber-400 break-words">
               "{currentQ.wordOrPhrase}"
             </h3>
-            <div className="text-[10px] text-sky-400 flex items-center justify-center gap-1.5 pt-1 flex-wrap">
-              <span>
-                {(() => {
-                  if (currentQ.exam || currentQ.year || currentQ.examDate || currentQ.shift) {
-                    return formatExamTag(currentQ.exam, currentQ.year, currentQ.examDate, currentQ.shift);
-                  }
-                  return (currentQ.examHistory && currentQ.examHistory.length > 0)
-                    ? currentQ.examHistory.slice(0, 2).join(' • ')
-                    : 'Govt Exam PYQ';
-                })()}
-              </span>
+            <div className="pt-1 flex items-center justify-center">
+              <ExamAppearancesBadge
+                appearances={currentQ.appearances}
+                exam={currentQ.exam}
+                year={currentQ.year}
+                tier={currentQ.tier}
+                examHistory={currentQ.examHistory}
+                repeatCount={currentQ.repeatCount}
+                showRepeatCount={true}
+                size="xs"
+              />
             </div>
           </div>
 

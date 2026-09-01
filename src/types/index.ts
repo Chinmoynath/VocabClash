@@ -25,6 +25,16 @@ export interface QuestionOptionDetail {
   isCorrect?: boolean;
 }
 
+export interface ExamAppearance {
+  examFamily?: string;
+  exam: string;
+  year: number;
+  tier?: string;
+  shift?: string | null;
+  examDate?: string | null;
+  questionNumber?: number | string;
+}
+
 export interface Question {
   id: string;
   category: QuestionCategory;
@@ -56,6 +66,8 @@ export interface Question {
   verified?: boolean;
   conceptKey?: string;
   memoryKey?: string;
+  fingerprint?: string; // Deterministic question fingerprint
+  appearances?: ExamAppearance[]; // Canonical list of all exam occurrences
   sourceType?: 'verified_pyq' | 'generated_practice';
   reviewReason?: 'fresh' | 'due_review' | 'mistake_review' | 'saved_review' | 'pool_exhausted_review';
   examFamily?: string;

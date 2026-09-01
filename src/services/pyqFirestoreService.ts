@@ -17,9 +17,13 @@ import {
   isFirestoreQuotaExhausted, 
   markFirestoreQuotaExhausted 
 } from './firebaseService';
-import { Question, QuestionCategory, QuestionOptionDetail } from '../types';
+import { Question, QuestionCategory, QuestionOptionDetail, ExamAppearance } from '../types';
 import { ImportBatch } from '../types/pyqImport';
 import { formatExamTag, normalizeExamDate } from './jsonPyqParser';
+import { 
+  computeQuestionFingerprint, 
+  sortAppearances 
+} from '../utils/questionFingerprint';
 
 export const ADMIN_EMAIL = 'nathchinmoy777@gmail.com';
 
@@ -79,13 +83,63 @@ export async function fetchPublishedQuestionBank(): Promise<Question[]> {
           }));
         }
 
+        const category = data.category as QuestionCategory;
+        const wordOrPhrase = data.wordOrPhrase;
+        const options = data.options;
+        const correctIndex = typeof data.correctIndex === 'number' ? data.correctIndex : 0;
+        const instruction = data.instruction || `Select the most appropriate ${String(category).toUpperCase()} of the given word:`;
+
+        const fingerprint = data.fingerprint || computeQuestionFingerprint(
+          category,
+          wordOrPhrase,
+          options,
+          correctIndex,
+          instruction
+        );
+
+        // Resolve appearances list
+        const rawAppearances: ExamAppearance[] = Array.isArray(data.appearances) && data.appearances.length > 0
+          ? data.appearances.map((a: any) => ({
+              examFamily: a.examFamily || data.examFamily || 'SSC',
+              exam: a.exam || data.exam || 'SSC CGL',
+              year: typeof a.year === 'number' ? a.year : (data.year || 2024),
+              tier: a.tier !== undefined ? a.tier : (data.tier || ''),
+              shift: a.shift || null,
+              examDate: a.examDate || null,
+              questionNumber: a.questionNumber,
+            }))
+          : [
+              {
+                examFamily: data.examFamily || 'SSC',
+                exam: data.exam || 'SSC CGL',
+                year: data.year || 2024,
+                tier: data.tier || '',
+                shift: data.shift || null,
+                examDate: data.examDate || null,
+                questionNumber: data.questionNumber,
+              }
+            ];
+
+        const appearances = sortAppearances(rawAppearances);
+        const primaryApp = appearances[0];
+
+        // Format dynamic exam history tags from appearances
+        const examHistory = Array.isArray(data.examHistory) && data.examHistory.length > 0
+          ? data.examHistory
+          : appearances.map(app => formatExamTag(app.exam, app.year, app.tier));
+
+        const repeatCount = Math.max(
+          typeof data.repeatCount === 'number' ? data.repeatCount : 1,
+          appearances.length
+        );
+
         questions.push({
           id: docSnap.id,
-          category: data.category as QuestionCategory,
-          wordOrPhrase: data.wordOrPhrase,
-          instruction: data.instruction || `Select the most appropriate ${String(data.category).toUpperCase()} of the given word:`,
-          options: data.options,
-          correctIndex: typeof data.correctIndex === 'number' ? data.correctIndex : 0,
+          category,
+          wordOrPhrase,
+          instruction,
+          options,
+          correctIndex,
           meaning: data.meaning || '',
           hindiMeaning: data.hindiMeaning || '',
           exampleSentence: data.exampleSentence || '',
@@ -94,18 +148,22 @@ export async function fetchPublishedQuestionBank(): Promise<Question[]> {
           explanation: data.explanation || '',
           optionDetails: validOptionDetails,
           enrichment: data.enrichment || undefined,
-          examHistory: Array.isArray(data.examHistory) ? data.examHistory : ['Govt Exam PYQ Bank'],
-          repeatCount: typeof data.repeatCount === 'number' ? data.repeatCount : 1,
+          fingerprint,
+          appearances,
+          examHistory,
+          repeatCount,
           importanceLevel: data.importanceLevel || 'ultra-high',
           difficulty: data.difficulty || 'medium',
-          isPYQ: true,
-          verified: true,
-          examFamily: data.examFamily || 'SSC',
-          exam: data.exam || 'SSC CGL',
-          year: data.year || 2024,
-          shift: data.shift || null,
-          examDate: data.examDate || null,
-          questionNumber: data.questionNumber || undefined,
+          isPYQ: data.isPYQ !== undefined ? Boolean(data.isPYQ) : true,
+          verified: data.verified !== undefined ? Boolean(data.verified) : true,
+          sourceType: data.sourceType || 'verified_pyq',
+          examFamily: primaryApp.examFamily || data.examFamily || 'SSC',
+          exam: primaryApp.exam || data.exam || 'SSC CGL',
+          year: primaryApp.year || data.year || 2024,
+          tier: primaryApp.tier !== undefined ? primaryApp.tier : (data.tier || ''),
+          shift: primaryApp.shift || data.shift || null,
+          examDate: primaryApp.examDate || data.examDate || null,
+          questionNumber: primaryApp.questionNumber || data.questionNumber || undefined,
         });
       }
     });
@@ -180,16 +238,36 @@ export async function publishApprovedQuestionsToFirestore(
           : resolvedBatchShift;
         const resolvedExamDate = q.examDate ? (normalizeExamDate(q.examDate) || q.examDate) : resolvedBatchExamDate;
 
-        const examFamily = q.examFamily || batch.examFamily || 'SSC';
-        const exam = q.exam || batch.exam || 'SSC CGL';
-        const year = q.year || batch.year || 2024;
-        const questionNumber = q.questionNumber !== undefined && q.questionNumber !== null ? q.questionNumber : null;
+        const defaultApp: ExamAppearance = {
+          examFamily: q.examFamily || batch.examFamily || 'SSC',
+          exam: q.exam || batch.exam || 'SSC CGL',
+          year: q.year || batch.year || 2024,
+          tier: q.tier || batch.tier || '',
+          shift: resolvedShift,
+          examDate: resolvedExamDate,
+          questionNumber: q.questionNumber !== undefined && q.questionNumber !== null ? q.questionNumber : null,
+        };
 
+        // Determine canonical appearances
+        const appearances: ExamAppearance[] = Array.isArray(q.appearances) && q.appearances.length > 0
+          ? sortAppearances(q.appearances)
+          : [defaultApp];
+
+        const primaryApp = appearances[0] || defaultApp;
         const validOptionDetails = (Array.isArray(q.optionDetails) && q.optionDetails.length === 4)
           ? q.optionDetails
           : null;
 
-        const dynamicExamTag = formatExamTag(exam, year, resolvedExamDate, resolvedShift);
+        const fingerprint = q.fingerprint || computeQuestionFingerprint(
+          q.category,
+          q.wordOrPhrase,
+          q.options,
+          q.correctIndex,
+          q.instruction || q.question
+        );
+
+        const examHistoryTags = appearances.map(app => formatExamTag(app.exam, app.year, app.tier));
+        const repeatCount = Math.max(q.repeatCount || 1, appearances.length);
 
         const payload: any = sanitizeForFirestore({
           id: q.id,
@@ -206,30 +284,22 @@ export async function publishApprovedQuestionsToFirestore(
           explanation: q.explanation || '',
           optionDetails: validOptionDetails,
           enrichment: q.enrichment || null,
-          examFamily,
-          exam,
-          year,
-          shift: resolvedShift,
-          examDate: resolvedExamDate,
-          questionNumber,
-          appearances: [
-            {
-              examFamily,
-              exam,
-              year,
-              shift: resolvedShift,
-              examDate: resolvedExamDate,
-              questionNumber,
-            }
-          ],
-          examHistory: q.examHistory && q.examHistory.length > 0 ? q.examHistory : [
-            dynamicExamTag
-          ],
-          repeatCount: q.repeatCount || 1,
+          fingerprint,
+          appearances,
+          examFamily: primaryApp.examFamily || 'SSC',
+          exam: primaryApp.exam || 'SSC CGL',
+          year: primaryApp.year || 2024,
+          tier: primaryApp.tier || '',
+          shift: primaryApp.shift || resolvedShift,
+          examDate: primaryApp.examDate || resolvedExamDate,
+          questionNumber: primaryApp.questionNumber || (q.questionNumber !== undefined ? q.questionNumber : null),
+          examHistory: examHistoryTags,
+          repeatCount,
           importanceLevel: q.importanceLevel || 'ultra-high',
           difficulty: q.difficulty || 'medium',
-          isPYQ: true,
-          verified: true,
+          isPYQ: q.isPYQ !== undefined ? q.isPYQ : true,
+          verified: q.verified !== undefined ? q.verified : true,
+          sourceType: q.sourceType || (q.isPYQ === false ? 'generated_practice' : 'verified_pyq'),
           sourceBatchId: batch.batchId,
           createdAt: Date.now(),
           updatedAt: Date.now(),

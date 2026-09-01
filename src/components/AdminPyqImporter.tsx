@@ -40,14 +40,8 @@ import {
   needsEnrichment 
 } from '../services/pyqEnrichmentService';
 import { Question, QuestionCategory } from '../types';
-
-const EXAMS_BY_FAMILY: Record<string, string[]> = {
-  SSC: ['SSC CGL', 'SSC CHSL', 'SSC CPO', 'SSC MTS', 'SSC Selection Post'],
-  Banking: ['IBPS PO', 'IBPS Clerk', 'SBI PO', 'SBI Clerk', 'IBPS RRB PO', 'IBPS RRB Clerk'],
-  Defence: ['CDS', 'AFCAT', 'NDA'],
-  Railways: ['RRB NTPC', 'RRB Group D', 'RRB JE'],
-  State: ['DSSSB', 'Other'],
-};
+import { EXAMS_BY_FAMILY, EXAM_STAGE_OPTIONS, getStageOptionsForExam, normalizeTier } from '../config/examMetadataConfig';
+import { ExamAppearancesBadge } from './ExamAppearancesBadge';
 
 interface AdminPyqImporterProps {
   userEmail?: string | null;
@@ -76,11 +70,14 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
     examFamily: 'SSC',
     exam: 'SSC CGL',
     year: 2024,
-    tier: 'Tier 1',
+    tier: '',
     shift: '',
     examDate: '',
     paper: 'English Comprehension'
   });
+
+  const [isCustomTier, setIsCustomTier] = useState<boolean>(false);
+  const [modalCustomTier, setModalCustomTier] = useState<boolean>(false);
 
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [isPublishing, setIsPublishing] = useState<boolean>(false);
@@ -166,6 +163,10 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
               : prev.examFamily;
             const availableExams = EXAMS_BY_FAMILY[familyKey] || EXAMS_BY_FAMILY.SSC;
             const newExam = detected.exam || (availableExams.includes(prev.exam) ? prev.exam : availableExams[0]);
+            const resolvedTier = detected.tier !== undefined ? normalizeTier(detected.tier) : prev.tier;
+            const stageOptions = getStageOptionsForExam(newExam);
+            setIsCustomTier(Boolean(resolvedTier && !stageOptions.includes(resolvedTier)));
+
             return {
               ...prev,
               examFamily: familyKey,
@@ -173,7 +174,7 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
               year: detected.year || prev.year,
               shift: detected.shift !== undefined && detected.shift !== null ? detected.shift : prev.shift,
               examDate: detected.examDate || prev.examDate,
-              tier: detected.tier || prev.tier,
+              tier: resolvedTier,
               paper: detected.paper || prev.paper,
             };
           });
@@ -196,6 +197,10 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
             : prev.examFamily;
           const availableExams = EXAMS_BY_FAMILY[familyKey] || EXAMS_BY_FAMILY.SSC;
           const newExam = detected.exam || (availableExams.includes(prev.exam) ? prev.exam : availableExams[0]);
+          const resolvedTier = detected.tier !== undefined ? normalizeTier(detected.tier) : prev.tier;
+          const stageOptions = getStageOptionsForExam(newExam);
+          setIsCustomTier(Boolean(resolvedTier && !stageOptions.includes(resolvedTier)));
+
           return {
             ...prev,
             examFamily: familyKey,
@@ -203,7 +208,7 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
             year: detected.year || prev.year,
             shift: detected.shift !== undefined && detected.shift !== null ? detected.shift : prev.shift,
             examDate: detected.examDate || prev.examDate,
-            tier: detected.tier || prev.tier,
+            tier: resolvedTier,
             paper: detected.paper || prev.paper,
           };
         });
@@ -214,10 +219,29 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
   const handleExamFamilyChange = (newFamily: string) => {
     const availableExams = EXAMS_BY_FAMILY[newFamily] || EXAMS_BY_FAMILY.SSC;
     const newExam = availableExams.includes(metadata.exam) ? metadata.exam : (availableExams[0] || 'SSC CGL');
+    const stageOptions = getStageOptionsForExam(newExam);
+    const tierStillValid = stageOptions.includes(metadata.tier);
+    if (!tierStillValid) {
+      setIsCustomTier(false);
+    }
     setMetadata(prev => ({
       ...prev,
       examFamily: newFamily,
       exam: newExam,
+      tier: tierStillValid ? prev.tier : '',
+    }));
+  };
+
+  const handleExamChange = (newExam: string) => {
+    const stageOptions = getStageOptionsForExam(newExam);
+    const tierStillValid = stageOptions.includes(metadata.tier);
+    if (!tierStillValid) {
+      setIsCustomTier(false);
+    }
+    setMetadata(prev => ({
+      ...prev,
+      exam: newExam,
+      tier: tierStillValid ? prev.tier : '',
     }));
   };
 
@@ -400,9 +424,10 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
         const resolvedExam = q.exam || metadata.exam || 'SSC CGL';
         const resolvedYear = q.year || metadata.year || 2024;
         const resolvedFamily = q.examFamily || metadata.examFamily || 'SSC';
+        const resolvedTier = q.tier || metadata.tier || '';
         const resolvedQNo = q.questionNumber !== undefined ? q.questionNumber : (qIndex + 1);
 
-        const examHistoryItem = formatExamTag(resolvedExam, resolvedYear, resolvedExamDate, resolvedShift);
+        const examHistoryItem = formatExamTag(resolvedExam, resolvedYear, resolvedExamDate, resolvedShift, resolvedTier);
 
         return {
           id: `pyq-${q.category}-${resolvedYear}-${q.wordOrPhrase.toLowerCase().replace(/[^a-z0-9]/g, '_')}-${Math.random().toString(36).slice(2, 6)}`,
@@ -427,6 +452,7 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
           examFamily: resolvedFamily,
           exam: resolvedExam,
           year: resolvedYear,
+          tier: resolvedTier,
           shift: resolvedShift,
           examDate: resolvedExamDate,
           questionNumber: resolvedQNo,
@@ -434,9 +460,9 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
           repeatCount: q.repeatCount || 1,
           importanceLevel: q.importanceLevel || 'high',
           difficulty: q.difficulty || 'medium',
-          verified: true,
-          sourceType: 'verified_pyq',
-          isPYQ: true,
+          verified: q.verified !== undefined ? q.verified : true,
+          sourceType: q.sourceType || (q.isPYQ === false ? 'generated_practice' : 'verified_pyq'),
+          isPYQ: q.isPYQ !== undefined ? q.isPYQ : true,
         };
       });
 
@@ -780,7 +806,7 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
               )}
 
               {/* Metadata Controls */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 pt-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2">
                 <div>
                   <label className="text-xs text-slate-400 block mb-1 font-medium">Exam Family</label>
                   <select
@@ -800,7 +826,7 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
                   <label className="text-xs text-slate-400 block mb-1 font-medium">Specific Exam Name</label>
                   <select
                     value={metadata.exam}
-                    onChange={e => setMetadata({ ...metadata, exam: e.target.value })}
+                    onChange={e => handleExamChange(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-sky-500"
                   >
                     {(() => {
@@ -824,29 +850,47 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
                 </div>
 
                 <div>
-                  <label className="text-xs text-slate-400 block mb-1 font-medium">Date & Month</label>
-                  <input
-                    type="text"
-                    value={metadata.examDate}
-                    onChange={e => setMetadata({ ...metadata, examDate: e.target.value })}
-                    placeholder="e.g. 19 Sept, 18 Oct"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-sky-500 font-medium"
-                  />
-                </div>
+                  <label className="text-xs text-slate-400 block mb-1 font-medium">Stage / Tier / Phase</label>
+                  <div className="space-y-1">
+                    <select
+                      value={
+                        !metadata.tier
+                          ? ''
+                          : isCustomTier || !getStageOptionsForExam(metadata.exam).includes(metadata.tier)
+                          ? '__custom__'
+                          : metadata.tier
+                      }
+                      onChange={e => {
+                        const val = e.target.value;
+                        if (val === '__custom__') {
+                          setIsCustomTier(true);
+                          if (getStageOptionsForExam(metadata.exam).includes(metadata.tier)) {
+                            setMetadata(prev => ({ ...prev, tier: '' }));
+                          }
+                        } else {
+                          setIsCustomTier(false);
+                          setMetadata(prev => ({ ...prev, tier: val }));
+                        }
+                      }}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-sky-500"
+                    >
+                      <option value="">Not Specified</option>
+                      {getStageOptionsForExam(metadata.exam).map(opt => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                      <option value="__custom__">Custom Stage / Tier...</option>
+                    </select>
 
-                <div>
-                  <label className="text-xs text-slate-400 block mb-1 font-medium">Exam Shift</label>
-                  <select
-                    value={metadata.shift}
-                    onChange={e => setMetadata({ ...metadata, shift: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-sky-500"
-                  >
-                    <option value="">Not Specified</option>
-                    <option value="Shift 1">Shift 1</option>
-                    <option value="Shift 2">Shift 2</option>
-                    <option value="Shift 3">Shift 3</option>
-                    <option value="Shift 4">Shift 4</option>
-                  </select>
+                    {(isCustomTier || (!getStageOptionsForExam(metadata.exam).includes(metadata.tier) && Boolean(metadata.tier))) && (
+                      <input
+                        type="text"
+                        value={metadata.tier}
+                        onChange={e => setMetadata(prev => ({ ...prev, tier: e.target.value }))}
+                        placeholder="e.g. Tier-I, Paper-I, Stage-II, Written Exam"
+                        className="w-full bg-slate-950 border border-sky-500/50 rounded-xl px-2.5 py-1 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-sky-500 font-medium"
+                      />
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -1003,11 +1047,8 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
                                   </span>
                                   {(() => {
                                     const parts: string[] = [q.exam, String(q.year)];
-                                    if (q.examDate && q.examDate.trim()) {
-                                      parts.push(q.examDate);
-                                    }
-                                    if (q.shift && q.shift.trim() && q.shift !== 'Not Specified' && q.shift !== 'null' && q.shift !== 'undefined') {
-                                      parts.push(q.shift);
+                                    if (q.tier && q.tier.trim() && q.tier !== 'Not Specified' && q.tier !== 'null' && q.tier !== '-') {
+                                      parts.push(q.tier);
                                     }
                                     const qNo = q.questionNumber !== undefined && q.questionNumber !== null ? q.questionNumber : (idx + 1);
                                     parts.push(`Q${qNo}`);
@@ -1028,7 +1069,19 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
                                     </span>
                                   )}
 
-                                  {q.duplicateConfidence && q.duplicateConfidence !== 'none' && (
+                                  {q.matchedExistingQuestion && (
+                                    <span className="text-[10px] bg-sky-500/20 text-sky-300 px-2 py-0.5 rounded font-bold border border-sky-500/30 flex items-center gap-1">
+                                      🔁 Merging Appearance into Canonical Question
+                                    </span>
+                                  )}
+
+                                  {q.appearances && q.appearances.length > 1 && (
+                                    <span className="text-[10px] bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded font-bold border border-indigo-500/30 flex items-center gap-1">
+                                      📚 {q.appearances.length} Exam Occurrences
+                                    </span>
+                                  )}
+
+                                  {q.duplicateConfidence && q.duplicateConfidence !== 'none' && !q.matchedExistingQuestion && (
                                     <span className="text-[10px] bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded font-medium border border-purple-500/30 flex items-center gap-1">
                                       <AlertTriangle className="w-3 h-3" /> Duplicate ({q.duplicateOfQuestion})
                                     </span>
@@ -1040,6 +1093,19 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
                                     </span>
                                   )}
                                 </div>
+
+                                {q.appearances && q.appearances.length > 0 && (
+                                  <div className="pt-1">
+                                    <ExamAppearancesBadge
+                                      appearances={q.appearances}
+                                      exam={q.exam}
+                                      year={q.year}
+                                      tier={q.tier}
+                                      showRepeatCount={false}
+                                      size="xs"
+                                    />
+                                  </div>
+                                )}
 
                                 <div className="text-sm font-semibold text-white pt-1">
                                   {q.question}
@@ -1674,31 +1740,117 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
               />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
               <div>
-                <label className="text-xs text-slate-400 block mb-1">Date & Month</label>
-                <input
-                  type="text"
-                  value={editingQuestion.examDate || ''}
-                  onChange={e => setEditingQuestion({ ...editingQuestion, examDate: e.target.value || null })}
-                  placeholder="e.g. 19 Sept, 18 Oct"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-sky-500 font-medium"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-slate-400 block mb-1">Exam Shift</label>
+                <label className="text-xs text-slate-400 block mb-1">Exam Family</label>
                 <select
-                  value={editingQuestion.shift || ''}
-                  onChange={e => setEditingQuestion({ ...editingQuestion, shift: e.target.value || null })}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-sky-500"
+                  value={editingQuestion.examFamily || 'SSC'}
+                  onChange={e => {
+                    const fam = e.target.value;
+                    const availableExams = EXAMS_BY_FAMILY[fam] || EXAMS_BY_FAMILY.SSC;
+                    const newExam = availableExams.includes(editingQuestion.exam) ? editingQuestion.exam : (availableExams[0] || 'SSC CGL');
+                    const stageOptions = getStageOptionsForExam(newExam);
+                    const tierStillValid = stageOptions.includes(editingQuestion.tier || '');
+                    if (!tierStillValid) setModalCustomTier(false);
+                    setEditingQuestion({
+                      ...editingQuestion,
+                      examFamily: fam,
+                      exam: newExam,
+                      tier: tierStillValid ? editingQuestion.tier : '',
+                    });
+                  }}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-sky-500"
                 >
-                  <option value="">Not Specified</option>
-                  <option value="Shift 1">Shift 1</option>
-                  <option value="Shift 2">Shift 2</option>
-                  <option value="Shift 3">Shift 3</option>
-                  <option value="Shift 4">Shift 4</option>
+                  <option value="SSC">SSC</option>
+                  <option value="Banking">Banking</option>
+                  <option value="Defence">Defence</option>
+                  <option value="Railways">Railways</option>
+                  <option value="State">State Govt</option>
                 </select>
               </div>
+
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Specific Exam</label>
+                <select
+                  value={editingQuestion.exam}
+                  onChange={e => {
+                    const newExam = e.target.value;
+                    const stageOptions = getStageOptionsForExam(newExam);
+                    const tierStillValid = stageOptions.includes(editingQuestion.tier || '');
+                    if (!tierStillValid) setModalCustomTier(false);
+                    setEditingQuestion({
+                      ...editingQuestion,
+                      exam: newExam,
+                      tier: tierStillValid ? editingQuestion.tier : '',
+                    });
+                  }}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-sky-500"
+                >
+                  {(() => {
+                    const fam = editingQuestion.examFamily || 'SSC';
+                    const available = EXAMS_BY_FAMILY[fam] || EXAMS_BY_FAMILY.SSC;
+                    const optionsList = available.includes(editingQuestion.exam) ? available : [editingQuestion.exam, ...available];
+                    return optionsList.map(opt => (
+                      <option key={opt} value={opt}>{opt}</option>
+                    ));
+                  })()}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Exam Year</label>
+                <input
+                  type="number"
+                  value={editingQuestion.year || 2024}
+                  onChange={e => setEditingQuestion({ ...editingQuestion, year: parseInt(e.target.value, 10) || 2024 })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-sky-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Stage / Tier / Phase</label>
+                <div className="space-y-1">
+                  <select
+                    value={
+                      !editingQuestion.tier
+                        ? ''
+                        : modalCustomTier || !getStageOptionsForExam(editingQuestion.exam).includes(editingQuestion.tier)
+                        ? '__custom__'
+                        : editingQuestion.tier
+                    }
+                    onChange={e => {
+                      const val = e.target.value;
+                      if (val === '__custom__') {
+                        setModalCustomTier(true);
+                        if (getStageOptionsForExam(editingQuestion.exam).includes(editingQuestion.tier || '')) {
+                          setEditingQuestion({ ...editingQuestion, tier: '' });
+                        }
+                      } else {
+                        setModalCustomTier(false);
+                        setEditingQuestion({ ...editingQuestion, tier: val });
+                      }
+                    }}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-sky-500"
+                  >
+                    <option value="">Not Specified</option>
+                    {getStageOptionsForExam(editingQuestion.exam).map(opt => (
+                      <option key={opt} value={opt}>{opt}</option>
+                    ))}
+                    <option value="__custom__">Custom Stage / Tier...</option>
+                  </select>
+
+                  {(modalCustomTier || (!getStageOptionsForExam(editingQuestion.exam).includes(editingQuestion.tier || '') && Boolean(editingQuestion.tier))) && (
+                    <input
+                      type="text"
+                      value={editingQuestion.tier || ''}
+                      onChange={e => setEditingQuestion({ ...editingQuestion, tier: e.target.value })}
+                      placeholder="e.g. Tier-I, Paper-I, Stage-II, Written Exam"
+                      className="w-full bg-slate-950 border border-sky-500/50 rounded-xl px-2.5 py-1 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-sky-500 font-medium"
+                    />
+                  )}
+                </div>
+              </div>
+
               <div>
                 <label className="text-xs text-slate-400 block mb-1">Question Number (Q#)</label>
                 <input
@@ -1706,7 +1858,7 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
                   value={editingQuestion.questionNumber || ''}
                   onChange={e => setEditingQuestion({ ...editingQuestion, questionNumber: e.target.value })}
                   placeholder="e.g. 76"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-sky-500"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-sky-500"
                 />
               </div>
             </div>

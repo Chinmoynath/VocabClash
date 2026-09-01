@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { ReportQuestionModal } from './ReportQuestionModal';
 import { formatExamTag } from '../services/jsonPyqParser';
+import { ExamAppearancesBadge } from './ExamAppearancesBadge';
 
 interface MistakeVaultProps {
   savedWords: SavedWord[];
@@ -294,8 +295,17 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
                 <div className="text-xs text-slate-400">
                   {currentCard.question.instruction || 'What is the meaning and correct answer?'}
                 </div>
-                <div className="text-[11px] text-slate-500">
-                  Repeated {currentCard.question.repeatCount}x in SSC / Railway
+                <div className="pt-1 flex items-center justify-center">
+                  <ExamAppearancesBadge
+                    appearances={currentCard.question.appearances}
+                    exam={currentCard.question.exam}
+                    year={currentCard.question.year}
+                    tier={currentCard.question.tier}
+                    examHistory={currentCard.question.examHistory}
+                    repeatCount={currentCard.question.repeatCount}
+                    showRepeatCount={true}
+                    size="xs"
+                  />
                 </div>
               </div>
             ) : (
@@ -579,15 +589,20 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
                   </div>
 
                   {/* Exam Attribution */}
-                  <div className="text-[10px] text-slate-400 flex items-center justify-between pt-0.5 gap-2">
-                    <span className="truncate">
-                      Asked in: {
-                        item.question.exam || item.question.year || item.question.examDate || item.question.shift
-                          ? formatExamTag(item.question.exam, item.question.year, item.question.examDate, item.question.shift)
-                          : (item.question.examHistory && item.question.examHistory.length > 0 ? item.question.examHistory.slice(0, 2).join(', ') : 'Govt Exam PYQ')
-                      }
-                    </span>
-                    <span className="text-amber-400 font-bold shrink-0">Repeated {item.question.repeatCount}x</span>
+                  <div className="pt-0.5 flex items-center justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <ExamAppearancesBadge
+                        appearances={item.question.appearances}
+                        exam={item.question.exam}
+                        year={item.question.year}
+                        tier={item.question.tier}
+                        examHistory={item.question.examHistory}
+                        repeatCount={item.question.repeatCount}
+                        showRepeatCount={false}
+                        size="xs"
+                      />
+                    </div>
+                    <span className="text-amber-400 font-bold text-[10px] shrink-0">Repeated {item.question.repeatCount}x</span>
                   </div>
                 </div>
               );
