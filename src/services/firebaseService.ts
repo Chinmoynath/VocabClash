@@ -19,7 +19,7 @@ import {
 import { 
   getFirestore, 
   initializeFirestore,
-  memoryLocalCache,
+  setLogLevel,
   doc, 
   getDoc, 
   setDoc,
@@ -28,6 +28,13 @@ import {
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { PlayerProfile, UserSubscription, DailyStreakState, SavedWord } from '../types';
+
+// Suppress internal connection retry warnings
+try {
+  setLogLevel('error');
+} catch {
+  // Ignore in environments where setLogLevel is not available
+}
 
 // Initialize Firebase App
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
@@ -44,13 +51,16 @@ export function createGoogleProvider(): GoogleAuthProvider {
 
 export const googleProvider = createGoogleProvider();
 
-// Initialize Firestore with memory cache and auto-detect long polling for reliable web channel connections
+// Initialize Firestore with long polling to ensure immediate, stable connections in sandboxed iframe & container environments
 let dbInstance: ReturnType<typeof getFirestore>;
 try {
-  dbInstance = initializeFirestore(app, {
-    localCache: memoryLocalCache(),
-    experimentalAutoDetectLongPolling: true,
-  }, firebaseConfig.firestoreDatabaseId || undefined);
+  dbInstance = initializeFirestore(
+    app,
+    {
+      experimentalForceLongPolling: true,
+    },
+    firebaseConfig.firestoreDatabaseId || undefined
+  );
 } catch {
   dbInstance = getFirestore(app, firebaseConfig.firestoreDatabaseId || undefined);
 }
@@ -117,6 +127,10 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     errMsg.includes('Quota limit exceeded') || 
     errMsg.includes('Quota exceeded') ||
     errMsg.includes('Free daily write units');
+  const isOffline = 
+    errMsg.includes('client is offline') || 
+    errMsg.includes('unavailable') || 
+    errMsg.includes('Could not reach Cloud Firestore backend');
 
   if (isQuota) {
     markFirestoreQuotaExhausted();
@@ -140,8 +154,10 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     path
   };
 
-  if (!isQuota) {
+  if (!isQuota && !isOffline) {
     console.error('Firestore Error: ', JSON.stringify(errInfo));
+  } else if (isOffline) {
+    console.warn(`[Firestore Offline Cache] Operating in offline mode for ${operationType} on ${path || 'doc'}`);
   }
   return errInfo;
 }

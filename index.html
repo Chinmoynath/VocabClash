@@ -16,8 +16,28 @@
     <meta name="description" content="Head-to-head real-time competitive English vocabulary arena for SSC CGL, CHSL, CPO, MTS & Railway exams." />
     <link rel="icon" type="image/png" href="/favicon.png" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
+    <link rel="apple-touch-icon" sizes="192x192" href="/icon-192.png" />
+    <link rel="apple-touch-icon" sizes="512x512" href="/icon-512.png" />
     <link rel="manifest" href="/manifest.json" />
     <meta name="theme-color" content="#0f172a" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="VocabClash" />
+    <meta name="application-name" content="VocabClash" />
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function() {
+          navigator.serviceWorker.register('/sw.js', { scope: '/' })
+            .then(function(reg) {
+              console.log('[PWA] Service Worker successfully registered with scope:', reg.scope);
+            })
+            .catch(function(err) {
+              console.warn('[PWA] Service Worker registration note:', err);
+            });
+        });
+      }
+    </script>
     <meta property="og:title" content="VocabClash - Govt Exam English Arena" />
     <meta property="og:description" content="Head-to-head real-time competitive English vocabulary arena for SSC CGL, CHSL, CPO, MTS & Railway exams." />
     <meta property="og:image" content="https://firebasestorage.googleapis.com/v0/b/tactile-world-jq6d2.firebasestorage.app/o/WhatsApp%20Image%202026-08-20%20at%2020.49.29.jpeg?alt=media&token=9f2a6019-fcc3-437f-8a31-29248bd200b8" />

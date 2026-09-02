@@ -11,7 +11,9 @@ import {
   ChevronRight,
   TrendingUp,
   Brain,
-  GraduationCap
+  GraduationCap,
+  BookMarked,
+  Languages
 } from 'lucide-react';
 
 const SUGGESTED_EXAM_WORDS = [
@@ -168,12 +170,56 @@ export const AiTutorTab: React.FC = () => {
         <div className="py-14 text-center space-y-3 bg-slate-850/60 border border-slate-800 rounded-2xl">
           <div className="w-10 h-10 border-4 border-purple-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
           <div className="text-xs font-bold text-slate-300">
-            Decoding root words, Hinglish mnemonics & exam trap traps...
+            Decoding word meanings, root words, Hinglish mnemonics & exam trap traps...
           </div>
         </div>
       ) : analysis ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 text-xs">
-          {/* 1. Mnemonic Memory Hook (Full width on desktop) */}
+          {/* 1. Meaning & Definition Section (Full width on desktop) */}
+          <div className="md:col-span-2 bg-gradient-to-br from-slate-850 via-slate-850 to-indigo-950/40 border border-indigo-500/40 rounded-2xl p-4 sm:p-5 space-y-3 shadow-sm">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2 font-bold text-indigo-400 text-sm sm:text-base">
+                <BookMarked className="w-4 h-4 text-indigo-400" />
+                <span>Meaning & Exam Definition</span>
+              </div>
+              {analysis.partOfSpeech && (
+                <span className="text-[10px] font-mono font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 px-2 py-0.5 rounded-full">
+                  {analysis.partOfSpeech}
+                </span>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              {/* English Meaning */}
+              <div className="bg-slate-900/90 p-3 sm:p-4 rounded-xl border border-slate-750">
+                <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                  English Definition
+                </div>
+                <p className="text-slate-100 font-semibold text-xs sm:text-sm leading-relaxed">
+                  {analysis.meaning || `Meaning and context for "${activeWord}".`}
+                </p>
+              </div>
+
+              {/* Hindi Meaning */}
+              {analysis.hindiMeaning && (
+                <div className="bg-slate-900/90 p-3 sm:p-4 rounded-xl border border-slate-750 flex items-start gap-2.5">
+                  <div className="p-1.5 rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/30 shrink-0 mt-0.5">
+                    <Languages className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <div className="text-[11px] font-bold text-purple-300 uppercase tracking-wider mb-0.5">
+                      Hindi Meaning (हिंदी अर्थ)
+                    </div>
+                    <p className="text-amber-200 font-bold text-xs sm:text-sm leading-relaxed">
+                      {analysis.hindiMeaning}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* 2. Mnemonic Memory Hook (Full width on desktop) */}
           <div className="md:col-span-2 bg-slate-850 border border-amber-500/40 rounded-2xl p-4 sm:p-5 space-y-2 shadow-sm">
             <div className="flex items-center gap-2 font-bold text-amber-400 text-sm sm:text-base">
               <Lightbulb className="w-4 h-4 text-amber-400" />

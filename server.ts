@@ -974,6 +974,9 @@ Past Exam Appearances: "${Array.isArray(examHistory) ? examHistory.join(', ') : 
 
 Respond strictly with a JSON object in this exact schema without markdown formatting or code fences:
 {
+  "meaning": "clear, precise, and complete English dictionary and exam definition of the word/phrase",
+  "hindiMeaning": "accurate Hindi meaning with Devanagari script and clear explanation (e.g. अल्पभाषी / कम बोलने वाला)",
+  "partOfSpeech": "part of speech (e.g. Adjective, Noun, Verb, Adverb, Idiom/Phrase)",
   "rootEtymology": "concise root word origin, Latin/Greek components and meanings in 1-2 lines",
   "mnemonicHook": "a clever, humorous, or highly effective memory trick / Hinglish trick (like how KD Campus / Neetu Singh / Jaideep Sir teach) to never forget this word",
   "examTrapTip": "common traps set by TCS / SSC examiners (e.g. confuse with similar sounding words, synonym vs antonym trap)",
@@ -1035,6 +1038,9 @@ Respond strictly with a JSON object in this exact schema without markdown format
   // Graceful structured response if API key is not configured or all live model endpoints are experiencing temporary spikes
   res.json({
     analysis: {
+      meaning: `Primary definition and competitive exam usage context for "${wordOrPhrase}".`,
+      hindiMeaning: `महत्वपूर्ण परीक्षा शब्दावली अर्थ / सटीक हिंदी भावार्थ`,
+      partOfSpeech: `Vocabulary Term`,
       rootEtymology: `Derived from classical roots frequently appearing in SSC CGL, CHSL & Banking exams. Focus on root affixes to decode antonyms/synonyms instantly.`,
       mnemonicHook: `Memory Hook: Connect "${wordOrPhrase}" phonetically with an everyday Hindi phrase or vivid mental image to lock it into long-term memory.`,
       examTrapTip: `High-frequency in SSC Tier-1 & Tier-2 shifts. Watch out for near-synonym options engineered to mislead hurried candidates.`,
@@ -1115,6 +1121,26 @@ app.get('/sitemap.xml', (req, res) => {
 app.get('/robots.txt', (req, res) => {
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.send('User-agent: *\nAllow: /\n\nSitemap: https://vocabclash.in/sitemap.xml\n');
+});
+
+// Service Worker Endpoints (sw.js and service-worker.js) with proper PWA & TWA headers
+const serveServiceWorker = (req: express.Request, res: express.Response) => {
+  const swPath = path.join(process.cwd(), 'public', 'sw.js');
+  res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+  res.setHeader('Service-Worker-Allowed', '/');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.sendFile(swPath);
+};
+
+app.get('/sw.js', serveServiceWorker);
+app.get('/service-worker.js', serveServiceWorker);
+
+// Web App Manifest Endpoint
+app.get('/manifest.json', (req, res) => {
+  const manifestPath = path.join(process.cwd(), 'public', 'manifest.json');
+  res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  res.sendFile(manifestPath);
 });
 
 async function startServer() {

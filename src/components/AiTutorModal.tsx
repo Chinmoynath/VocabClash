@@ -11,7 +11,9 @@ import {
   AlertTriangle, 
   CheckCircle,
   Search,
-  ChevronRight
+  ChevronRight,
+  BookMarked,
+  Languages
 } from 'lucide-react';
 
 interface AiTutorModalProps {
@@ -145,7 +147,36 @@ export const AiTutorModal: React.FC<AiTutorModalProps> = ({ question, onClose })
           </div>
         ) : analysis ? (
           <div className="space-y-3 text-xs">
-            {/* 1. Mnemonic Memory Hook */}
+            {/* 1. Meaning & Definition */}
+            <div className="bg-gradient-to-br from-slate-800 to-indigo-950/30 border border-indigo-500/40 rounded-2xl p-3.5 space-y-2">
+              <div className="flex items-center justify-between flex-wrap gap-1">
+                <div className="flex items-center gap-1.5 font-bold text-indigo-400">
+                  <BookMarked className="w-4 h-4 text-indigo-400" />
+                  <span>Meaning & Definition</span>
+                </div>
+                {analysis.partOfSpeech && (
+                  <span className="text-[9px] font-mono font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 px-1.5 py-0.5 rounded-full">
+                    {analysis.partOfSpeech}
+                  </span>
+                )}
+              </div>
+
+              <p className="text-slate-100 font-semibold leading-relaxed bg-slate-950/60 p-2.5 rounded-xl border border-slate-800">
+                {analysis.meaning || `Primary exam definition for "${activeWord}".`}
+              </p>
+
+              {analysis.hindiMeaning && (
+                <div className="bg-purple-950/40 p-2.5 rounded-xl border border-purple-800/40 flex items-start gap-2">
+                  <Languages className="w-3.5 h-3.5 text-purple-400 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="text-[10px] font-bold text-purple-300 uppercase block mb-0.5">हिंदी अर्थ</span>
+                    <span className="text-amber-200 font-bold">{analysis.hindiMeaning}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 2. Mnemonic Memory Hook */}
             <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-3.5 space-y-1">
               <div className="flex items-center gap-1.5 font-bold text-amber-400">
                 <Lightbulb className="w-4 h-4 text-amber-400" />
