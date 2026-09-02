@@ -1135,6 +1135,14 @@ const serveServiceWorker = (req: express.Request, res: express.Response) => {
 app.get('/sw.js', serveServiceWorker);
 app.get('/service-worker.js', serveServiceWorker);
 
+// Digital Asset Links Endpoint for Android TWA APK (Removes Chrome URL bar)
+app.get('/.well-known/assetlinks.json', (req, res) => {
+  const assetLinksPath = path.join(process.cwd(), 'public', '.well-known', 'assetlinks.json');
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.sendFile(assetLinksPath);
+});
+
 // Web App Manifest Endpoint
 app.get('/manifest.json', (req, res) => {
   const manifestPath = path.join(process.cwd(), 'public', 'manifest.json');
