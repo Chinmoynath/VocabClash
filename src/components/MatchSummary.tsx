@@ -566,12 +566,8 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
   const [activeTab, setActiveTab] = useState<'summary' | 'solutions'>('summary');
   const [filterType, setFilterType] = useState<'all' | 'mistakes' | 'correct'>('all');
   
-  const isWinner = matchState.finalResult 
-    ? (matchState.finalResult.winnerId === player.id || (matchState.finalResult.winnerId !== 'draw' && matchState.playerScore > matchState.opponentScore))
-    : matchState.playerScore > matchState.opponentScore;
-  const isDraw = matchState.finalResult
-    ? (matchState.finalResult.winnerId === 'draw' || matchState.playerScore === matchState.opponentScore)
-    : matchState.playerScore === matchState.opponentScore;
+  const isWinner = matchState.playerScore > matchState.opponentScore || (matchState.finalResult?.winnerId === player.id && matchState.playerScore >= matchState.opponentScore);
+  const isDraw = !isWinner && matchState.playerScore === matchState.opponentScore;
 
   // Authoritative LP calculation
   const playerLpChange = isWinner ? 30 : isDraw ? 5 : -15;
@@ -858,25 +854,6 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
-
-            {/* Quick Link to Mistake Vault if mistakes were made */}
-            {mistakeCount > 0 && onNavigateToMistakes && (
-              <div className="max-w-xl mx-auto">
-                <button
-                  onClick={() => {
-                    soundManager.playTap();
-                    onNavigateToMistakes();
-                  }}
-                  className="w-full bg-rose-950/40 hover:bg-rose-950/70 border border-rose-500/40 hover:border-rose-400/80 text-rose-200 font-bold p-3 rounded-2xl flex items-center justify-between text-xs transition-all shadow-sm group"
-                >
-                  <div className="flex items-center gap-2">
-                    <BookOpen className="w-4 h-4 text-rose-400 group-hover:scale-110 transition-transform" />
-                    <span>Review {mistakeCount} Mistake{mistakeCount > 1 ? 's' : ''} in Spaced-Repetition Vault</span>
-                  </div>
-                  <ChevronRight className="w-4 h-4 text-rose-400 group-hover:translate-x-0.5 transition-transform" />
-                </button>
-              </div>
-            )}
 
             {/* POST-MATCH SIGNUP/SAVE CARD (If guest) */}
             {!currentUser && showSignupCard && (

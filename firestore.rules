@@ -16,14 +16,13 @@ service cloud.firestore {
     }
 
     // Real-time Matchmaking Queue
-    // Allow players to read active queue tickets, create ticket, update during atomic match transaction, and clean up
+    // Allow players to read active queue documents, create queue tickets, update during atomic match transaction, and clean up
+    match /matchmaking_queue/{uid} {
+      allow read, write: if true;
+    }
+
     match /match_queue/{ticketId} {
-      allow read: if true;
-      allow create: if request.resource.data.userId is string 
-                    && request.resource.data.status is string
-                    && request.resource.data.createdAt is number;
-      allow update: if request.resource.data.status in ['searching', 'matched', 'cancelled', 'expired'];
-      allow delete: if true;
+      allow read, write: if true;
     }
 
     // Shared Synchronized 1v1 Live Rooms
@@ -37,6 +36,17 @@ service cloud.firestore {
     }
 
     match /friendRooms/{lobbyCode} {
+      allow read, write: if true;
+    }
+
+    // Realtime Global Leaderboard Users
+    match /leaderboard_users/{userId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Match Records
+    match /matches/{matchId} {
       allow read, write: if true;
     }
 

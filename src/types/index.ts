@@ -181,12 +181,16 @@ export interface LeaderboardUser {
   id: string;
   name: string;
   avatar: string;
+  photoURL?: string;
   countryCode: string;
   targetExam: string;
   rankPoints: number;
-  tierTitle: string;
+  tierTitle?: string;
   winRate: number;
   winStreak: number;
+  matchesPlayed?: number;
+  matchesWon?: number;
+  updatedAt?: number;
   isCurrentUser?: boolean;
 }
 

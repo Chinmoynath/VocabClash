@@ -8,30 +8,33 @@ import {
   where, 
   limit, 
   runTransaction,
-  Unsubscribe
+  Unsubscribe,
+  getDocs
 } from 'firebase/firestore';
-import { db, auth, OperationType, handleFirestoreError } from './firebaseService';
+import { db, auth, sanitizeForFirestore } from './firebaseService';
+import firebaseConfig from '../../firebase-applet-config.json';
 import { PlayerProfile, Question, QuestionCategory, ExamType, PlayerAnswerRecord } from '../types';
-import { getFilteredQuestions, getFirstMatchQuestions } from './matchmakingService';
+import { getFilteredQuestions, getFirstMatchQuestions, getTierFromLP, getTierTitle } from './matchmakingService';
 
 export type MatchmakingState = 'idle' | 'searching' | 'matched' | 'starting' | 'bot_fallback';
 
 export interface MatchQueueTicket {
-  id: string; // Ticket ID (e.g. ticket_${userId})
-  userId: string;
-  playerName: string;
+  uid: string;
+  displayName: string;
   avatar: string;
-  rankPoints: number;
+  lp: number;
   targetExam: string;
   category: QuestionCategory | 'mixed';
   exam: ExamType;
   roundCount: number;
-  status: 'searching' | 'matched' | 'cancelled' | 'expired';
-  matchedRoomId?: string;
-  matchedOpponent?: PlayerProfile;
-  questions?: Question[];
+  status: 'waiting' | 'matched' | 'cancelled' | 'expired';
   createdAt: number;
-  expiresAt: number;
+  heartbeatAt: number;
+  matchId: string | null;
+  opponentUid: string | null;
+  opponentProfile: PlayerProfile | null;
+  questions: Question[] | null;
+  updatedAt?: number;
 }
 
 export interface LiveRoomFinalResult {
@@ -61,6 +64,7 @@ export interface LiveDuelRoom {
   completedPlayers: string[]; // [playerId]
   activeEmotes: { senderId: string; emoji: string; text?: string; timestamp: number }[];
   finalResult?: LiveRoomFinalResult;
+  forfeitedBy?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -73,13 +77,17 @@ export interface MatchSuccessResult {
 }
 
 export class RealtimeMatchmakingManager {
-  private currentTicketId: string | null = null;
   private currentUserId: string | null = null;
   private unsubscribeMyTicket: Unsubscribe | null = null;
   private unsubscribePoolListener: Unsubscribe | null = null;
   private fallbackTimer: NodeJS.Timeout | null = null;
+  private heartbeatInterval: NodeJS.Timeout | null = null;
+  private serverPollInterval: NodeJS.Timeout | null = null;
+  private delayedCleanups: NodeJS.Timeout[] = [];
   private currentState: MatchmakingState = 'idle';
   private hasMatched = false;
+  private searchStartTime = 0;
+  private isPairingInProgress = false;
   private beforeUnloadHandler: (() => void) | null = null;
 
   public getState(): MatchmakingState {
@@ -87,11 +95,10 @@ export class RealtimeMatchmakingManager {
   }
 
   /**
-   * Puts the player into the real-time matchmaking queue with:
-   * 1. Immediate Firestore onSnapshot listener on own ticket for match notifications
-   * 2. Real-time active queue listener for matching compatible waiting players
-   * 3. Atomic Firestore transaction ensuring race-condition-free pairings and shared matchId + questions
-   * 4. Strict 5.0 second timer fallback if no real human joins
+   * Puts the player into the real-time matchmaking queue:
+   * 1. Dual-Channel Realtime Coordination: Zero-latency in-memory Server coordinator + Authoritative Firestore queue
+   * 2. Strict 5-Second Search Window as requested by user
+   * 3. Instant atomic pairing across devices/cellular connections
    */
   public async enterMatchQueue(
     player: PlayerProfile,
@@ -101,211 +108,363 @@ export class RealtimeMatchmakingManager {
     onMatchSuccess: (result: MatchSuccessResult) => void,
     onFallbackToBot: () => void
   ): Promise<void> {
-    // Clean up any stale state first
+    // Clean up any previous session state
     this.cleanup();
 
     this.currentState = 'searching';
     this.hasMatched = false;
+    this.searchStartTime = Date.now();
+    this.isPairingInProgress = false;
 
-    const userId = auth.currentUser?.uid || player.id || `guest_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
-    const ticketId = `ticket_${userId}`;
-    this.currentUserId = userId;
-    this.currentTicketId = ticketId;
+    // Authoritative UID
+    const uid = auth.currentUser?.uid || player.id || `guest_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+    this.currentUserId = uid;
 
-    // Window unload/leave safety handler
+    const projectId = firebaseConfig.projectId || 'tactile-world-jq6d2';
+
+    // REQUIRED DEBUG LOGS
+    console.log('[MATCHMAKING] current uid:', uid);
+    console.log('[MATCHMAKING] firebase project:', projectId);
+    console.log('[MATCHMAKING] entering queue (max 5s window)');
+    console.log('[MATCHMAKING] queue doc:', `matchmaking_queue/${uid}`);
+
+    // Pre-curate candidate questions for immediate match synchronization
+    const initialCuratedQuestions = player.matchesPlayed === 0 && category === 'mixed' && roundCount === 10
+      ? getFirstMatchQuestions(exam)
+      : getFilteredQuestions(category, exam, roundCount);
+
+    // Register unload handlers to clean queue doc if user navigates away
     this.beforeUnloadHandler = () => {
       this.cancelMatchmaking();
     };
     window.addEventListener('beforeunload', this.beforeUnloadHandler);
     window.addEventListener('pagehide', this.beforeUnloadHandler);
 
+    // =========================================================================
+    // CHANNEL 1: ULTRA-FAST SERVER MATCHMAKER (Instant cross-device pairing)
+    // =========================================================================
     try {
-      const myTicketRef = doc(db, 'match_queue', ticketId);
-      const now = Date.now();
-      const expiresAt = now + 12000; // 12 seconds max TTL for queue validity
+      fetch('/api/matchmaking/join', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          player,
+          category,
+          exam,
+          roundCount,
+          questions: initialCuratedQuestions,
+        }),
+      }).then(res => res.json()).then(data => {
+        if (this.hasMatched || this.currentState !== 'searching') return;
+        if (data && data.success && data.matched && data.roomId && data.opponent) {
+          console.log('[MATCHMAKING-SERVER] Instant match confirmed on join:', data.roomId);
+          this.transitionToMatched({
+            roomId: data.roomId,
+            opponent: data.opponent,
+            questions: data.questions || initialCuratedQuestions,
+            isRealPlayer: true,
+          }, onMatchSuccess);
+        }
+      }).catch(err => {
+        console.warn('[MATCHMAKING-SERVER] Server join notice:', err);
+      });
 
-      // 1. Subscribe to own ticket in REAL-TIME immediately BEFORE publishing to guarantee no missed events
-      this.unsubscribeMyTicket = onSnapshot(myTicketRef, (docSnap) => {
+      // Poll server matchmaking state rapidly (every 350ms)
+      this.serverPollInterval = setInterval(async () => {
+        if (this.hasMatched || this.currentState !== 'searching' || !this.currentUserId) return;
+        try {
+          const res = await fetch('/api/matchmaking/poll', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ uid: this.currentUserId }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (this.hasMatched || this.currentState !== 'searching') return;
+            if (data && data.success && data.matched && data.roomId && data.opponent) {
+              console.log('[MATCHMAKING-SERVER] Match detected via fast server poll:', data.roomId);
+              this.transitionToMatched({
+                roomId: data.roomId,
+                opponent: data.opponent,
+                questions: data.questions || initialCuratedQuestions,
+                isRealPlayer: true,
+              }, onMatchSuccess);
+            }
+          }
+        } catch {
+          // Ignore polling errors
+        }
+      }, 350);
+    } catch (e) {
+      console.warn('[MATCHMAKING-SERVER] Error starting server poll:', e);
+    }
+
+    // =========================================================================
+    // CHANNEL 2: FIRESTORE REALTIME SYNC (Authoritative Firestore queue)
+    // =========================================================================
+    try {
+      const now = Date.now();
+      const myDocRef = doc(db, 'matchmaking_queue', uid);
+
+      // 1. Subscribe to own document in REAL-TIME before writing
+      this.unsubscribeMyTicket = onSnapshot(myDocRef, (docSnap) => {
         if (!docSnap.exists() || this.hasMatched || this.currentState !== 'searching') return;
 
         const data = docSnap.data() as MatchQueueTicket;
-        if (data && data.status === 'matched' && data.matchedRoomId && data.matchedOpponent) {
-          // Transition state: searching -> matched
+        if (data && data.status === 'matched' && data.matchId && data.opponentProfile) {
+          console.log('[MATCHMAKING] Firestore ticket matched:', data.matchId);
+          const sharedQuestions = data.questions && data.questions.length > 0
+            ? data.questions
+            : initialCuratedQuestions;
+
           this.transitionToMatched({
-            roomId: data.matchedRoomId,
-            opponent: data.matchedOpponent,
-            questions: data.questions || (player.matchesPlayed === 0 ? getFirstMatchQuestions(exam) : getFilteredQuestions(category, exam, roundCount)),
+            roomId: data.matchId,
+            opponent: data.opponentProfile,
+            questions: sharedQuestions,
             isRealPlayer: true,
           }, onMatchSuccess);
         }
       }, (err) => {
-        handleFirestoreError(err, OperationType.GET, `match_queue/${ticketId}`);
+        console.error('[MATCHMAKING] Firestore error on own ticket listener:', err);
       });
 
-      // 2. Publish player's searching ticket to the real-time queue
-      const myTicketPayload: MatchQueueTicket = {
-        id: ticketId,
-        userId,
-        playerName: player.name,
-        avatar: player.avatar,
-        rankPoints: player.rankPoints,
-        targetExam: player.targetExam || 'SSC CGL',
+      // 2. Write player document to `matchmaking_queue/{uid}`
+      const queueDocPayload: MatchQueueTicket = {
+        uid,
+        displayName: player.name || 'Govt Aspirant',
+        avatar: player.avatar || '👨‍💼',
+        lp: player.rankPoints || 1200,
+        targetExam: player.targetExam || exam || 'SSC CGL',
         category,
         exam,
         roundCount,
-        status: 'searching',
+        status: 'waiting',
         createdAt: now,
-        expiresAt,
+        heartbeatAt: now,
+        matchId: null,
+        opponentUid: null,
+        opponentProfile: null,
+        questions: null,
       };
 
-      await setDoc(myTicketRef, myTicketPayload);
+      setDoc(myDocRef, sanitizeForFirestore(queueDocPayload)).catch(err => {
+        console.warn('[MATCHMAKING] Firestore write notice:', err);
+      });
 
-      // 3. Start 5.0 second fallback timer. If no real player matches before this, trigger bot fallback.
-      this.fallbackTimer = setTimeout(() => {
+      // 3. Heartbeat interval: update heartbeatAt every 2 seconds to prove liveness
+      this.heartbeatInterval = setInterval(async () => {
+        if (this.currentState === 'searching' && !this.hasMatched && this.currentUserId) {
+          try {
+            await setDoc(doc(db, 'matchmaking_queue', this.currentUserId), {
+              heartbeatAt: Date.now(),
+            }, { merge: true });
+          } catch (e) {
+            // ignore background heartbeat errors
+          }
+        }
+      }, 2000);
+
+      // 4. Start EXACT 5.0s window for real human search before bot fallback (User requested max 5 seconds)
+      this.fallbackTimer = setTimeout(async () => {
+        if (this.hasMatched || this.currentState !== 'searching' || this.isPairingInProgress) {
+          return;
+        }
+
+        // Final fast check before triggering bot fallback
+        try {
+          const pollRes = await fetch('/api/matchmaking/poll', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ uid }),
+          });
+          if (pollRes.ok) {
+            const pData = await pollRes.json();
+            if (pData && pData.success && pData.matched && pData.roomId && pData.opponent) {
+              console.log('[MATCHMAKING] Match caught in final 5s check!');
+              this.transitionToMatched({
+                roomId: pData.roomId,
+                opponent: pData.opponent,
+                questions: pData.questions || initialCuratedQuestions,
+                isRealPlayer: true,
+              }, onMatchSuccess);
+              return;
+            }
+          }
+        } catch {
+          // ignore
+        }
+
         if (this.hasMatched || this.currentState !== 'searching') return;
 
-        // Transition state: searching -> bot_fallback
+        // Transition to bot fallback at 5 seconds
+        console.log('[MATCHMAKING] bot fallback started after 5 seconds');
         this.currentState = 'bot_fallback';
         this.cleanup();
         onFallbackToBot();
       }, 5000);
 
-      // 4. Real-time listener for compatible waiting players entering the queue
-      const queueCollection = collection(db, 'match_queue');
-      const poolQuery = query(
+      // 5. Subscribe to other waiting players in `matchmaking_queue`
+      const queueCollection = collection(db, 'matchmaking_queue');
+      const waitingQuery = query(
         queueCollection,
-        where('status', '==', 'searching'),
-        limit(10)
+        where('status', '==', 'waiting'),
+        limit(20)
       );
 
-      this.unsubscribePoolListener = onSnapshot(poolQuery, async (snapshot) => {
-        if (this.hasMatched || this.currentState !== 'searching') return;
+      this.unsubscribePoolListener = onSnapshot(waitingQuery, async (snapshot) => {
+        if (this.hasMatched || this.currentState !== 'searching' || this.isPairingInProgress) return;
 
         const currentTime = Date.now();
-        // Look for another searching ticket (not our own, not expired)
-        for (const docChange of snapshot.docChanges()) {
-          if (this.hasMatched || this.currentState !== 'searching') break;
+        const waitingCandidates: MatchQueueTicket[] = [];
 
-          const candidateData = docChange.doc.data() as MatchQueueTicket;
+        for (const docSnap of snapshot.docs) {
+          const data = docSnap.data() as MatchQueueTicket;
           if (
-            candidateData &&
-            candidateData.userId !== userId &&
-            candidateData.status === 'searching' &&
-            candidateData.createdAt > (currentTime - 10000) // Within valid 10s window
+            data &&
+            data.uid &&
+            data.uid !== uid &&
+            data.status === 'waiting' &&
+            (currentTime - (data.heartbeatAt || data.createdAt)) < 15000 // Fresh within 15s
           ) {
-            // Attempt atomic pairing transaction!
-            await this.attemptAtomicPairing(
+            waitingCandidates.push(data);
+          }
+        }
+
+        if (waitingCandidates.length > 0) {
+          const candidate = waitingCandidates[0];
+          console.log('[MATCHMAKING] waiting candidate discovered:', candidate.uid);
+
+          // Designated initiator: lower UID triggers transaction immediately
+          const isDesignatedInitiator = uid < candidate.uid;
+          const hasWaitedAsNonInitiator = (currentTime - this.searchStartTime) > 1200;
+
+          if (isDesignatedInitiator || hasWaitedAsNonInitiator) {
+            this.isPairingInProgress = true;
+            console.log('[MATCHMAKING] trying atomic claim');
+            const paired = await this.attemptAtomicPairing(
               player,
-              candidateData,
+              candidate,
               category,
               exam,
               roundCount,
+              initialCuratedQuestions,
               onMatchSuccess
             );
-            break;
+            this.isPairingInProgress = false;
           }
         }
       }, (err) => {
-        handleFirestoreError(err, OperationType.LIST, 'match_queue');
+        console.error('[MATCHMAKING] Firestore error on pool query listener:', err);
       });
 
     } catch (error) {
-      console.warn('Real-time matchmaking initialization fallback:', error);
-      if (!this.hasMatched && this.currentState === 'searching') {
-        this.currentState = 'bot_fallback';
-        this.cleanup();
-        onFallbackToBot();
-      }
+      console.error('[MATCHMAKING] Firestore error during initialization:', error);
     }
   }
 
   /**
    * ATOMIC TRANSACTION MATCHMAKING:
-   * Prevents race conditions when two or more players queue at the exact same millisecond.
-   * Ensures:
-   * - Both tickets are atomically verified to still be 'searching'
-   * - Both tickets are updated to 'matched' with the EXACT SAME match/room ID and questions
-   * - Creates the shared Live Room document
-   * - If another process matched either ticket first, transaction aborts cleanly
+   * 1. Reads both `matchmaking_queue/${myUid}` and `matchmaking_queue/${candidate.uid}`
+   * 2. Verifies both documents are still status == "waiting"
+   * 3. Sets both documents to status == "matched" with deterministic matchId, opponentProfile, and questions
+   * 4. Creates `live_rooms/${matchId}` and `matches/${matchId}`
+   * 5. Cancels bot fallback and triggers success callback
    */
   private async attemptAtomicPairing(
     myPlayer: PlayerProfile,
-    opponentTicket: MatchQueueTicket,
+    candidate: MatchQueueTicket,
     category: QuestionCategory | 'mixed',
     exam: ExamType,
     roundCount: number,
+    curatedQuestions: Question[],
     onMatchSuccess: (result: MatchSuccessResult) => void
   ): Promise<boolean> {
     if (this.hasMatched || this.currentState !== 'searching') return false;
-    if (!this.currentTicketId || !this.currentUserId) return false;
+    if (!this.currentUserId) return false;
 
-    const myTicketRef = doc(db, 'match_queue', this.currentTicketId);
-    const oppTicketRef = doc(db, 'match_queue', opponentTicket.id);
+    const myUid = this.currentUserId;
+    const oppUid = candidate.uid;
+
+    const myDocRef = doc(db, 'matchmaking_queue', myUid);
+    const oppDocRef = doc(db, 'matchmaking_queue', oppUid);
 
     try {
-      const sharedRoomId = `duel_${this.currentUserId.slice(0, 5)}_${opponentTicket.userId.slice(0, 5)}_${Date.now()}`;
-      const sharedQuestions = myPlayer.matchesPlayed === 0 && category === 'mixed'
-        ? getFirstMatchQuestions(exam)
+      // Deterministic match ID using sorted UIDs
+      const sortedPair = [myUid, oppUid].sort();
+      const matchId = `duel_1v1_${sortedPair[0].slice(0, 6)}_${sortedPair[1].slice(0, 6)}_${Date.now()}`;
+
+      // Shared synchronized questions
+      const sharedQuestions = curatedQuestions && curatedQuestions.length > 0
+        ? curatedQuestions
         : getFilteredQuestions(category, exam, roundCount);
 
+      // Build opponent profile from candidate ticket
+      const oppTier = getTierFromLP(candidate.lp || 1200);
       const opponentProfile: PlayerProfile = {
-        id: opponentTicket.userId,
-        name: opponentTicket.playerName,
-        avatar: opponentTicket.avatar,
+        id: candidate.uid,
+        name: candidate.displayName || 'Govt Aspirant',
+        avatar: candidate.avatar || '👨‍💼',
         country: 'India',
         countryCode: 'IN',
-        targetExam: opponentTicket.targetExam || 'SSC CGL',
-        rankPoints: opponentTicket.rankPoints || 1200,
+        targetExam: candidate.targetExam || exam || 'SSC CGL',
+        rankPoints: candidate.lp || 1200,
         pyqScore: 0,
-        tier: 'Aspirant',
-        tierTitle: 'Aspirant',
-        level: Math.max(1, Math.floor((opponentTicket.rankPoints || 1200) / 300)),
-        matchesPlayed: 12,
-        matchesWon: 8,
+        tier: oppTier,
+        tierTitle: getTierTitle(oppTier),
+        level: Math.max(1, Math.floor((candidate.lp || 1200) / 300)),
+        matchesPlayed: 14,
+        matchesWon: 9,
         winStreak: 2,
-        accuracyRate: 75,
+        accuracyRate: 72,
         bestCategory: category === 'mixed' ? 'synonyms' : category,
         badges: ['⚡ Live Challenger', '🇮🇳 Verified Aspirant']
       };
 
-      const roomRef = doc(db, 'live_rooms', sharedRoomId);
+      const roomRef = doc(db, 'live_rooms', matchId);
+      const matchRef = doc(db, 'matches', matchId);
 
       await runTransaction(db, async (transaction) => {
-        const mySnap = await transaction.get(myTicketRef);
-        const oppSnap = await transaction.get(oppTicketRef);
+        const mySnap = await transaction.get(myDocRef);
+        const oppSnap = await transaction.get(oppDocRef);
 
         if (!mySnap.exists() || !oppSnap.exists()) {
-          throw new Error('Ticket no longer exists');
+          throw new Error('One or both queue documents no longer exist');
         }
 
         const myData = mySnap.data() as MatchQueueTicket;
         const oppData = oppSnap.data() as MatchQueueTicket;
 
-        // Check if both tickets are strictly still in 'searching' state
-        if (myData.status !== 'searching' || oppData.status !== 'searching') {
-          throw new Error('One of the tickets is already matched or cancelled');
+        // Verify both are still strictly waiting
+        if (myData.status !== 'waiting' || oppData.status !== 'waiting') {
+          throw new Error('One of the players was matched or cancelled');
         }
 
-        // 1. Mark Opponent Ticket as 'matched' with the shared matchId and questions
-        transaction.update(oppTicketRef, {
+        const now = Date.now();
+
+        // 1. Update Opponent Queue Doc
+        transaction.update(oppDocRef, {
           status: 'matched',
-          matchedRoomId: sharedRoomId,
-          matchedOpponent: myPlayer,
-          questions: sharedQuestions,
+          matchId,
+          opponentUid: myUid,
+          opponentProfile: sanitizeForFirestore(myPlayer),
+          questions: sanitizeForFirestore(sharedQuestions),
+          updatedAt: now,
         });
 
-        // 2. Mark My Ticket as 'matched' with the shared matchId and questions
-        transaction.update(myTicketRef, {
+        // 2. Update My Queue Doc
+        transaction.update(myDocRef, {
           status: 'matched',
-          matchedRoomId: sharedRoomId,
-          matchedOpponent: opponentProfile,
-          questions: sharedQuestions,
+          matchId,
+          opponentUid: oppUid,
+          opponentProfile: sanitizeForFirestore(opponentProfile),
+          questions: sanitizeForFirestore(sharedQuestions),
+          updatedAt: now,
         });
 
-        // 3. Create the shared Live Room Document with authoritative score maps
+        // 3. Create Shared Live Room Document for LiveDuelArena
         const liveRoomData: LiveDuelRoom = {
-          id: sharedRoomId,
-          roomId: sharedRoomId,
+          id: matchId,
+          roomId: matchId,
           mode: roundCount === 10 ? 'quick_duel' : '1v1_ranked',
           category,
           exam,
@@ -328,16 +487,28 @@ export class RealtimeMatchmakingManager {
           },
           completedPlayers: [],
           activeEmotes: [],
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
+          createdAt: now,
+          updatedAt: now,
         };
 
-        transaction.set(roomRef, liveRoomData);
+        transaction.set(roomRef, sanitizeForFirestore(liveRoomData));
+
+        // 4. Create Match Document
+        transaction.set(matchRef, sanitizeForFirestore({
+          matchId,
+          player1Uid: myPlayer.id,
+          player2Uid: opponentProfile.id,
+          status: 'in_progress',
+          type: 'random-human',
+          createdAt: now,
+        }));
       });
 
-      // Transaction succeeded! Transition initiator to matched
+      // Transaction Succeeded!
+      console.log('[MATCHMAKING] human match created via transaction:', matchId);
+
       this.transitionToMatched({
-        roomId: sharedRoomId,
+        roomId: matchId,
         opponent: opponentProfile,
         questions: sharedQuestions,
         isRealPlayer: true,
@@ -345,13 +516,13 @@ export class RealtimeMatchmakingManager {
 
       return true;
     } catch (err) {
-      // Transaction failed or opponent was matched concurrently.
+      // Transaction aborted cleanly (e.g. concurrent claim or network latency)
       return false;
     }
   }
 
   /**
-   * Helper to perform clean state transition to 'matched'
+   * Helper to transition to 'matched' state and notify UI
    */
   private transitionToMatched(
     result: MatchSuccessResult,
@@ -361,30 +532,43 @@ export class RealtimeMatchmakingManager {
     this.hasMatched = true;
     this.currentState = 'matched';
 
-    // Cancel 5-second timer immediately
+    // Cancel bot fallback timer immediately
     if (this.fallbackTimer) {
       clearTimeout(this.fallbackTimer);
       this.fallbackTimer = null;
     }
 
-    // Stop queue listeners
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
+
+    if (this.serverPollInterval) {
+      clearInterval(this.serverPollInterval);
+      this.serverPollInterval = null;
+    }
+
+    // Stop pool queue listener
     if (this.unsubscribePoolListener) {
       this.unsubscribePoolListener();
       this.unsubscribePoolListener = null;
     }
 
-    // Clean up ticket in background
-    if (this.currentTicketId) {
-      const ticketRef = doc(db, 'match_queue', this.currentTicketId);
-      deleteDoc(ticketRef).catch(() => {});
+    // Schedule cleanup of queue doc after 20s so both clients have safe reading margin
+    const uidToClean = this.currentUserId;
+    if (uidToClean) {
+      const cleanTimer = setTimeout(() => {
+        deleteDoc(doc(db, 'matchmaking_queue', uidToClean)).catch(() => {});
+      }, 20000);
+      this.delayedCleanups.push(cleanTimer);
     }
 
-    // Fire success callback
+    // Trigger success callback to start live match
     onMatchSuccess(result);
   }
 
   /**
-   * Cancels search and removes player ticket from queue immediately
+   * Cancels search and removes player from matchmaking_queue immediately
    */
   public async cancelMatchmaking(): Promise<void> {
     this.currentState = 'idle';
@@ -393,12 +577,22 @@ export class RealtimeMatchmakingManager {
   }
 
   /**
-   * Complete teardown of timers, listeners, and window hooks
+   * Complete teardown of timers, listeners, heartbeat, and queue documents
    */
   public cleanup(): void {
     if (this.fallbackTimer) {
       clearTimeout(this.fallbackTimer);
       this.fallbackTimer = null;
+    }
+
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
+
+    if (this.serverPollInterval) {
+      clearInterval(this.serverPollInterval);
+      this.serverPollInterval = null;
     }
 
     if (this.unsubscribeMyTicket) {
@@ -417,13 +611,21 @@ export class RealtimeMatchmakingManager {
       this.beforeUnloadHandler = null;
     }
 
-    if (this.currentTicketId) {
-      const ticketRef = doc(db, 'match_queue', this.currentTicketId);
-      deleteDoc(ticketRef).catch(() => {});
-      this.currentTicketId = null;
+    if (this.currentUserId && this.currentState !== 'matched') {
+      const uidToDelete = this.currentUserId;
+      deleteDoc(doc(db, 'matchmaking_queue', uidToDelete)).catch(() => {});
+      fetch('/api/matchmaking/leave', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uid: uidToDelete }),
+      }).catch(() => {});
+      this.currentUserId = null;
     }
 
-    this.currentUserId = null;
+    this.delayedCleanups.forEach(t => clearTimeout(t));
+    this.delayedCleanups = [];
+
+    this.isPairingInProgress = false;
   }
 }
 
@@ -436,9 +638,6 @@ export const realtimeMatchmaker = new RealtimeMatchmakingManager();
  * ============================================================================
  */
 
-/**
- * Subscribes to live room state changes.
- */
 export function subscribeToLiveRoom(
   roomId: string,
   onUpdate: (room: LiveDuelRoom) => void,
@@ -461,278 +660,126 @@ export function subscribeToLiveRoom(
     }
   }, (err) => {
     if (onError) onError(err);
-    handleFirestoreError(err, OperationType.GET, `live_rooms/${roomId}`);
   });
 
-  // Server polling fallback (every 800ms)
+  // Backup HTTP polling for instant fallback
   pollInterval = setInterval(async () => {
     if (isUnsubscribed) return;
     try {
       const res = await fetch(`/api/match/room/${roomId}`);
       if (res.ok) {
-        const json = await res.json();
-        if (json.success && json.room) {
-          handleUpdate(json.room as LiveDuelRoom);
+        const data = await res.json();
+        if (data.success && data.room) {
+          handleUpdate(data.room as LiveDuelRoom);
         }
       }
     } catch {
-      // ignore
+      // Ignore background sync errors
     }
-  }, 800);
+  }, 1500);
 
   return () => {
     isUnsubscribed = true;
+    unsubscribeFs();
     if (pollInterval) clearInterval(pollInterval);
-    try {
-      unsubscribeFs();
-    } catch {
-      // ignore
-    }
   };
 }
 
-/**
- * Submits a player's answer atomically to the shared Live Room in Firestore.
- * Prevents race conditions and computes the final synchronized match result
- * once all players finish the round series.
- */
 export async function submitPlayerAnswerToLiveRoom(
   roomId: string,
   playerId: string,
-  answer: PlayerAnswerRecord,
-  isLastQuestion: boolean
+  answerRecord: PlayerAnswerRecord,
+  score: number,
+  combo: number,
+  isLastQuestion: boolean = false
 ): Promise<LiveDuelRoom | null> {
-  // Sync to server API backup
+  const roomRef = doc(db, 'live_rooms', roomId);
+  let updatedRoomResult: LiveDuelRoom | null = null;
+
   try {
-    fetch('/api/match/room/sync', {
+    await runTransaction(db, async (transaction) => {
+      const snap = await transaction.get(roomRef);
+      if (!snap.exists()) return;
+
+      const room = snap.data() as LiveDuelRoom;
+      const scores = { ...(room.scores || {}) };
+      const combos = { ...(room.combos || {}) };
+      const answers = { ...(room.answers || {}) };
+      const completedPlayers = [...(room.completedPlayers || [])];
+
+      scores[playerId] = score;
+      combos[playerId] = combo;
+
+      const playerAnswers = [...(answers[playerId] || [])];
+      const alreadyAnswered = playerAnswers.some(a => a.questionId === answerRecord.questionId);
+      if (!alreadyAnswered) {
+        playerAnswers.push(answerRecord);
+      }
+      answers[playerId] = playerAnswers;
+
+      if (isLastQuestion && !completedPlayers.includes(playerId)) {
+        completedPlayers.push(playerId);
+      }
+
+      const p1Id = room.player1?.id;
+      const p2Id = room.player2?.id;
+      const p1Score = (p1Id ? scores[p1Id] : 0) ?? 0;
+      const p2Score = (p2Id ? scores[p2Id] : 0) ?? 0;
+      const opponentLeft = !!room.forfeitedBy;
+
+      const updatedRoom: Partial<LiveDuelRoom> = {
+        scores,
+        combos,
+        answers,
+        completedPlayers,
+        updatedAt: Date.now(),
+      };
+
+      // If both players have completed, or if one player finished after opponent left:
+      if (completedPlayers.length >= 2 || (isLastQuestion && opponentLeft)) {
+        const winnerId = p1Score > p2Score ? p1Id : (p2Score > p1Score ? p2Id : 'draw');
+        const loserId = winnerId === p1Id ? p2Id : (winnerId === p2Id ? p1Id : '');
+
+        updatedRoom.status = 'completed';
+        updatedRoom.finalResult = {
+          winnerId,
+          loserId,
+          player1FinalScore: p1Score,
+          player2FinalScore: p2Score,
+          player1LPChange: winnerId === p1Id ? 30 : (winnerId === 'draw' ? 5 : -15),
+          player2LPChange: winnerId === p2Id ? 30 : (winnerId === 'draw' ? 5 : -15),
+          finalised: true,
+        };
+      }
+
+      transaction.update(roomRef, updatedRoom);
+      updatedRoomResult = { ...room, ...updatedRoom } as LiveDuelRoom;
+    });
+  } catch (err) {
+    console.warn('[LiveRoom] Firestore score sync failed, falling back to server API:', err);
+  }
+
+  // Also sync to server API
+  try {
+    await fetch('/api/match/room/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         roomId,
         playerId,
-        score: answer.scoreGained,
-        answerRecord: answer,
+        score,
+        combo,
+        answerRecord,
+        isLastQuestion,
       }),
-    }).catch(() => {});
-  } catch {
-    // ignore
-  }
-
-  const roomRef = doc(db, 'live_rooms', roomId);
-
-  try {
-    const updatedRoom = await runTransaction(db, async (transaction) => {
-      const roomSnap = await transaction.get(roomRef);
-      if (!roomSnap.exists()) {
-        throw new Error(`Live room ${roomId} not found`);
-      }
-
-      const room = roomSnap.data() as LiveDuelRoom;
-      const currentScores = room.scores || {};
-      const currentCombos = room.combos || {};
-      const currentAnswers = room.answers || {};
-      const completedPlayers = [...(room.completedPlayers || [])];
-
-      // Update player score & combo
-      const playerCurrentScore = currentScores[playerId] || 0;
-      const playerNewScore = Math.max(0, playerCurrentScore + answer.scoreGained);
-      currentScores[playerId] = playerNewScore;
-
-      const playerCurrentCombo = currentCombos[playerId] || 0;
-      currentCombos[playerId] = answer.isCorrect ? playerCurrentCombo + 1 : 0;
-
-      // Append answer record
-      const playerExistingAnswers = currentAnswers[playerId] || [];
-      currentAnswers[playerId] = [...playerExistingAnswers, answer];
-
-      // If last question, record player completion
-      if (isLastQuestion && !completedPlayers.includes(playerId)) {
-        completedPlayers.push(playerId);
-      }
-
-      const p1Id = room.player1.id;
-      const p2Id = room.player2.id;
-
-      let status = room.status;
-      let finalResult = room.finalResult;
-
-      // Check if both players have now completed all questions
-      const isBothCompleted = completedPlayers.includes(p1Id) && completedPlayers.includes(p2Id);
-
-      if (isBothCompleted && (!finalResult || !finalResult.finalised)) {
-        const p1Score = currentScores[p1Id] || 0;
-        const p2Score = currentScores[p2Id] || 0;
-
-        const isP1Winner = p1Score > p2Score;
-        const isP2Winner = p2Score > p1Score;
-        const isDraw = p1Score === p2Score;
-
-        const winnerId = isP1Winner ? p1Id : isP2Winner ? p2Id : 'draw';
-        const loserId = isP1Winner ? p2Id : isP2Winner ? p1Id : 'draw';
-
-        const p1LP = isP1Winner ? 30 : isDraw ? 5 : -15;
-        const p2LP = isP2Winner ? 30 : isDraw ? 5 : -15;
-
-        status = 'completed';
-        finalResult = {
-          winnerId,
-          loserId,
-          player1FinalScore: p1Score,
-          player2FinalScore: p2Score,
-          player1LPChange: p1LP,
-          player2LPChange: p2LP,
-          finalised: true,
-        };
-      }
-
-      const updatedPayload: Record<string, any> = {
-        scores: currentScores,
-        combos: currentCombos,
-        answers: currentAnswers,
-        completedPlayers,
-        status,
-        updatedAt: Date.now(),
-      };
-
-      if (finalResult !== undefined) {
-        updatedPayload.finalResult = finalResult;
-      }
-
-      transaction.update(roomRef, updatedPayload);
-
-      return {
-        ...room,
-        ...updatedPayload,
-      } as LiveDuelRoom;
     });
-
-    return updatedRoom;
-  } catch (error) {
-    console.error('Error submitting answer to live room:', error);
-    return null;
+  } catch (e) {
+    // Ignore server sync failure
   }
+
+  return updatedRoomResult;
 }
 
-/**
- * Force finalizes the live room if one player finished and the opponent timed out or disconnected.
- */
-export async function forceFinalizeLiveRoom(roomId: string): Promise<LiveDuelRoom | null> {
-  const roomRef = doc(db, 'live_rooms', roomId);
-
-  try {
-    return await runTransaction(db, async (transaction) => {
-      const roomSnap = await transaction.get(roomRef);
-      if (!roomSnap.exists()) return null;
-
-      const room = roomSnap.data() as LiveDuelRoom;
-      if (room.finalResult && room.finalResult.finalised) {
-        return room;
-      }
-
-      const p1Id = room.player1.id;
-      const p2Id = room.player2.id;
-      const p1Score = (room.scores && room.scores[p1Id]) || 0;
-      const p2Score = (room.scores && room.scores[p2Id]) || 0;
-
-      const isP1Winner = p1Score > p2Score;
-      const isP2Winner = p2Score > p1Score;
-      const isDraw = p1Score === p2Score;
-
-      const winnerId = isP1Winner ? p1Id : isP2Winner ? p2Id : 'draw';
-      const loserId = isP1Winner ? p2Id : isP2Winner ? p1Id : 'draw';
-
-      const p1LP = isP1Winner ? 30 : isDraw ? 5 : -15;
-      const p2LP = isP2Winner ? 30 : isDraw ? 5 : -15;
-
-      const finalResult: LiveRoomFinalResult = {
-        winnerId,
-        loserId,
-        player1FinalScore: p1Score,
-        player2FinalScore: p2Score,
-        player1LPChange: p1LP,
-        player2LPChange: p2LP,
-        finalised: true,
-      };
-
-      transaction.update(roomRef, {
-        status: 'completed',
-        finalResult,
-        updatedAt: Date.now(),
-      });
-
-      return {
-        ...room,
-        status: 'completed',
-        finalResult,
-      } as LiveDuelRoom;
-    });
-  } catch (error) {
-    console.error('Error force finalizing live room:', error);
-    return null;
-  }
-}
-
-/**
- * Forfeits an active live room when a player leaves or abandons the match in between.
- * The leaving player suffers an immediate -15 LP penalty, while the opponent is awarded +30 LP victory.
- */
-export async function forfeitLiveRoom(
-  roomId: string,
-  forfeitingPlayerId: string
-): Promise<LiveDuelRoom | null> {
-  const roomRef = doc(db, 'live_rooms', roomId);
-
-  try {
-    return await runTransaction(db, async (transaction) => {
-      const roomSnap = await transaction.get(roomRef);
-      if (!roomSnap.exists()) return null;
-
-      const room = roomSnap.data() as LiveDuelRoom;
-      if (room.finalResult && room.finalResult.finalised) {
-        return room;
-      }
-
-      const p1Id = room.player1.id;
-      const p2Id = room.player2.id;
-      const isP1Forfeit = forfeitingPlayerId === p1Id;
-
-      const winnerId = isP1Forfeit ? p2Id : p1Id;
-      const loserId = isP1Forfeit ? p1Id : p2Id;
-
-      const p1Score = (room.scores && room.scores[p1Id]) || 0;
-      const p2Score = (room.scores && room.scores[p2Id]) || 0;
-
-      const finalResult: LiveRoomFinalResult = {
-        winnerId,
-        loserId,
-        player1FinalScore: p1Score,
-        player2FinalScore: p2Score,
-        player1LPChange: isP1Forfeit ? -15 : 30,
-        player2LPChange: isP1Forfeit ? 30 : -15,
-        finalised: true,
-      };
-
-      transaction.update(roomRef, {
-        status: 'completed',
-        finalResult,
-        updatedAt: Date.now(),
-      });
-
-      return {
-        ...room,
-        status: 'completed',
-        finalResult,
-      } as LiveDuelRoom;
-    });
-  } catch (error) {
-    console.error('Error forfeiting live room:', error);
-    return null;
-  }
-}
-
-/**
- * Sends a real-time emote to the shared Live Room.
- */
 export async function sendLiveRoomEmote(
   roomId: string,
   senderId: string,
@@ -740,27 +787,129 @@ export async function sendLiveRoomEmote(
   text?: string
 ): Promise<void> {
   const roomRef = doc(db, 'live_rooms', roomId);
+  const newEmote = { senderId, emoji, text, timestamp: Date.now() };
+
   try {
     await runTransaction(db, async (transaction) => {
-      const roomSnap = await transaction.get(roomRef);
-      if (!roomSnap.exists()) return;
-      const room = roomSnap.data() as LiveDuelRoom;
-      const emotes = (room.activeEmotes || []).filter(e => Date.now() - e.timestamp < 10000);
-      const newEmote: { senderId: string; emoji: string; text?: string; timestamp: number } = {
-        senderId,
-        emoji,
-        timestamp: Date.now(),
-      };
-      if (text) {
-        newEmote.text = text;
-      }
-      emotes.push(newEmote);
+      const snap = await transaction.get(roomRef);
+      if (!snap.exists()) return;
+
+      const room = snap.data() as LiveDuelRoom;
+      const activeEmotes = (room.activeEmotes || [])
+        .filter(e => Date.now() - e.timestamp < 10000);
+      activeEmotes.push(newEmote);
+
       transaction.update(roomRef, {
-        activeEmotes: emotes,
+        activeEmotes,
         updatedAt: Date.now(),
       });
     });
-  } catch (err) {
-    console.warn('Failed to send live room emote:', err);
+  } catch {
+    // Fallback to server API
+  }
+
+  try {
+    await fetch('/api/match/room/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        roomId,
+        playerId: senderId,
+        emote: newEmote,
+      }),
+    });
+  } catch {
+    // Ignore
+  }
+}
+
+export async function forceFinalizeLiveRoom(
+  roomId: string,
+  myPlayerId?: string,
+  myScore?: number,
+  opponentScore?: number,
+  finalResult?: LiveRoomFinalResult
+): Promise<LiveDuelRoom | null> {
+  const roomRef = doc(db, 'live_rooms', roomId);
+  try {
+    let resolvedResult = finalResult;
+
+    await runTransaction(db, async (transaction) => {
+      const snap = await transaction.get(roomRef);
+      if (!snap.exists()) return;
+      const room = snap.data() as LiveDuelRoom;
+
+      if (!resolvedResult) {
+        const p1Id = room.player1?.id || 'p1';
+        const p2Id = room.player2?.id || 'p2';
+
+        const p1Score = (myPlayerId === p1Id && typeof myScore === 'number')
+          ? myScore
+          : (room.scores?.[p1Id] ?? (myPlayerId !== p1Id && typeof opponentScore === 'number' ? opponentScore : 0));
+        const p2Score = (myPlayerId === p2Id && typeof myScore === 'number')
+          ? myScore
+          : (room.scores?.[p2Id] ?? (myPlayerId !== p2Id && typeof opponentScore === 'number' ? opponentScore : 0));
+
+        const winnerId = p1Score > p2Score ? p1Id : (p2Score > p1Score ? p2Id : 'draw');
+        const loserId = winnerId === p1Id ? p2Id : (winnerId === p2Id ? p1Id : '');
+
+        resolvedResult = {
+          winnerId,
+          loserId,
+          player1FinalScore: p1Score,
+          player2FinalScore: p2Score,
+          player1LPChange: winnerId === p1Id ? 30 : (winnerId === 'draw' ? 5 : -15),
+          player2LPChange: winnerId === p2Id ? 30 : (winnerId === 'draw' ? 5 : -15),
+          finalised: true,
+        };
+      }
+
+      transaction.update(roomRef, {
+        status: 'completed',
+        finalResult: resolvedResult,
+        updatedAt: Date.now(),
+      });
+    });
+
+    return {
+      id: roomId,
+      roomId,
+      status: 'completed',
+      finalResult: resolvedResult || undefined,
+    } as LiveDuelRoom;
+  } catch (e) {
+    console.warn('[LiveRoom] Finalize sync warning:', e);
+    return null;
+  }
+}
+
+export async function forfeitLiveRoom(
+  roomId: string,
+  forfeitingPlayerId: string
+): Promise<void> {
+  const roomRef = doc(db, 'live_rooms', roomId);
+  try {
+    // Only mark forfeitedBy so the other player knows their opponent left.
+    // Do NOT draw or abruptly complete the room for the remaining player:
+    // The match continues for the remaining player so their score decides who won!
+    await setDoc(roomRef, {
+      forfeitedBy: forfeitingPlayerId,
+      updatedAt: Date.now(),
+    }, { merge: true });
+  } catch (e) {
+    console.warn('[LiveRoom] Forfeit sync warning:', e);
+  }
+
+  try {
+    await fetch('/api/match/room/forfeit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        roomId,
+        forfeitingPlayerId,
+      }),
+    });
+  } catch {
+    // Ignore
   }
 }

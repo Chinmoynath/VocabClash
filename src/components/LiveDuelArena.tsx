@@ -75,6 +75,7 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
 
   // Authoritative live state from Firestore (for real-player matches)
   const [liveRoom, setLiveRoom] = useState<LiveDuelRoom | null>(null);
+  const [opponentLeft, setOpponentLeft] = useState<boolean>(false);
 
   // Authoritative live scores & combos for instant real-time UI synchronization
   const [livePlayerScore, setLivePlayerScore] = useState<number>(matchState.playerScore);
@@ -143,6 +144,11 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
     const unsubscribe = subscribeToLiveRoom(roomId, (roomData) => {
       setLiveRoom(roomData);
 
+      // Check if opponent forfeited or left
+      if (roomData.forfeitedBy && roomData.forfeitedBy === oppPlayerId) {
+        setOpponentLeft(true);
+      }
+
       // Extract authoritative scores
       if (roomData.scores) {
         const authPlayerScore = roomData.scores[myPlayerId] ?? currentLiveScoresRef.current.playerScore;
@@ -185,17 +191,23 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
         });
       }
 
-      // Check for match completion
-      if (roomData.finalResult && roomData.finalResult.finalised && !hasCompletedRef.current) {
+      // Check for match completion: ONLY if current player is on the last question and has finished
+      const isOnLastQuestion = currentQIndex + 1 >= matchState.questions.length;
+      if (isOnLastQuestion && roomData.finalResult && roomData.finalResult.finalised && !hasCompletedRef.current) {
         hasCompletedRef.current = true;
-        onCompleteMatch(roomData.finalResult);
+        onCompleteMatch(roomData.finalResult, {
+          playerScore: currentLiveScoresRef.current.playerScore,
+          opponentScore: currentLiveScoresRef.current.opponentScore,
+          combo: currentLiveScoresRef.current.combo,
+          opponentCombo: currentLiveScoresRef.current.opponentCombo,
+        });
       }
     });
 
     return () => {
       unsubscribe();
     };
-  }, [isRealMatch, roomId, myPlayerId, oppPlayerId, currentQIndex, onCompleteMatch]);
+  }, [isRealMatch, roomId, myPlayerId, oppPlayerId, currentQIndex, matchState.questions.length, onCompleteMatch]);
 
   const advanceToNextRound = () => {
     if (isRoundAdvancingRef.current) return;
@@ -217,8 +229,47 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
         if (liveRoom?.finalResult && liveRoom.finalResult.finalised && !hasCompletedRef.current) {
           hasCompletedRef.current = true;
           onCompleteMatch(liveRoom.finalResult, finalScoresSnapshot);
+        } else if (opponentLeft || liveRoom?.forfeitedBy) {
+          // Opponent left! Current scores determine who won
+          const pScore = currentLiveScoresRef.current.playerScore;
+          const oScore = currentLiveScoresRef.current.opponentScore;
+          const winnerId = pScore > oScore ? myPlayerId : (oScore > pScore ? oppPlayerId : 'draw');
+          const loserId = winnerId === myPlayerId ? oppPlayerId : (winnerId === oppPlayerId ? myPlayerId : '');
+          const finalResult: LiveRoomFinalResult = {
+            winnerId,
+            loserId,
+            player1FinalScore: pScore,
+            player2FinalScore: oScore,
+            player1LPChange: winnerId === myPlayerId ? 30 : (winnerId === 'draw' ? 5 : -15),
+            player2LPChange: winnerId === oppPlayerId ? 30 : (winnerId === 'draw' ? 5 : -15),
+            finalised: true,
+          };
+          hasCompletedRef.current = true;
+          forceFinalizeLiveRoom(roomId, myPlayerId, pScore, oScore, finalResult).catch(() => {});
+          onCompleteMatch(finalResult, finalScoresSnapshot);
         } else {
-          setIsWaitingForOpponent(true);
+          // Check if opponent already answered all questions
+          const oppAnswers = liveRoom?.answers?.[oppPlayerId] || [];
+          if (oppAnswers.length >= matchState.questions.length) {
+            const pScore = currentLiveScoresRef.current.playerScore;
+            const oScore = currentLiveScoresRef.current.opponentScore;
+            const winnerId = pScore > oScore ? myPlayerId : (oScore > pScore ? oppPlayerId : 'draw');
+            const loserId = winnerId === myPlayerId ? oppPlayerId : (winnerId === oppPlayerId ? myPlayerId : '');
+            const finalResult: LiveRoomFinalResult = {
+              winnerId,
+              loserId,
+              player1FinalScore: pScore,
+              player2FinalScore: oScore,
+              player1LPChange: winnerId === myPlayerId ? 30 : (winnerId === 'draw' ? 5 : -15),
+              player2LPChange: winnerId === oppPlayerId ? 30 : (winnerId === 'draw' ? 5 : -15),
+              finalised: true,
+            };
+            hasCompletedRef.current = true;
+            forceFinalizeLiveRoom(roomId, myPlayerId, pScore, oScore, finalResult).catch(() => {});
+            onCompleteMatch(finalResult, finalScoresSnapshot);
+          } else {
+            setIsWaitingForOpponent(true);
+          }
         }
       } else {
         const pRecord = playerAnswerRecordRef.current || {
@@ -379,19 +430,54 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
   useEffect(() => {
     if (!isWaitingForOpponent || !isRealMatch || !roomId) return;
 
+    // If opponent already left, immediately finalize based on score
+    if (opponentLeft || liveRoom?.forfeitedBy) {
+      if (!hasCompletedRef.current) {
+        const pScore = currentLiveScoresRef.current.playerScore;
+        const oScore = currentLiveScoresRef.current.opponentScore;
+        const winnerId = pScore > oScore ? myPlayerId : (oScore > pScore ? oppPlayerId : 'draw');
+        const loserId = winnerId === myPlayerId ? oppPlayerId : (winnerId === oppPlayerId ? myPlayerId : '');
+        const finalResult: LiveRoomFinalResult = {
+          winnerId,
+          loserId,
+          player1FinalScore: pScore,
+          player2FinalScore: oScore,
+          player1LPChange: winnerId === myPlayerId ? 30 : (winnerId === 'draw' ? 5 : -15),
+          player2LPChange: winnerId === oppPlayerId ? 30 : (winnerId === 'draw' ? 5 : -15),
+          finalised: true,
+        };
+        hasCompletedRef.current = true;
+        forceFinalizeLiveRoom(roomId, myPlayerId, pScore, oScore, finalResult).catch(() => {});
+        onCompleteMatch(finalResult, {
+          playerScore: pScore,
+          opponentScore: oScore,
+          combo: currentLiveScoresRef.current.combo,
+          opponentCombo: currentLiveScoresRef.current.opponentCombo,
+        });
+      }
+      return;
+    }
+
     const safetyTimer = setTimeout(() => {
       if (!hasCompletedRef.current) {
-        forceFinalizeLiveRoom(roomId).then(finalizedRoom => {
+        const pScore = currentLiveScoresRef.current.playerScore;
+        const oScore = currentLiveScoresRef.current.opponentScore;
+        forceFinalizeLiveRoom(roomId, myPlayerId, pScore, oScore).then(finalizedRoom => {
           if (finalizedRoom?.finalResult && !hasCompletedRef.current) {
             hasCompletedRef.current = true;
-            onCompleteMatch(finalizedRoom.finalResult);
+            onCompleteMatch(finalizedRoom.finalResult, {
+              playerScore: pScore,
+              opponentScore: oScore,
+              combo: currentLiveScoresRef.current.combo,
+              opponentCombo: currentLiveScoresRef.current.opponentCombo,
+            });
           }
         });
       }
-    }, 12000);
+    }, 6000);
 
     return () => clearTimeout(safetyTimer);
-  }, [isWaitingForOpponent, isRealMatch, roomId, onCompleteMatch]);
+  }, [isWaitingForOpponent, isRealMatch, roomId, opponentLeft, liveRoom, myPlayerId, oppPlayerId, onCompleteMatch]);
 
   const handleTimeExpired = () => {
     if (isAnswered || isRoundAdvancingRef.current) return;
@@ -437,8 +523,8 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
 
     if (isRealMatch && roomId) {
       // SUBMIT ANSWER ATOMICALLY TO FIRESTORE LIVE ROOM
-      submitPlayerAnswerToLiveRoom(roomId, myPlayerId, playerRecord, isLastQuestion).then(updatedRoom => {
-        if (updatedRoom?.finalResult && updatedRoom.finalResult.finalised && !hasCompletedRef.current) {
+      submitPlayerAnswerToLiveRoom(roomId, myPlayerId, playerRecord, newPlayerScore, nextPlayerCombo, isLastQuestion).then(updatedRoom => {
+        if (isLastQuestion && updatedRoom?.finalResult && updatedRoom.finalResult.finalised && !hasCompletedRef.current) {
           hasCompletedRef.current = true;
           setTimeout(() => {
             onCompleteMatch(updatedRoom.finalResult, {
@@ -729,8 +815,15 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
           {/* Opponent Side */}
           <div className="flex items-center justify-end gap-2 flex-1 min-w-0 text-right">
             <div className="min-w-0 flex-1">
-              <div className="text-xs sm:text-sm font-extrabold text-slate-100 truncate">
-                {matchState.opponent.name}
+              <div className="flex items-center justify-end gap-1 truncate">
+                {opponentLeft && (
+                  <span className="text-[9px] bg-rose-950 border border-rose-600/60 text-rose-300 font-bold px-1.5 py-0.5 rounded-full shrink-0">
+                    Left
+                  </span>
+                )}
+                <span className="text-xs sm:text-sm font-extrabold text-slate-100 truncate">
+                  {matchState.opponent.name}
+                </span>
               </div>
               <div className="flex items-center justify-end gap-1.5">
                 <span className="text-sm sm:text-base font-black text-orange-400 font-mono">

@@ -429,7 +429,25 @@ interface ServerFriendLobby {
 const serverLobbies = new Map<string, ServerFriendLobby>();
 const serverLiveRooms = new Map<string, any>();
 
-// Periodic cleanup of stale lobbies (> 1 hour old)
+// Realtime 1v1 Random Matchmaking In-Memory Queue (Zero Latency Dual-Channel Coordinator)
+interface ServerQueueEntry {
+  uid: string;
+  player: any;
+  category: string;
+  exam: string;
+  roundCount: number;
+  questions: any[];
+  status: 'waiting' | 'matched' | 'cancelled';
+  createdAt: number;
+  heartbeatAt: number;
+  matchedRoomId?: string;
+  matchedOpponent?: any;
+  matchedQuestions?: any[];
+}
+
+const serverMatchmakingQueue = new Map<string, ServerQueueEntry>();
+
+// Periodic cleanup of stale lobbies & matchmaking queue (> 10s old)
 setInterval(() => {
   const now = Date.now();
   for (const [code, lobby] of serverLobbies.entries()) {
@@ -442,7 +460,175 @@ setInterval(() => {
       serverLiveRooms.delete(roomId);
     }
   }
-}, 60000);
+  for (const [uid, entry] of serverMatchmakingQueue.entries()) {
+    if (entry.status === 'cancelled' || now - entry.heartbeatAt > 12000 || now - entry.createdAt > 20000) {
+      serverMatchmakingQueue.delete(uid);
+    }
+  }
+}, 5000);
+
+// Fast 1v1 Matchmaking Join / Match Endpoint
+app.post('/api/matchmaking/join', (req, res) => {
+  try {
+    const { player, category = 'mixed', exam = 'SSC CGL', roundCount = 10, questions = [] } = req.body;
+    if (!player || !player.id) {
+      return res.status(400).json({ success: false, error: 'Player profile with id is required' });
+    }
+
+    const uid = player.id;
+    const now = Date.now();
+
+    // Look for another waiting human candidate in queue (excluding current player, active within last 10s)
+    let matchedCandidate: ServerQueueEntry | null = null;
+    for (const [cId, candidate] of serverMatchmakingQueue.entries()) {
+      if (
+        cId !== uid &&
+        candidate.status === 'waiting' &&
+        now - candidate.heartbeatAt < 10000
+      ) {
+        matchedCandidate = candidate;
+        break;
+      }
+    }
+
+    if (matchedCandidate) {
+      // Instant Match Found!
+      const sortedPair = [uid, matchedCandidate.uid].sort();
+      const matchId = `duel_1v1_${sortedPair[0].slice(0, 6)}_${sortedPair[1].slice(0, 6)}_${Date.now()}`;
+      
+      const sharedQuestions = (matchedCandidate.questions && matchedCandidate.questions.length > 0)
+        ? matchedCandidate.questions
+        : (questions && questions.length > 0 ? questions : []);
+
+      // Update matched candidate in queue
+      matchedCandidate.status = 'matched';
+      matchedCandidate.matchedRoomId = matchId;
+      matchedCandidate.matchedOpponent = player;
+      matchedCandidate.matchedQuestions = sharedQuestions;
+      serverMatchmakingQueue.set(matchedCandidate.uid, matchedCandidate);
+
+      // Register the live room on the server
+      const liveRoomData = {
+        id: matchId,
+        roomId: matchId,
+        mode: roundCount === 10 ? 'quick_duel' : '1v1_ranked',
+        category,
+        exam,
+        roundCount,
+        player1: player,
+        player2: matchedCandidate.player,
+        questions: sharedQuestions,
+        status: 'in_progress',
+        scores: {
+          [player.id]: 0,
+          [matchedCandidate.player.id]: 0,
+        },
+        combos: {
+          [player.id]: 0,
+          [matchedCandidate.player.id]: 0,
+        },
+        answers: {
+          [player.id]: [],
+          [matchedCandidate.player.id]: [],
+        },
+        completedPlayers: [],
+        activeEmotes: [],
+        createdAt: now,
+        updatedAt: now,
+      };
+      serverLiveRooms.set(matchId, liveRoomData);
+
+      console.log(`[MATCHMAKING-SERVER] Instant match created: ${player.name} (${uid}) vs ${matchedCandidate.player.name} (${matchedCandidate.uid}) in room ${matchId}`);
+
+      return res.json({
+        success: true,
+        matched: true,
+        roomId: matchId,
+        opponent: matchedCandidate.player,
+        questions: sharedQuestions,
+        isRealPlayer: true,
+      });
+    }
+
+    // No immediate match: register in waiting queue
+    const myEntry: ServerQueueEntry = {
+      uid,
+      player,
+      category,
+      exam,
+      roundCount,
+      questions,
+      status: 'waiting',
+      createdAt: now,
+      heartbeatAt: now,
+    };
+    serverMatchmakingQueue.set(uid, myEntry);
+
+    console.log(`[MATCHMAKING-SERVER] Player entered queue: ${player.name} (${uid}). Waiting pool size: ${serverMatchmakingQueue.size}`);
+
+    return res.json({
+      success: true,
+      matched: false,
+      waiting: true,
+    });
+  } catch (error: any) {
+    console.error('Error in matchmaking join:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Fast Matchmaking Poll Endpoint (checks every 300-400ms)
+app.post('/api/matchmaking/poll', (req, res) => {
+  try {
+    const { uid } = req.body;
+    if (!uid) {
+      return res.status(400).json({ success: false, error: 'uid is required' });
+    }
+
+    const entry = serverMatchmakingQueue.get(uid);
+    if (!entry) {
+      return res.json({ success: true, matched: false, queueExpired: true });
+    }
+
+    // Refresh heartbeat
+    entry.heartbeatAt = Date.now();
+    serverMatchmakingQueue.set(uid, entry);
+
+    if (entry.status === 'matched' && entry.matchedRoomId && entry.matchedOpponent) {
+      console.log(`[MATCHMAKING-SERVER] Poll returned match for ${uid} -> room ${entry.matchedRoomId}`);
+      return res.json({
+        success: true,
+        matched: true,
+        roomId: entry.matchedRoomId,
+        opponent: entry.matchedOpponent,
+        questions: entry.matchedQuestions || [],
+        isRealPlayer: true,
+      });
+    }
+
+    return res.json({
+      success: true,
+      matched: false,
+      status: entry.status,
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Matchmaking Cancel / Leave Endpoint
+app.post('/api/matchmaking/leave', (req, res) => {
+  try {
+    const { uid } = req.body;
+    if (uid) {
+      serverMatchmakingQueue.delete(uid);
+      console.log(`[MATCHMAKING-SERVER] Player ${uid} left matchmaking queue`);
+    }
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
 // Create or Register Lobby Endpoint
 app.post('/api/lobby/create', (req, res) => {
@@ -620,7 +806,7 @@ app.post('/api/lobby/start', (req, res) => {
 // Live Room Sync Endpoint (Score, Answers, Emotes fallback)
 app.post('/api/match/room/sync', (req, res) => {
   try {
-    const { roomId, playerId, score, combo, answerRecord, emote } = req.body;
+    const { roomId, playerId, score, combo, answerRecord, emote, isLastQuestion } = req.body;
     if (!roomId) {
       return res.status(400).json({ success: false, error: 'roomId is required' });
     }
@@ -658,6 +844,12 @@ app.post('/api/match/room/sync', (req, res) => {
           room.answers[playerId].push(answerRecord);
         }
       }
+      if (isLastQuestion) {
+        room.completedPlayers = room.completedPlayers || [];
+        if (!room.completedPlayers.includes(playerId)) {
+          room.completedPlayers.push(playerId);
+        }
+      }
     }
 
     if (emote) {
@@ -672,6 +864,25 @@ app.post('/api/match/room/sync', (req, res) => {
 
     room.updatedAt = Date.now();
     serverLiveRooms.set(roomId, room);
+    res.json({ success: true, room });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Live Room Forfeit Endpoint (Player leaves, match continues for opponent)
+app.post('/api/match/room/forfeit', (req, res) => {
+  try {
+    const { roomId, forfeitingPlayerId } = req.body;
+    if (!roomId) {
+      return res.status(400).json({ success: false, error: 'roomId is required' });
+    }
+    const room = serverLiveRooms.get(roomId);
+    if (room) {
+      room.forfeitedBy = forfeitingPlayerId;
+      room.updatedAt = Date.now();
+      serverLiveRooms.set(roomId, room);
+    }
     res.json({ success: true, room });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });

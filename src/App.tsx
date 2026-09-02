@@ -45,6 +45,7 @@ import {
   fetchUserDataFromFirestore,
   checkRedirectAuthResult
 } from './services/firebaseService';
+import { syncUserToLeaderboard } from './services/leaderboardService';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { AndroidDeviceShell } from './components/AndroidDeviceShell';
 import { TopBar } from './components/TopBar';
@@ -731,49 +732,27 @@ export default function App() {
   ) => {
     if (!matchState) return;
 
-    let isWinner = false;
-    let isDraw = false;
-    let lpDelta = 0;
     let finalPlayerScore = finalScores?.playerScore ?? matchState.playerScore;
     let finalOpponentScore = finalScores?.opponentScore ?? matchState.opponentScore;
     const finalComboStreak = finalScores?.combo ?? matchState.comboStreak;
     const finalOpponentCombo = finalScores?.opponentCombo ?? matchState.opponentCombo;
 
-    if (authoritativeResult && authoritativeResult.finalised) {
-      // Authoritative synchronized scores directly from Firestore Live Room
-      if (authoritativeResult.winnerId === 'draw') {
-        isDraw = true;
-        isWinner = false;
-        lpDelta = 5;
-      } else if (authoritativeResult.winnerId === player.id) {
+    // Direct, definitive winner determination based on scores
+    let isWinner = finalPlayerScore > finalOpponentScore;
+    let isDraw = !isWinner && finalPlayerScore === finalOpponentScore;
+
+    // If authoritative result explicitly designated winner and scores are tied, use it
+    if (authoritativeResult?.finalised) {
+      if (authoritativeResult.winnerId === player.id && !isWinner) {
         isWinner = true;
         isDraw = false;
-        lpDelta = 30;
-      } else {
+      } else if (authoritativeResult.winnerId === 'draw' && finalPlayerScore === finalOpponentScore) {
+        isDraw = true;
         isWinner = false;
-        isDraw = false;
-        lpDelta = -15;
       }
-
-      // Synchronize exact final scores
-      if (authoritativeResult.player1FinalScore !== undefined && authoritativeResult.player2FinalScore !== undefined) {
-        if (isWinner) {
-          finalPlayerScore = Math.max(authoritativeResult.player1FinalScore, authoritativeResult.player2FinalScore);
-          finalOpponentScore = Math.min(authoritativeResult.player1FinalScore, authoritativeResult.player2FinalScore);
-        } else if (isDraw) {
-          finalPlayerScore = authoritativeResult.player1FinalScore;
-          finalOpponentScore = authoritativeResult.player2FinalScore;
-        } else {
-          finalPlayerScore = Math.min(authoritativeResult.player1FinalScore, authoritativeResult.player2FinalScore);
-          finalOpponentScore = Math.max(authoritativeResult.player1FinalScore, authoritativeResult.player2FinalScore);
-        }
-      }
-    } else {
-      // Bot / Offline match
-      isWinner = finalPlayerScore > finalOpponentScore;
-      isDraw = finalPlayerScore === finalOpponentScore;
-      lpDelta = isWinner ? 30 + (finalComboStreak > 2 ? 5 : 0) : isDraw ? 5 : -15;
     }
+
+    const lpDelta = isWinner ? 30 + (finalComboStreak > 2 ? 5 : 0) : isDraw ? 5 : -15;
 
     const newLP = Math.max(100, player.rankPoints + lpDelta);
     const newTier = getTierFromLP(newLP);
@@ -798,6 +777,7 @@ export default function App() {
     };
 
     setPlayer(updatedPlayer);
+    syncUserToLeaderboard(updatedPlayer, currentUser?.uid).catch(() => {});
 
     setMatchState(prev => prev ? {
       ...prev,

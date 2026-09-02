@@ -136,12 +136,42 @@
         "updatedAt": { "type": "number", "description": "Timestamp last updated" }
       },
       "required": ["batchId", "dateImported", "status"]
+    },
+    "LeaderboardUserDoc": {
+      "title": "LeaderboardUserDoc",
+      "description": "Real-time user standing, rank points (LP), target exam, and win rates for the unified All-India leaderboard",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "User UID" },
+        "uid": { "type": "string", "description": "User UID" },
+        "name": { "type": "string", "description": "Aspirant display name" },
+        "avatar": { "type": "string", "description": "Avatar emoji" },
+        "photoURL": { "type": "string", "description": "Optional profile photo" },
+        "countryCode": { "type": "string", "description": "Country code (IN)" },
+        "targetExam": { "type": "string", "description": "Target exam" },
+        "rankPoints": { "type": "number", "description": "Rank points / LP" },
+        "tierTitle": { "type": "string", "description": "Tier title" },
+        "winRate": { "type": "number", "description": "Accuracy / win rate percentage" },
+        "winStreak": { "type": "number", "description": "Current win streak" },
+        "matchesPlayed": { "type": "number", "description": "Total matches played" },
+        "matchesWon": { "type": "number", "description": "Total matches won" },
+        "updatedAt": { "type": "number", "description": "Timestamp updated in ms" }
+      },
+      "required": ["id", "uid", "name", "rankPoints", "updatedAt"]
     }
   },
   "firestore": {
     "/users/{userId}": {
       "schema": "UserProfile",
       "description": "Private user profile and synchronization state"
+    },
+    "/leaderboard_users/{userId}": {
+      "schema": "LeaderboardUserDoc",
+      "description": "Unified All-India leaderboard real user listings"
+    },
+    "/matchmaking_queue/{uid}": {
+      "schema": "MatchQueueTicket",
+      "description": "Authoritative real-time 1v1 matchmaking queue documents with onSnapshot listening and atomic claim transactions"
     },
     "/match_queue/{ticketId}": {
       "schema": "MatchQueueTicket",

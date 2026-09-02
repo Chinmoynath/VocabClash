@@ -34,20 +34,37 @@ export const MatchmakingModal: React.FC<MatchmakingModalProps> = ({
   const [isRealOpponent, setIsRealOpponent] = useState<boolean>(false);
   const [matchedQuestions, setMatchedQuestions] = useState<Question[] | undefined>(undefined);
   const [sharedRoomId, setSharedRoomId] = useState<string | undefined>(undefined);
+  const [searchSecondsLeft, setSearchSecondsLeft] = useState<number>(5);
 
   const isMatchedRef = useRef<boolean>(false);
+
+  // Active 5s search countdown visual
+  useEffect(() => {
+    if (searchStep >= 2) return;
+    setSearchSecondsLeft(5);
+    const interval = setInterval(() => {
+      setSearchSecondsLeft(prev => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [searchStep]);
 
   useEffect(() => {
     isMatchedRef.current = false;
     const roundCount = mode === 'quick_duel' ? 10 : 20;
 
-    // Connect to Firestore real-time matchmaking queue
+    // Connect to Firestore + Server dual-channel matchmaking queue
     realtimeMatchmaker.enterMatchQueue(
       player,
       category,
       exam,
       roundCount,
-      // 1. Real Match Found: Triggered via onSnapshot instantly when paired!
+      // 1. Real Match Found: Triggered instantly when paired!
       (result: MatchSuccessResult) => {
         if (isMatchedRef.current) return;
         isMatchedRef.current = true;
@@ -138,11 +155,17 @@ export const MatchmakingModal: React.FC<MatchmakingModalProps> = ({
                 <span>All-India Online Lobby</span>
               </div>
               <h3 className="text-base font-extrabold text-slate-100">
-                Finding Opponent...
+                Finding Live Opponent ({searchSecondsLeft}s)
               </h3>
               <p className="text-xs text-slate-400">
                 Matching Rank: <span className="text-amber-300 font-bold">{player.rankPoints} ± 150 LP</span>
               </p>
+              <div className="w-44 h-1.5 bg-slate-800 rounded-full mx-auto overflow-hidden border border-slate-700/50 mt-1">
+                <div 
+                  className="h-full bg-gradient-to-r from-amber-500 to-orange-500 rounded-full transition-all duration-1000 ease-linear"
+                  style={{ width: `${Math.max(0, (searchSecondsLeft / 5) * 100)}%` }}
+                />
+              </div>
             </div>
           </div>
         ) : (

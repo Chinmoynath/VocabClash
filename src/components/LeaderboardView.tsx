@@ -1,13 +1,17 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { PlayerProfile, LeaderboardUser } from '../types';
-import { INITIAL_LEADERBOARD } from '../data/mockQuestions';
+import { 
+  getDeterministicBots, 
+  subscribeToRealLeaderboardUsers, 
+  buildMergedLeaderboard, 
+  syncUserToLeaderboard,
+  TOTAL_LEADERBOARD_ASPIRANTS
+} from '../services/leaderboardService';
 import { soundManager } from '../utils/audio';
 import { 
   Trophy, 
   Shield, 
-  TrendingUp, 
-  Award,
-  Zap
+  TrendingUp
 } from 'lucide-react';
 import { AdSenseUnit } from './AdSenseUnit';
 import { ADSENSE_BANNER_SLOT } from '../services/adSenseService';
@@ -17,117 +21,88 @@ interface LeaderboardViewProps {
   isPremium?: boolean;
 }
 
-const TOTAL_ACTIVE_ASPIRANTS = 5480;
-
-// Natural non-linear distribution curve calculating realistic All-India Rank from LP
-export function calculateAllIndiaRank(rankPoints: number): number {
-  if (rankPoints >= 4890) return 1;
-  if (rankPoints >= 4420) return 2;
-  if (rankPoints >= 4180) return 3;
-  if (rankPoints >= 3920) return 4;
-  if (rankPoints >= 3740) return 5;
-  if (rankPoints >= 3580) return 6;
-  if (rankPoints >= 3460) return 7;
-  if (rankPoints >= 3350) return 8;
-  if (rankPoints >= 3240) return 9;
-  if (rankPoints >= 3150) return 10;
-
-  // Below Rank 10: Smooth, realistic percentile power curve across 5,480+ aspirants
-  // At 3,150 LP -> Rank 11
-  // At 2,000 LP -> Rank ~410
-  // At 1,200 LP -> Rank ~1,380
-  // At 600 LP  -> Rank ~2,860
-  // At 300 LP  -> Rank ~3,940
-  // At 100 LP  -> Rank ~4,820 (Standard starting baseline)
-  // At 0 LP    -> Rank ~5,480
-  const normalized = Math.max(0, Math.min(1, rankPoints / 3150));
-  const rankOffset = Math.round((TOTAL_ACTIVE_ASPIRANTS - 11) * Math.pow(1 - normalized, 1.62));
-  return Math.max(11, 11 + rankOffset);
-}
-
-// Indian aspirants pool for nearby rank bracket simulation
-const NEIGHBOR_ASPIRANTS = [
-  { name: 'Suresh Ganguly', avatar: '👨‍💼', exam: 'SSC CGL 2026', winRate: 64 },
-  { name: 'Divya Kulkarni', avatar: '👩‍🎓', exam: 'RRB NTPC CBT-2', winRate: 62 },
-  { name: 'Manoj Tripathi', avatar: '👨‍💻', exam: 'Bank Clerk SBI', winRate: 59 },
-  { name: 'Kavita Sen', avatar: '👩‍🏫', exam: 'SSC CHSL Tier-1', winRate: 57 },
-  { name: 'Abhishek Roy', avatar: '🧑‍💼', exam: 'SSC CPO SI', winRate: 61 },
-  { name: 'Sunita Mehra', avatar: '👩‍🔬', exam: 'Railways Group D', winRate: 55 },
-  { name: 'Prashant Nair', avatar: '👨‍💼', exam: 'UPSC EPFO PA', winRate: 60 },
-  { name: 'Rashmi Panda', avatar: '👩‍💼', exam: 'SSC MTS Havaldar', winRate: 58 },
-];
-
 export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ player, isPremium = false }) => {
   const [activeTab, setActiveTab] = useState<'all_india' | 'tiers'>('all_india');
+  const [realUsers, setRealUsers] = useState<LeaderboardUser[]>([]);
 
-  const userRank = calculateAllIndiaRank(player.rankPoints);
-  const isInTop10 = userRank <= 10;
+  // 1. Subscribe to real Firestore users in real-time & sync current player
+  useEffect(() => {
+    syncUserToLeaderboard(player);
+    const unsubscribe = subscribeToRealLeaderboardUsers((users) => {
+      setRealUsers(users);
+    });
 
-  // Build the Top 10 list
-  let top10List: LeaderboardUser[] = [...INITIAL_LEADERBOARD];
-
-  if (isInTop10) {
-    const userEntry: LeaderboardUser = {
-      rank: userRank,
-      id: player.id,
-      name: `${player.name} (You)`,
-      avatar: player.avatar,
-      countryCode: 'IN',
-      targetExam: player.targetExam,
-      rankPoints: player.rankPoints,
-      tierTitle: player.tierTitle,
-      winRate: player.accuracyRate,
-      winStreak: player.winStreak,
-      isCurrentUser: true,
+    return () => {
+      unsubscribe();
     };
-    top10List = [...top10List.filter(u => u.id !== player.id), userEntry]
-      .sort((a, b) => b.rankPoints - a.rankPoints)
-      .slice(0, 10)
-      .map((u, i) => ({ ...u, rank: i + 1 }));
-  }
+  }, [player]);
 
-  // Exact psychometric Percentile calculation:
-  // Percentile is the % of total candidates whose score is lower than yours.
-  // AIR 1 has 99.98%ile. Median has 50.0%ile. Rank 4,820/5480 has 12.0%ile.
-  const candidatesBelow = Math.max(0, TOTAL_ACTIVE_ASPIRANTS - userRank);
-  const exactPercentile = Math.min(99.9, Math.max(0.1, (candidatesBelow / TOTAL_ACTIVE_ASPIRANTS) * 100));
+  // 2. Load deterministic base bots (~5,480 deterministic competitors)
+  const baseBots = useMemo(() => getDeterministicBots(), []);
 
-  // Generate 2 competitors above and 2 below for user's local neighborhood bracket
-  const neighborAbove1 = {
-    rank: userRank - 1,
-    name: NEIGHBOR_ASPIRANTS[(userRank + 1) % NEIGHBOR_ASPIRANTS.length].name,
-    avatar: NEIGHBOR_ASPIRANTS[(userRank + 1) % NEIGHBOR_ASPIRANTS.length].avatar,
-    exam: NEIGHBOR_ASPIRANTS[(userRank + 1) % NEIGHBOR_ASPIRANTS.length].exam,
-    winRate: NEIGHBOR_ASPIRANTS[(userRank + 1) % NEIGHBOR_ASPIRANTS.length].winRate,
-    rankPoints: player.rankPoints + 4,
-  };
+  // 3. Build single unified merged leaderboard with Standard Competition Ranking
+  const mergedLeaderboard = useMemo(() => {
+    return buildMergedLeaderboard(baseBots, realUsers, player);
+  }, [baseBots, realUsers, player]);
 
-  const neighborAbove2 = {
-    rank: userRank - 2,
-    name: NEIGHBOR_ASPIRANTS[(userRank + 2) % NEIGHBOR_ASPIRANTS.length].name,
-    avatar: NEIGHBOR_ASPIRANTS[(userRank + 2) % NEIGHBOR_ASPIRANTS.length].avatar,
-    exam: NEIGHBOR_ASPIRANTS[(userRank + 2) % NEIGHBOR_ASPIRANTS.length].exam,
-    winRate: NEIGHBOR_ASPIRANTS[(userRank + 2) % NEIGHBOR_ASPIRANTS.length].winRate,
-    rankPoints: player.rankPoints + 9,
-  };
+  const totalAspirantsCount = mergedLeaderboard.length;
 
-  const neighborBelow1 = {
-    rank: userRank + 1,
-    name: NEIGHBOR_ASPIRANTS[(userRank + 3) % NEIGHBOR_ASPIRANTS.length].name,
-    avatar: NEIGHBOR_ASPIRANTS[(userRank + 3) % NEIGHBOR_ASPIRANTS.length].avatar,
-    exam: NEIGHBOR_ASPIRANTS[(userRank + 3) % NEIGHBOR_ASPIRANTS.length].exam,
-    winRate: NEIGHBOR_ASPIRANTS[(userRank + 3) % NEIGHBOR_ASPIRANTS.length].winRate,
-    rankPoints: Math.max(0, player.rankPoints - 4),
-  };
+  // 4. Find current user's position in the merged leaderboard
+  const myIndex = useMemo(() => {
+    const idx = mergedLeaderboard.findIndex(
+      (u) => u.isCurrentUser || u.id === player.id
+    );
+    return idx !== -1 ? idx : mergedLeaderboard.length - 1;
+  }, [mergedLeaderboard, player.id]);
 
-  const neighborBelow2 = {
-    rank: userRank + 2,
-    name: NEIGHBOR_ASPIRANTS[(userRank + 4) % NEIGHBOR_ASPIRANTS.length].name,
-    avatar: NEIGHBOR_ASPIRANTS[(userRank + 4) % NEIGHBOR_ASPIRANTS.length].avatar,
-    exam: NEIGHBOR_ASPIRANTS[(userRank + 4) % NEIGHBOR_ASPIRANTS.length].exam,
-    winRate: NEIGHBOR_ASPIRANTS[(userRank + 4) % NEIGHBOR_ASPIRANTS.length].winRate,
-    rankPoints: Math.max(0, player.rankPoints - 8),
-  };
+  const currentUserEntry = mergedLeaderboard[myIndex];
+  const userRank = currentUserEntry ? currentUserEntry.rank : 4820;
+  const isInTop10 = myIndex < 10;
+
+  // 5. Top 10 list for podium & main ranking display
+  const top10List = useMemo(() => {
+    return mergedLeaderboard.slice(0, 10);
+  }, [mergedLeaderboard]);
+
+  // 6. Psychometric Percentile calculation across entire merged pool
+  const candidatesBelow = Math.max(0, totalAspirantsCount - userRank);
+  const exactPercentile = Math.min(
+    99.9,
+    Math.max(0.1, (candidatesBelow / totalAspirantsCount) * 100)
+  );
+
+  // 7. Live Match Bracket from the SAME merged leaderboard
+  const bracketSlice = useMemo(() => {
+    if (isInTop10) return [];
+    const start = Math.max(0, myIndex - 2);
+    const end = Math.min(mergedLeaderboard.length, myIndex + 3);
+    return mergedLeaderboard.slice(start, end);
+  }, [mergedLeaderboard, myIndex, isInTop10]);
+
+  // 8. Next Higher LP target calculation
+  const nextTargetInfo = useMemo(() => {
+    if (isInTop10 || myIndex <= 0) return null;
+    
+    let nextHigher: LeaderboardUser | null = null;
+    for (let i = myIndex - 1; i >= 0; i--) {
+      if (mergedLeaderboard[i].rankPoints > player.rankPoints) {
+        nextHigher = mergedLeaderboard[i];
+        break;
+      }
+    }
+
+    if (!nextHigher) {
+      return {
+        lpNeeded: 10,
+        targetRank: Math.max(1, userRank - 1),
+      };
+    }
+
+    return {
+      lpNeeded: Math.max(1, nextHigher.rankPoints - player.rankPoints + 1),
+      targetRank: nextHigher.rank,
+    };
+  }, [mergedLeaderboard, myIndex, isInTop10, player.rankPoints, userRank]);
 
   const cadres = [
     { title: '👑 Apex Cadre Officer', lpRange: '4,500+ LP', badge: 'Level 14+', desc: 'Principal Commissioner, Joint Secretary Cadre' },
@@ -177,7 +152,7 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ player, isPrem
               #{userRank.toLocaleString()}
             </div>
             <div className="text-[10px] text-slate-400 font-mono mt-0.5">
-              of {TOTAL_ACTIVE_ASPIRANTS.toLocaleString()}
+              of {totalAspirantsCount.toLocaleString()}
             </div>
           </div>
         </div>
@@ -194,7 +169,7 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ player, isPrem
             <div className="text-[10px] text-slate-400">Standing</div>
             <div className="font-mono font-bold text-slate-200 text-[11px]">
               {userRank <= 100 
-                ? `Top ${Math.max(0.1, (userRank / TOTAL_ACTIVE_ASPIRANTS * 100)).toFixed(1)}%`
+                ? `Top ${Math.max(0.1, (userRank / totalAspirantsCount * 100)).toFixed(1)}%`
                 : `AIR #${userRank}`
               }
             </div>
@@ -239,9 +214,9 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ player, isPrem
 
       {activeTab === 'all_india' ? (
         <div className="space-y-3">
-          {/* TOP 3 PODIUM (Identical to original clean aesthetic) */}
+          {/* TOP 3 PODIUM */}
           <div className="grid grid-cols-3 gap-2 items-stretch">
-            {/* Rank 2 (Snehlata Verma) */}
+            {/* Rank 2 */}
             {top10List[1] && (
               <div className="bg-slate-850/80 border border-slate-800 rounded-2xl p-3 flex flex-col items-center justify-center text-center">
                 <div className="w-9 h-9 rounded-full bg-slate-800 border border-slate-700/60 flex items-center justify-center text-xl mb-1.5 shadow-sm">
@@ -256,7 +231,7 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ player, isPrem
               </div>
             )}
 
-            {/* Rank 1 (Rajesh Meena - Gold Highlighted) */}
+            {/* Rank 1 (Gold Highlighted) */}
             {top10List[0] && (
               <div className="bg-slate-850/90 border border-amber-500/80 rounded-2xl p-3 flex flex-col items-center justify-center text-center relative">
                 <div className="w-10 h-10 rounded-full bg-slate-800 border border-amber-400/80 flex items-center justify-center text-2xl mb-1.5 shadow-sm">
@@ -271,7 +246,7 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ player, isPrem
               </div>
             )}
 
-            {/* Rank 3 (Ankit Deshmukh) */}
+            {/* Rank 3 */}
             {top10List[2] && (
               <div className="bg-slate-850/80 border border-slate-800 rounded-2xl p-3 flex flex-col items-center justify-center text-center">
                 <div className="w-9 h-9 rounded-full bg-slate-800 border border-slate-700/60 flex items-center justify-center text-xl mb-1.5 shadow-sm">
@@ -287,10 +262,10 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ player, isPrem
             )}
           </div>
 
-          {/* RANKED LIST ITEMS (Dark sleek borders, matching original style) */}
+          {/* RANKED LIST ITEMS */}
           <div className="space-y-2">
-            {top10List.map(user => {
-              const isMe = user.isCurrentUser;
+            {top10List.map((user) => {
+              const isMe = user.isCurrentUser || user.id === player.id;
               return (
                 <div
                   key={user.id}
@@ -342,71 +317,68 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ player, isPrem
             })}
           </div>
 
-          {/* LIVE NEIGHBORHOOD BRACKET (If user is not in Top 10) */}
-          {!isInTop10 && (
+          {/* LIVE NEIGHBORHOOD BRACKET (From the exact same merged list) */}
+          {!isInTop10 && bracketSlice.length > 0 && (
             <div className="pt-2 space-y-2">
               <div className="flex items-center justify-between px-1">
                 <div className="text-xs font-extrabold text-slate-300 flex items-center gap-1.5">
                   <TrendingUp className="w-3.5 h-3.5 text-sky-400" />
                   <span>Your Live Match Bracket</span>
                 </div>
-                <span className="text-[10px] text-amber-400 font-medium">
-                  +{neighborAbove1.rankPoints - player.rankPoints} LP to reach #{userRank - 1}
-                </span>
+                {nextTargetInfo && (
+                  <span className="text-[10px] text-amber-400 font-medium">
+                    +{nextTargetInfo.lpNeeded} LP to reach #{nextTargetInfo.targetRank}
+                  </span>
+                )}
               </div>
 
               <div className="bg-slate-900/60 rounded-2xl border border-slate-800 p-2 space-y-1.5">
-                {/* 2 Ranks Above */}
-                <div className="p-2 rounded-xl bg-slate-850/40 border border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
-                  <div className="flex items-center gap-2.5">
-                    <span className="font-mono font-bold text-slate-500 w-14 text-left">#{neighborAbove2.rank.toLocaleString()}</span>
-                    <span>{neighborAbove2.avatar}</span>
-                    <span className="font-medium text-slate-300">{neighborAbove2.name}</span>
-                  </div>
-                  <span className="font-mono font-bold text-slate-400">{neighborAbove2.rankPoints} LP</span>
-                </div>
+                {bracketSlice.map((neighbor) => {
+                  const isMe = neighbor.isCurrentUser || neighbor.id === player.id;
+                  if (isMe) {
+                    return (
+                      <div 
+                        key={neighbor.id}
+                        className="p-2.5 rounded-xl bg-slate-800/90 border border-amber-500/80 text-amber-200 flex items-center justify-between text-xs shadow-sm"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span className="font-mono font-black text-amber-400 w-14 text-left">
+                            #{neighbor.rank.toLocaleString()}
+                          </span>
+                          <span className="shrink-0">{player.avatar}</span>
+                          <span className="font-black text-slate-100 truncate">
+                            {player.name} (You)
+                          </span>
+                        </div>
+                        <div className="text-right shrink-0 ml-2">
+                          <span className="font-mono font-black text-amber-400">
+                            {neighbor.rankPoints} LP
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  }
 
-                {/* 1 Rank Above */}
-                <div className="p-2 rounded-xl bg-slate-850/60 border border-slate-800/80 flex items-center justify-between text-xs text-slate-300">
-                  <div className="flex items-center gap-2.5">
-                    <span className="font-mono font-bold text-slate-500 w-14 text-left">#{neighborAbove1.rank.toLocaleString()}</span>
-                    <span>{neighborAbove1.avatar}</span>
-                    <span className="font-medium text-slate-200">{neighborAbove1.name}</span>
-                  </div>
-                  <span className="font-mono font-bold text-amber-400">{neighborAbove1.rankPoints} LP</span>
-                </div>
-
-                {/* YOU (Active Standing) */}
-                <div className="p-2.5 rounded-xl bg-slate-800/90 border border-amber-500/80 text-amber-200 flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-2.5">
-                    <span className="font-mono font-black text-amber-400 w-14 text-left">#{userRank.toLocaleString()}</span>
-                    <span>{player.avatar}</span>
-                    <span className="font-black text-slate-100">{player.name} (You)</span>
-                  </div>
-                  <div className="text-right">
-                    <span className="font-mono font-black text-amber-400">{player.rankPoints} LP</span>
-                  </div>
-                </div>
-
-                {/* 1 Rank Below */}
-                <div className="p-2 rounded-xl bg-slate-850/60 border border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
-                  <div className="flex items-center gap-2.5">
-                    <span className="font-mono font-bold text-slate-500 w-14 text-left">#{neighborBelow1.rank.toLocaleString()}</span>
-                    <span>{neighborBelow1.avatar}</span>
-                    <span className="font-medium text-slate-300">{neighborBelow1.name}</span>
-                  </div>
-                  <span className="font-mono font-bold text-slate-500">{neighborBelow1.rankPoints} LP</span>
-                </div>
-
-                {/* 2 Ranks Below */}
-                <div className="p-2 rounded-xl bg-slate-850/40 border border-slate-800/80 flex items-center justify-between text-xs text-slate-500">
-                  <div className="flex items-center gap-2.5">
-                    <span className="font-mono font-bold text-slate-600 w-14 text-left">#{neighborBelow2.rank.toLocaleString()}</span>
-                    <span>{neighborBelow2.avatar}</span>
-                    <span className="font-medium text-slate-400">{neighborBelow2.name}</span>
-                  </div>
-                  <span className="font-mono font-bold text-slate-600">{neighborBelow2.rankPoints} LP</span>
-                </div>
+                  return (
+                    <div 
+                      key={neighbor.id}
+                      className="p-2 rounded-xl bg-slate-850/60 border border-slate-800/80 flex items-center justify-between text-xs text-slate-300"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className="font-mono font-bold text-slate-500 w-14 text-left">
+                          #{neighbor.rank.toLocaleString()}
+                        </span>
+                        <span className="shrink-0">{neighbor.avatar}</span>
+                        <span className="font-medium text-slate-300 truncate">
+                          {neighbor.name}
+                        </span>
+                      </div>
+                      <span className="font-mono font-bold text-slate-400 shrink-0 ml-2">
+                        {neighbor.rankPoints} LP
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
