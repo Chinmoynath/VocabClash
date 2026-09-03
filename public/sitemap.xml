@@ -4,60 +4,91 @@
         xsi:schemaLocation="http://www.sitemaps.org/schemas/sitemap/0.9
         http://www.sitemaps.org/schemas/sitemap/0.9/sitemap.xsd">
 
-  <!-- Home / Arena -->
+  <!-- 1. Home / 1v1 Battle Arena -->
   <url>
     <loc>https://vocabclash.in/</loc>
-    <lastmod>2026-08-20</lastmod>
+    <lastmod>2026-09-03</lastmod>
     <changefreq>daily</changefreq>
     <priority>1.0</priority>
   </url>
 
-  <!-- PYQ Drill & Practice -->
+  <!-- 2. Comprehensive SSC Vocabulary Hub -->
   <url>
-    <loc>https://vocabclash.in/?mode=practice</loc>
-    <lastmod>2026-08-20</lastmod>
-    <changefreq>daily</changefreq>
-    <priority>0.9</priority>
-  </url>
-
-  <!-- Live 1v1 Battle Arena -->
-  <url>
-    <loc>https://vocabclash.in/?mode=duel</loc>
-    <lastmod>2026-08-20</lastmod>
-    <changefreq>daily</changefreq>
-    <priority>0.9</priority>
-  </url>
-
-  <!-- Daily Challenge / Streak -->
-  <url>
-    <loc>https://vocabclash.in/?mode=daily</loc>
-    <lastmod>2026-08-20</lastmod>
-    <changefreq>daily</changefreq>
-    <priority>0.8</priority>
-  </url>
-
-  <!-- Leaderboard -->
-  <url>
-    <loc>https://vocabclash.in/?tab=leaderboard</loc>
-    <lastmod>2026-08-20</lastmod>
-    <changefreq>hourly</changefreq>
-    <priority>0.8</priority>
-  </url>
-
-  <!-- Mistake & Revision Vault -->
-  <url>
-    <loc>https://vocabclash.in/?tab=vault</loc>
-    <lastmod>2026-08-20</lastmod>
+    <loc>https://vocabclash.in/ssc-vocabulary</loc>
+    <lastmod>2026-09-03</lastmod>
     <changefreq>weekly</changefreq>
-    <priority>0.7</priority>
+    <priority>0.9</priority>
   </url>
 
-  <!-- VIP Pass / Upgrade -->
+  <!-- 3. SSC CGL Vocabulary Master Guide -->
   <url>
-    <loc>https://vocabclash.in/?modal=vip</loc>
-    <lastmod>2026-08-20</lastmod>
+    <loc>https://vocabclash.in/ssc-cgl-vocabulary</loc>
+    <lastmod>2026-09-03</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+
+  <!-- 4. SSC CHSL Vocabulary 10+2 Guide -->
+  <url>
+    <loc>https://vocabclash.in/ssc-chsl-vocabulary</loc>
+    <lastmod>2026-09-03</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+
+  <!-- 5. Synonyms Master List & PYQs -->
+  <url>
+    <loc>https://vocabclash.in/synonyms</loc>
+    <lastmod>2026-09-03</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+
+  <!-- 6. Antonyms & Opposites Master List -->
+  <url>
+    <loc>https://vocabclash.in/antonyms</loc>
+    <lastmod>2026-09-03</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+
+  <!-- 7. One Word Substitution (OWS) Hub -->
+  <url>
+    <loc>https://vocabclash.in/one-word-substitution</loc>
+    <lastmod>2026-09-03</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+
+  <!-- 8. Idioms & Phrases Hub -->
+  <url>
+    <loc>https://vocabclash.in/idioms-and-phrases</loc>
+    <lastmod>2026-09-03</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+
+  <!-- 9. 24,000+ SSC English PYQs -->
+  <url>
+    <loc>https://vocabclash.in/ssc-english-pyq</loc>
+    <lastmod>2026-09-03</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+
+  <!-- 10. Legal & Policy Pages -->
+  <url>
+    <loc>https://vocabclash.in/privacy.html</loc>
+    <lastmod>2026-09-03</lastmod>
     <changefreq>monthly</changefreq>
-    <priority>0.6</priority>
+    <priority>0.3</priority>
+  </url>
+
+  <url>
+    <loc>https://vocabclash.in/terms.html</loc>
+    <lastmod>2026-09-03</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.3</priority>
   </url>
 
 </urlset>

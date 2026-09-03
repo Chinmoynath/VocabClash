@@ -1073,45 +1073,69 @@ app.get('/sitemap.xml', (req, res) => {
         http://www.sitemaps.org/schemas/sitemap/0.9/sitemap.xsd">
   <url>
     <loc>https://vocabclash.in/</loc>
-    <lastmod>2026-08-20</lastmod>
+    <lastmod>2026-09-03</lastmod>
     <changefreq>daily</changefreq>
     <priority>1.0</priority>
   </url>
   <url>
-    <loc>https://vocabclash.in/?mode=practice</loc>
-    <lastmod>2026-08-20</lastmod>
-    <changefreq>daily</changefreq>
-    <priority>0.9</priority>
-  </url>
-  <url>
-    <loc>https://vocabclash.in/?mode=duel</loc>
-    <lastmod>2026-08-20</lastmod>
-    <changefreq>daily</changefreq>
-    <priority>0.9</priority>
-  </url>
-  <url>
-    <loc>https://vocabclash.in/?mode=daily</loc>
-    <lastmod>2026-08-20</lastmod>
-    <changefreq>daily</changefreq>
-    <priority>0.8</priority>
-  </url>
-  <url>
-    <loc>https://vocabclash.in/?tab=leaderboard</loc>
-    <lastmod>2026-08-20</lastmod>
-    <changefreq>hourly</changefreq>
-    <priority>0.8</priority>
-  </url>
-  <url>
-    <loc>https://vocabclash.in/?tab=vault</loc>
-    <lastmod>2026-08-20</lastmod>
+    <loc>https://vocabclash.in/ssc-vocabulary</loc>
+    <lastmod>2026-09-03</lastmod>
     <changefreq>weekly</changefreq>
-    <priority>0.7</priority>
+    <priority>0.9</priority>
   </url>
   <url>
-    <loc>https://vocabclash.in/?modal=vip</loc>
-    <lastmod>2026-08-20</lastmod>
+    <loc>https://vocabclash.in/ssc-cgl-vocabulary</loc>
+    <lastmod>2026-09-03</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://vocabclash.in/ssc-chsl-vocabulary</loc>
+    <lastmod>2026-09-03</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://vocabclash.in/synonyms</loc>
+    <lastmod>2026-09-03</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://vocabclash.in/antonyms</loc>
+    <lastmod>2026-09-03</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://vocabclash.in/one-word-substitution</loc>
+    <lastmod>2026-09-03</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://vocabclash.in/idioms-and-phrases</loc>
+    <lastmod>2026-09-03</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://vocabclash.in/ssc-english-pyq</loc>
+    <lastmod>2026-09-03</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://vocabclash.in/privacy.html</loc>
+    <lastmod>2026-09-03</lastmod>
     <changefreq>monthly</changefreq>
-    <priority>0.6</priority>
+    <priority>0.3</priority>
+  </url>
+  <url>
+    <loc>https://vocabclash.in/terms.html</loc>
+    <lastmod>2026-09-03</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.3</priority>
   </url>
 </urlset>`;
   res.send(sitemapXml);
@@ -1120,7 +1144,7 @@ app.get('/sitemap.xml', (req, res) => {
 // robots.txt Endpoint
 app.get('/robots.txt', (req, res) => {
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-  res.send('User-agent: *\nAllow: /\n\nSitemap: https://vocabclash.in/sitemap.xml\n');
+  res.send('User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /admin/\nDisallow: /api/\nDisallow: /.well-known/\n\nSitemap: https://vocabclash.in/sitemap.xml\n');
 });
 
 // Service Worker Endpoints (sw.js and service-worker.js) with proper PWA & TWA headers

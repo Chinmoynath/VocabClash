@@ -69,6 +69,12 @@ import { PlayModeSelectorModal } from './components/PlayModeSelectorModal';
 import { FriendLobbyModal } from './components/FriendLobbyModal';
 import { AdminPyqImporter } from './components/AdminPyqImporter';
 import { UserStatsModal } from './components/UserStatsModal';
+import { OfflineWarningModal } from './components/OfflineWarningModal';
+import { SeoPublicPage } from './components/SeoPublicPage';
+import { SeoGuidesModal } from './components/SeoGuidesModal';
+import { SEO_PAGES } from './data/seoContentData';
+import { updatePageSeo } from './utils/seoMetaManager';
+import { networkManager } from './utils/networkManager';
 import { recordQuestionAttempt } from './utils/userStatsManager';
 
 const STORAGE_KEY_PLAYER = 'vocabclash_player_v5';
@@ -264,6 +270,18 @@ export default function App() {
   const [showTourModal, setShowTourModal] = useState<boolean>(false);
   const [showPlayModeModal, setShowPlayModeModal] = useState<boolean>(false);
   const [showFriendLobbyModal, setShowFriendLobbyModal] = useState<boolean>(false);
+  const [showOfflineWarningModal, setShowOfflineWarningModal] = useState<boolean>(false);
+  const [showSeoGuidesModal, setShowSeoGuidesModal] = useState<boolean>(false);
+  const [activeSeoSlug, setActiveSeoSlug] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      const rawPath = window.location.pathname.toLowerCase();
+      const key = rawPath.replace(/^\//, '').trim();
+      if (key && SEO_PAGES[key]) {
+        return `/${key}`;
+      }
+    }
+    return null;
+  });
   const [friendLobbyInitialCode, setFriendLobbyInitialCode] = useState<string>('');
   const [forfeitNotice, setForfeitNotice] = useState<string | null>(null);
   const [showAdminImporter, setShowAdminImporter] = useState<boolean>(() => {
@@ -278,7 +296,7 @@ export default function App() {
     return false;
   });
 
-  // Listen to hash / route changes for private admin portal
+  // Listen to hash / route changes for private admin portal and public SEO guides
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const handleHashOrPopState = () => {
@@ -288,6 +306,15 @@ export default function App() {
         window.location.hash.includes('admin-pyq') ||
         window.location.search.includes('admin=pyq');
       setShowAdminImporter(isAdminRoute);
+
+      const rawPath = window.location.pathname.toLowerCase();
+      const key = rawPath.replace(/^\//, '').trim();
+      if (key && SEO_PAGES[key]) {
+        setActiveSeoSlug(`/${key}`);
+      } else {
+        setActiveSeoSlug(null);
+        updatePageSeo(null);
+      }
     };
 
     window.addEventListener('popstate', handleHashOrPopState);
@@ -297,6 +324,13 @@ export default function App() {
       window.removeEventListener('hashchange', handleHashOrPopState);
     };
   }, []);
+
+  // Update default SEO meta tags when not on a specific SEO guide page
+  useEffect(() => {
+    if (!activeSeoSlug) {
+      updatePageSeo(null);
+    }
+  }, [activeSeoSlug]);
 
   // Auto-detect friend lobby code from URL parameters (e.g. ?lobby=492810 or ?join=492810)
   useEffect(() => {
@@ -585,12 +619,24 @@ export default function App() {
     }
   };
 
-  // Start matchmaking flow
+  // Start matchmaking flow (with offline check)
   const handleStartMatchmaking = (mode: '1v1_ranked' | 'quick_duel' | 'daily_challenge') => {
+    if (!networkManager.isOnline()) {
+      setShowOfflineWarningModal(true);
+      return;
+    }
     setMatchMode(mode);
     const opp = generateMatchedOpponent(player.rankPoints, selectedExam);
     setMatchedOpponent(opp);
     setIsMatchmaking(true);
+  };
+
+  const handleOpenFriendLobbyModal = () => {
+    if (!networkManager.isOnline()) {
+      setShowOfflineWarningModal(true);
+      return;
+    }
+    setShowFriendLobbyModal(true);
   };
 
   // When matchmaking countdown finishes -> transition to Live Duel
@@ -983,6 +1029,44 @@ export default function App() {
 
   const bookmarkedIds = savedWords.filter(w => isItemSaved(w)).map(w => w.question.id);
   const activeMistakeCount = savedWords.filter(w => isItemMistake(w)).length;
+  const activeSeoPage = activeSeoSlug ? SEO_PAGES[activeSeoSlug.replace(/^\//, '')] : null;
+
+  // 1. Render Public Crawlable SEO Page when URL matches any of the 8 SEO topic hubs
+  if (activeSeoPage) {
+    return (
+      <SeoPublicPage
+        pageData={activeSeoPage}
+        onNavigateHome={() => {
+          if (typeof window !== 'undefined') {
+            window.history.pushState(null, '', '/');
+          }
+          setActiveSeoSlug(null);
+          setCurrentTab('arena');
+        }}
+        onStartBattle={() => {
+          if (typeof window !== 'undefined') {
+            window.history.pushState(null, '', '/');
+          }
+          setActiveSeoSlug(null);
+          setCurrentTab('arena');
+          setShowPlayModeModal(true);
+        }}
+        onStartPractice={() => {
+          if (typeof window !== 'undefined') {
+            window.history.pushState(null, '', '/');
+          }
+          setActiveSeoSlug(null);
+          setCurrentTab('practice');
+        }}
+        onNavigateToSlug={(slug) => {
+          if (typeof window !== 'undefined') {
+            window.history.pushState(null, '', slug);
+          }
+          setActiveSeoSlug(slug);
+        }}
+      />
+    );
+  }
 
   return (
     <AndroidDeviceShell>
@@ -1020,6 +1104,10 @@ export default function App() {
           onOpenTour={() => {
             soundManager.playTap();
             setShowTourModal(true);
+          }}
+          onOpenGuides={() => {
+            soundManager.playTap();
+            setShowSeoGuidesModal(true);
           }}
         />
       )}
@@ -1126,7 +1214,7 @@ export default function App() {
                 onOpenPlayModeSelector={() => setShowPlayModeModal(true)}
                 onOpenFriendLobby={() => {
                   setFriendLobbyInitialCode('');
-                  setShowFriendLobbyModal(true);
+                  handleOpenFriendLobbyModal();
                 }}
                 onOpenPremium={() => setShowPremiumModal(true)}
                 onOpenStreak={() => setShowStreakModal(true)}
@@ -1234,6 +1322,28 @@ export default function App() {
           exam={selectedExam}
           onCancel={() => setIsMatchmaking(false)}
           onReadyToFight={handleReadyToFight}
+          onPlayOffline={() => {
+            setIsMatchmaking(false);
+            setCurrentTab('practice');
+          }}
+        />
+      )}
+
+      {/* 1v1 Offline Warning Modal */}
+      {showOfflineWarningModal && (
+        <OfflineWarningModal
+          onClose={() => setShowOfflineWarningModal(false)}
+          onPlayOfflineDrill={() => {
+            setShowOfflineWarningModal(false);
+            setCurrentTab('practice');
+          }}
+          onOpenMistakeVault={() => {
+            setShowOfflineWarningModal(false);
+            setCurrentTab('mistakes');
+          }}
+          onConnectionRestored={() => {
+            setShowOfflineWarningModal(false);
+          }}
         />
       )}
 
@@ -1366,6 +1476,21 @@ export default function App() {
             if (typeof window !== 'undefined' && window.location.hash.includes('admin-pyq')) {
               window.location.hash = '';
             }
+          }}
+        />
+      )}
+
+      {/* SSC Vocab Guides & PYQ Hub Modal */}
+      {showSeoGuidesModal && (
+        <SeoGuidesModal
+          isOpen={showSeoGuidesModal}
+          onClose={() => setShowSeoGuidesModal(false)}
+          onSelectGuide={(slug) => {
+            setShowSeoGuidesModal(false);
+            if (typeof window !== 'undefined') {
+              window.history.pushState(null, '', slug);
+            }
+            setActiveSeoSlug(slug);
           }}
         />
       )}

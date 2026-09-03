@@ -24,9 +24,11 @@ import {
   User,
   Eye,
   EyeOff,
-  KeyRound
+  KeyRound,
+  WifiOff
 } from 'lucide-react';
 import { User as FirebaseUser } from 'firebase/auth';
+import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { 
   PlayerProfile, 
   QuestionCategory, 
@@ -78,6 +80,7 @@ export const FriendLobbyModal: React.FC<FriendLobbyModalProps> = ({
   onClose,
   onStartMatch,
 }) => {
+  const network = useNetworkStatus();
   const [activeTab, setActiveTab] = useState<'create' | 'join'>(initialCode ? 'join' : 'create');
   
   // Auth state for Sign-In Gate
@@ -254,6 +257,10 @@ export const FriendLobbyModal: React.FC<FriendLobbyModalProps> = ({
 
   // 1. Create a 6-Digit Lobby
   const handleCreateLobby = async () => {
+    if (!network.isOnline) {
+      soundManager.playWrong();
+      return;
+    }
     setIsCreating(true);
     soundManager.playTap();
 
@@ -276,6 +283,11 @@ export const FriendLobbyModal: React.FC<FriendLobbyModalProps> = ({
 
   // 2. Join a 6-Digit Lobby
   const handleJoinLobby = async () => {
+    if (!network.isOnline) {
+      setJoinError('You are offline. Please connect to the internet to join a friend room.');
+      soundManager.playWrong();
+      return;
+    }
     const fullCode = joinCodeDigits.join('').trim();
     if (fullCode.length !== 6) {
       setJoinError('Please enter all 6 digits of the room code.');
@@ -428,6 +440,19 @@ export const FriendLobbyModal: React.FC<FriendLobbyModalProps> = ({
             Duel your friends, study partners, or coaching mates on identical PYQs
           </p>
         </div>
+
+        {/* Offline Notice Banner */}
+        {!network.isOnline && (
+          <div className="mb-4 p-3 rounded-2xl bg-rose-950/80 border border-rose-500/40 text-rose-200 text-xs flex items-center gap-2.5 shadow-md">
+            <div className="w-8 h-8 rounded-xl bg-rose-500/20 flex items-center justify-center text-rose-400 shrink-0">
+              <WifiOff className="w-4 h-4" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-bold text-rose-200">Device is Offline</p>
+              <p className="text-[11px] text-rose-300/80">Connect to the internet to create or join a friend lobby.</p>
+            </div>
+          </div>
+        )}
 
         {/* IF IN ACTIVE LOBBY: SHOW LIVE STAGE */}
         {activeLobby ? (

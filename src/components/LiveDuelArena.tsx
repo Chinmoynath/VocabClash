@@ -20,6 +20,7 @@ import {
   LiveRoomFinalResult 
 } from '../services/realtimeMatchmaking';
 import { soundManager } from '../utils/audio';
+import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { 
   Zap, 
   Clock, 
@@ -31,7 +32,13 @@ import {
   LogOut, 
   AlertTriangle,
   Loader2,
-  Radio
+  Radio,
+  Wifi,
+  WifiOff,
+  RefreshCw,
+  Signal,
+  CheckCircle2,
+  BookOpen
 } from 'lucide-react';
 
 interface LiveDuelArenaProps {
@@ -88,6 +95,15 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
     isCorrect: boolean;
     points: number;
   }>({ answered: false, isCorrect: false, points: 0 });
+
+  // Network connection state & chess.com-style mid-match disconnection protection
+  const network = useNetworkStatus();
+  const [isDisconnected, setIsDisconnected] = useState<boolean>(!network.isOnline);
+  const [reconnectSecondsLeft, setReconnectSecondsLeft] = useState<number>(30);
+  const [isReconnectingCheck, setIsReconnectingCheck] = useState<boolean>(false);
+  const [showReconnectedToast, setShowReconnectedToast] = useState<boolean>(false);
+  const [isForfeitedDueToDisconnect, setIsForfeitedDueToDisconnect] = useState<boolean>(false);
+  const reconnectIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Powerups local state for current question
   const [eliminatedOptions, setEliminatedOptions] = useState<number[]>([]);
@@ -208,6 +224,89 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
       unsubscribe();
     };
   }, [isRealMatch, roomId, myPlayerId, oppPlayerId, currentQIndex, matchState.questions.length, onCompleteMatch]);
+
+  // Listen to network changes for mid-match disconnection handling (Chess.com style)
+  useEffect(() => {
+    if (!network.isOnline) {
+      setIsDisconnected(true);
+      setReconnectSecondsLeft(30);
+      soundManager.playWrong();
+    } else {
+      if (isDisconnected && !isForfeitedDueToDisconnect) {
+        setIsDisconnected(false);
+        setShowReconnectedToast(true);
+        soundManager.playCorrect();
+        const toastTimer = setTimeout(() => {
+          setShowReconnectedToast(false);
+        }, 3000);
+        return () => clearTimeout(toastTimer);
+      }
+    }
+  }, [network.isOnline, isDisconnected, isForfeitedDueToDisconnect]);
+
+  // Handle mid-match disconnection 30-second countdown grace timer
+  useEffect(() => {
+    if (isDisconnected && !isForfeitedDueToDisconnect && !hasCompletedRef.current) {
+      if (reconnectIntervalRef.current) clearInterval(reconnectIntervalRef.current);
+      reconnectIntervalRef.current = setInterval(() => {
+        setReconnectSecondsLeft(prev => {
+          if (prev <= 1) {
+            clearInterval(reconnectIntervalRef.current!);
+            handleDisconnectTimeout();
+            return 0;
+          }
+          if (prev <= 5) {
+            soundManager.playTick();
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    } else {
+      if (reconnectIntervalRef.current) clearInterval(reconnectIntervalRef.current);
+    }
+
+    return () => {
+      if (reconnectIntervalRef.current) clearInterval(reconnectIntervalRef.current);
+    };
+  }, [isDisconnected, isForfeitedDueToDisconnect]);
+
+  const handleDisconnectTimeout = () => {
+    setIsForfeitedDueToDisconnect(true);
+    hasCompletedRef.current = true;
+    soundManager.playWrong();
+
+    const pScore = currentLiveScoresRef.current.playerScore;
+    const oScore = currentLiveScoresRef.current.opponentScore;
+
+    if (isRealMatch && roomId) {
+      forfeitLiveRoom(roomId, myPlayerId).catch(() => {});
+      const finalResult: LiveRoomFinalResult = {
+        winnerId: oppPlayerId,
+        loserId: myPlayerId,
+        player1FinalScore: pScore,
+        player2FinalScore: oScore,
+        player1LPChange: -15,
+        player2LPChange: 30,
+        finalised: true,
+      };
+      forceFinalizeLiveRoom(roomId, myPlayerId, pScore, oScore, finalResult).catch(() => {});
+    }
+  };
+
+  const handleManualReconnectCheck = async () => {
+    setIsReconnectingCheck(true);
+    const result = await network.checkConnection();
+    setIsReconnectingCheck(false);
+
+    if (result.isOnline) {
+      setIsDisconnected(false);
+      setShowReconnectedToast(true);
+      soundManager.playCorrect();
+      setTimeout(() => setShowReconnectedToast(false), 3000);
+    } else {
+      soundManager.playWrong();
+    }
+  };
 
   const advanceToNextRound = () => {
     if (isRoundAdvancingRef.current) return;
@@ -402,9 +501,9 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
     };
   }, [currentQIndex, currentQuestion, isRealMatch]);
 
-  // Main countdown timer
+  // Main countdown timer (pauses automatically if disconnected)
   useEffect(() => {
-    if (isAnswered || isWaitingForOpponent) return;
+    if (isAnswered || isWaitingForOpponent || isDisconnected || isForfeitedDueToDisconnect) return;
 
     timerRef.current = setInterval(() => {
       setTimeRemaining(prev => {
@@ -424,7 +523,7 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [isAnswered, isTimeFrozen, currentQIndex, isWaitingForOpponent]);
+  }, [isAnswered, isTimeFrozen, currentQIndex, isWaitingForOpponent, isDisconnected, isForfeitedDueToDisconnect]);
 
   // Fallback safety timeout if waiting for opponent on last question
   useEffect(() => {
@@ -485,7 +584,7 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
   };
 
   const handleSelectOption = async (index: number) => {
-    if (isAnswered || isWaitingForOpponent || isRoundAdvancingRef.current) return;
+    if (isAnswered || isWaitingForOpponent || isRoundAdvancingRef.current || isDisconnected || isForfeitedDueToDisconnect) return;
     setIsAnswered(true);
     setSelectedOption(index);
 
@@ -622,7 +721,7 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
   // Keyboard hotkeys for fast desktop gameplay (1, 2, 3, 4 or A, B, C, D)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (isAnswered || !currentQuestion || isWaitingForOpponent) return;
+      if (isAnswered || !currentQuestion || isWaitingForOpponent || isDisconnected || isForfeitedDueToDisconnect) return;
       if (e.key === '1' || e.key === 'a' || e.key === 'A') {
         handleSelectOption(0);
       } else if (e.key === '2' || e.key === 'b' || e.key === 'B') {
@@ -636,7 +735,7 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isAnswered, currentQuestion, isWaitingForOpponent]);
+  }, [isAnswered, currentQuestion, isWaitingForOpponent, isDisconnected, isForfeitedDueToDisconnect]);
 
   if (!currentQuestion) {
     return (
@@ -695,6 +794,132 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
         </div>
       )}
 
+      {/* 1. MID-MATCH DISCONNECTION OVERLAY (Chess.com Style Grace Period) */}
+      {isDisconnected && !isForfeitedDueToDisconnect && (
+        <div className="fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-lg flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-sm bg-gradient-to-b from-slate-900 to-slate-950 border border-rose-500/40 rounded-3xl p-6 shadow-2xl relative overflow-hidden text-center space-y-4">
+            {/* Ambient disconnect pulse */}
+            <div className="absolute -top-16 -right-16 w-36 h-36 bg-rose-500/20 rounded-full blur-3xl pointer-events-none animate-pulse" />
+
+            {/* Disconnect Icon with radar pulse */}
+            <div className="relative mx-auto w-16 h-16 rounded-2xl bg-rose-500/20 border-2 border-rose-500/50 flex items-center justify-center text-rose-400 shadow-xl shadow-rose-950/60">
+              <WifiOff className="w-8 h-8 animate-pulse" />
+              <div className="absolute -inset-1 rounded-2xl border border-rose-400/30 animate-ping pointer-events-none" />
+            </div>
+
+            <div className="space-y-1.5">
+              <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-rose-500/15 border border-rose-500/30 text-rose-300 text-[10px] font-bold uppercase tracking-wider">
+                <AlertTriangle className="w-3 h-3 text-rose-400" />
+                <span>Connection Lost</span>
+              </div>
+              <h3 className="text-lg font-black text-white">
+                Reconnecting to 1v1 Battle...
+              </h3>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Match clock is paused. Please check your Wi-Fi or mobile data.
+              </p>
+            </div>
+
+            {/* Grace period countdown badge */}
+            <div className="p-3.5 bg-slate-950/90 rounded-2xl border border-slate-800 space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-400 font-medium">Reconnection Grace Timer:</span>
+                <span className="text-rose-400 font-mono font-black text-base">{reconnectSecondsLeft}s</span>
+              </div>
+              {/* Progress bar */}
+              <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                <div 
+                  className="bg-gradient-to-r from-rose-500 to-amber-500 h-full transition-all duration-1000"
+                  style={{ width: `${(reconnectSecondsLeft / 30) * 100}%` }}
+                />
+              </div>
+              <div className="text-[10px] text-slate-400 text-left">
+                If not reconnected within 30s, this match will be forfeited (-15 LP).
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="space-y-2 pt-1">
+              <button
+                onClick={handleManualReconnectCheck}
+                disabled={isReconnectingCheck}
+                className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 active:scale-[0.98] text-slate-950 font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg transition-all cursor-pointer disabled:opacity-60"
+              >
+                <RefreshCw className={`w-4 h-4 ${isReconnectingCheck ? 'animate-spin' : ''}`} />
+                <span>{isReconnectingCheck ? 'Testing Connection...' : 'Retry Connection Now'}</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  handleDisconnectTimeout();
+                }}
+                className="w-full py-2.5 px-4 rounded-xl bg-slate-800/80 hover:bg-rose-950/60 border border-slate-700 hover:border-rose-600/50 text-slate-300 hover:text-rose-200 text-xs font-bold transition-all cursor-pointer"
+              >
+                Surrender & Exit
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 2. FORFEITED BY DISCONNECTION RESULT SCREEN */}
+      {isForfeitedDueToDisconnect && (
+        <div className="fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-lg flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-sm bg-slate-900 border border-rose-500/40 rounded-3xl p-6 shadow-2xl text-center space-y-4">
+            <div className="w-16 h-16 rounded-2xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center text-rose-400 mx-auto text-3xl">
+              ⚔️
+            </div>
+
+            <div className="space-y-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                Match Forfeited
+              </span>
+              <h3 className="text-xl font-black text-white">
+                Defeat by Disconnection
+              </h3>
+              <p className="text-xs text-slate-400">
+                The 30-second reconnection grace period expired while device was offline.
+              </p>
+            </div>
+
+            <div className="p-3 bg-slate-950/80 rounded-2xl border border-slate-800 flex items-center justify-between text-xs">
+              <span className="text-slate-400">LP Rating Change:</span>
+              <span className="text-rose-400 font-mono font-black text-sm">-15 LP</span>
+            </div>
+
+            <div className="space-y-2 pt-2">
+              <button
+                onClick={() => {
+                  soundManager.playTap();
+                  onLeaveMatch();
+                }}
+                className="w-full py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700 text-white font-black text-xs uppercase tracking-wider transition-all cursor-pointer"
+              >
+                Return to Arena Lobby
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 3. RECONNECTED TOAST */}
+      {showReconnectedToast && (
+        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 bg-emerald-950/95 border border-emerald-500/60 text-emerald-200 px-4 py-2 rounded-full shadow-2xl flex items-center gap-2 text-xs font-bold animate-in slide-in-from-top duration-300">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+          <span>Connection Restored! Resuming 1v1 Battle...</span>
+        </div>
+      )}
+
+      {/* Opponent Disconnected Notice Banner (Real Player Match) */}
+      {isRealMatch && opponentLeft && (
+        <div className="bg-amber-950/90 border border-amber-500/50 rounded-2xl p-2.5 text-amber-200 text-xs flex items-center justify-between gap-2 shadow-md">
+          <div className="flex items-center gap-2">
+            <Radio className="w-4 h-4 text-amber-400 animate-pulse" />
+            <span className="font-bold">Opponent left the match! Your final score will determine the victory.</span>
+          </div>
+        </div>
+      )}
+
       {/* TOP: Split Live Score Arena Header & Leave Match Option */}
       <div className="space-y-2 sm:space-y-2.5 shrink-0">
         {/* Round number, Leave Match Button & Exam tag */}
@@ -719,6 +944,16 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
               <span className="text-amber-400 uppercase font-mono text-[10px] sm:text-xs">
                 {currentQuestion.category}
               </span>
+            </div>
+
+            {/* Network Latency & Quality Pill */}
+            <div className={`hidden xs:flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-mono font-bold border ${
+              network.isOnline 
+                ? 'bg-emerald-950/80 text-emerald-400 border-emerald-500/40' 
+                : 'bg-rose-950/80 text-rose-400 border-rose-500/40'
+            }`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${network.isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
+              <span>{network.isOnline ? (network.pingMs ? `${network.pingMs}ms` : 'Online') : 'Offline'}</span>
             </div>
 
             {isRealMatch && (

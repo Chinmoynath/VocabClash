@@ -34,6 +34,7 @@ interface DesktopSidebarProps {
   onOpenStreak: () => void;
   onOpenStats?: () => void;
   onOpenTour?: () => void;
+  onOpenGuides?: () => void;
 }
 
 export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
@@ -49,6 +50,7 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
   onOpenStreak,
   onOpenStats,
   onOpenTour,
+  onOpenGuides,
 }) => {
   const navItems = [
     {
@@ -187,7 +189,21 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
             </div>
           </button>
 
-          {onOpenStats ? (
+          {onOpenGuides ? (
+            <button
+              onClick={() => {
+                soundManager.playTap();
+                onOpenGuides();
+              }}
+              className="flex items-center gap-1.5 p-2 rounded-xl bg-slate-900/80 hover:bg-slate-850 border border-amber-500/30 hover:border-amber-400/70 text-xs font-bold text-slate-200 transition-all text-left group"
+              title="SSC Vocabulary Guides & 2018-2025 PYQ Analysis"
+            >
+              <BookOpen className="w-4 h-4 text-amber-400 shrink-0 group-hover:scale-110 transition-transform" />
+              <div className="text-left leading-tight truncate">
+                <span className="text-amber-400 font-bold">Guides</span> Hub
+              </div>
+            </button>
+          ) : onOpenStats ? (
             <button
               onClick={() => {
                 soundManager.playTap();

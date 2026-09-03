@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { PlayerProfile, ExamType, QuestionCategory, Question } from '../types';
 import { soundManager } from '../utils/audio';
 import { realtimeMatchmaker, MatchSuccessResult } from '../services/realtimeMatchmaking';
-import { Swords, X, Radio } from 'lucide-react';
+import { useNetworkStatus } from '../hooks/useNetworkStatus';
+import { Swords, X, Radio, WifiOff, RefreshCw, BookOpen } from 'lucide-react';
 
 interface MatchmakingModalProps {
   player: PlayerProfile;
@@ -17,6 +18,7 @@ interface MatchmakingModalProps {
     matchedQuestions?: Question[], 
     sharedRoomId?: string
   ) => void;
+  onPlayOffline?: () => void;
 }
 
 export const MatchmakingModal: React.FC<MatchmakingModalProps> = ({
@@ -27,7 +29,9 @@ export const MatchmakingModal: React.FC<MatchmakingModalProps> = ({
   exam,
   onCancel,
   onReadyToFight,
+  onPlayOffline,
 }) => {
+  const network = useNetworkStatus();
   const [searchStep, setSearchStep] = useState<number>(0);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [matchedOpponent, setMatchedOpponent] = useState<PlayerProfile | null>(null);
@@ -35,12 +39,13 @@ export const MatchmakingModal: React.FC<MatchmakingModalProps> = ({
   const [matchedQuestions, setMatchedQuestions] = useState<Question[] | undefined>(undefined);
   const [sharedRoomId, setSharedRoomId] = useState<string | undefined>(undefined);
   const [searchSecondsLeft, setSearchSecondsLeft] = useState<number>(5);
+  const [isRetryingOffline, setIsRetryingOffline] = useState<boolean>(false);
 
   const isMatchedRef = useRef<boolean>(false);
 
   // Active 5s search countdown visual
   useEffect(() => {
-    if (searchStep >= 2) return;
+    if (searchStep >= 2 || !network.isOnline) return;
     setSearchSecondsLeft(5);
     const interval = setInterval(() => {
       setSearchSecondsLeft(prev => {
@@ -52,9 +57,14 @@ export const MatchmakingModal: React.FC<MatchmakingModalProps> = ({
       });
     }, 1000);
     return () => clearInterval(interval);
-  }, [searchStep]);
+  }, [searchStep, network.isOnline]);
 
   useEffect(() => {
+    if (!network.isOnline) {
+      realtimeMatchmaker.cancelMatchmaking();
+      return;
+    }
+
     isMatchedRef.current = false;
     const roundCount = mode === 'quick_duel' ? 10 : 20;
 
@@ -95,7 +105,7 @@ export const MatchmakingModal: React.FC<MatchmakingModalProps> = ({
     return () => {
       realtimeMatchmaker.cancelMatchmaking();
     };
-  }, [player, category, exam, mode, initialBotOpponent]);
+  }, [player, category, exam, mode, initialBotOpponent, network.isOnline]);
 
   // Countdown timer once match is found (3... 2... 1... GO!)
   useEffect(() => {
@@ -135,7 +145,56 @@ export const MatchmakingModal: React.FC<MatchmakingModalProps> = ({
           </button>
         )}
 
-        {searchStep < 2 ? (
+        {!network.isOnline && searchStep < 2 ? (
+          /* Offline Search Interrupted View */
+          <div className="py-6 space-y-4 flex flex-col items-center w-full">
+            <div className="w-16 h-16 rounded-2xl bg-rose-500/15 border-2 border-rose-500/40 flex items-center justify-center text-rose-400 mx-auto animate-pulse">
+              <WifiOff className="w-8 h-8" />
+            </div>
+
+            <div className="space-y-1.5">
+              <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-rose-500/15 border border-rose-500/30 text-rose-300 text-[10px] font-bold uppercase tracking-wider">
+                <span>Search Paused • Offline</span>
+              </div>
+              <h3 className="text-lg font-black text-white">
+                No Internet Connection
+              </h3>
+              <p className="text-xs text-slate-300 leading-relaxed px-2">
+                1v1 matchmaking requires an active internet connection to match aspirants.
+              </p>
+            </div>
+
+            <div className="w-full space-y-2 pt-2">
+              {onPlayOffline && (
+                <button
+                  onClick={() => {
+                    soundManager.playTap();
+                    onCancel();
+                    onPlayOffline();
+                  }}
+                  className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg transition-all cursor-pointer"
+                >
+                  <BookOpen className="w-4 h-4" />
+                  <span>Play Solo Practice Offline</span>
+                </button>
+              )}
+
+              <button
+                onClick={async () => {
+                  soundManager.playTap();
+                  setIsRetryingOffline(true);
+                  await network.checkConnection();
+                  setIsRetryingOffline(false);
+                }}
+                disabled={isRetryingOffline}
+                className="w-full py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700 text-slate-200 hover:text-white font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-amber-400 ${isRetryingOffline ? 'animate-spin' : ''}`} />
+                <span>{isRetryingOffline ? 'Checking connection...' : 'Retry Connection'}</span>
+              </button>
+            </div>
+          </div>
+        ) : searchStep < 2 ? (
           /* Radar Scanning View */
           <div className="py-7 space-y-5 flex flex-col items-center w-full">
             {/* Animated Radar */}
