@@ -1,11 +1,14 @@
 [
   {
-    "relation": ["delegate_permission/common.handle_all_urls"],
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
     "target": {
       "namespace": "android_app",
       "package_name": "in.vocabclash.twa",
-      "sha256_cert_fingerprints":
-        ["83:CE:2F:71:CC:C9:1E:3E:4C:E8:A4:F9:53:12:AE:D4:15:21:E1:E4:52:2E:C7:A8:1B:F4:94:50:53:22:DE:59"]
+      "sha256_cert_fingerprints": [
+        "8A:AA:DD:25:24:2A:71:3F:22:90:BE:97:22:54:7D:FD:F4:6D:D5:A6:5D:C8:7B:39:9B:F8:2D:46:15:13:98:31"
+      ]
     }
   }
 ]
