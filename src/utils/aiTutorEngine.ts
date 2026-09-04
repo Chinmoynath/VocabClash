@@ -12,7 +12,7 @@ export interface AiAnalysisResult {
   relatedWords: string[];
 }
 
-interface WordKnowledge {
+export interface WordKnowledge {
   meaning: string;
   hindiMeaning: string;
   partOfSpeech: string;
@@ -23,7 +23,7 @@ interface WordKnowledge {
   related: string[];
 }
 
-const VOCAB_KNOWLEDGE_BASE: Record<string, WordKnowledge> = {
+export const VOCAB_KNOWLEDGE_BASE: Record<string, WordKnowledge> = {
   taciturn: {
     meaning: "Reserved or uncommunicative in speech; saying little.",
     hindiMeaning: "अल्पभाषी / कम बोलने वाला (Silent & Reserved)",

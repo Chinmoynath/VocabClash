@@ -29,9 +29,9 @@ import {
 import firebaseConfig from '../../firebase-applet-config.json';
 import { PlayerProfile, UserSubscription, DailyStreakState, SavedWord } from '../types';
 
-// Suppress internal connection retry warnings
+// Suppress internal Firestore connection retry & offline warnings
 try {
-  setLogLevel('error');
+  setLogLevel('silent');
 } catch {
   // Ignore in environments where setLogLevel is not available
 }
@@ -51,13 +51,13 @@ export function createGoogleProvider(): GoogleAuthProvider {
 
 export const googleProvider = createGoogleProvider();
 
-// Initialize Firestore with long polling to ensure immediate, stable connections in sandboxed iframe & container environments
+// Initialize Firestore with auto-detect long polling to establish fast streams and gracefully fallback
 let dbInstance: ReturnType<typeof getFirestore>;
 try {
   dbInstance = initializeFirestore(
     app,
     {
-      experimentalForceLongPolling: true,
+      experimentalAutoDetectLongPolling: true,
     },
     firebaseConfig.firestoreDatabaseId || undefined
   );

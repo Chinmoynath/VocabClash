@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Question } from '../types';
 import { soundManager } from '../utils/audio';
 import { generateSmartAnalysis, AiAnalysisResult } from '../utils/aiTutorEngine';
+import { auth } from '../services/firebaseService';
 import { 
   Sparkles, 
   X, 
@@ -13,47 +14,115 @@ import {
   Search,
   ChevronRight,
   BookMarked,
-  Languages
+  Languages,
+  Crown
 } from 'lucide-react';
+
+interface DailyUsageInfo {
+  used: number;
+  limit: number;
+  remaining: number;
+  isPremium: boolean;
+}
 
 interface AiTutorModalProps {
   question: Question | null;
   onClose: () => void;
+  onOpenPremium?: () => void;
 }
 
-export const AiTutorModal: React.FC<AiTutorModalProps> = ({ question, onClose }) => {
+export const AiTutorModal: React.FC<AiTutorModalProps> = ({ question, onClose, onOpenPremium }) => {
   const [customWord, setCustomWord] = useState<string>('');
   const [activeWord, setActiveWord] = useState<string>(question?.wordOrPhrase || 'TACITURN');
   const [activeCategory, setActiveCategory] = useState<string>(question?.category || 'antonyms');
   const [loading, setLoading] = useState<boolean>(false);
+  const [dailyUsage, setDailyUsage] = useState<DailyUsageInfo | null>(null);
+  const [limitNotice, setLimitNotice] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<AiAnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const fetchUsageStats = async () => {
+    try {
+      const user = auth.currentUser;
+      const token = user ? await user.getIdToken() : undefined;
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      const url = user ? `/api/gemini/usage?userId=${encodeURIComponent(user.uid)}` : '/api/gemini/usage';
+      const res = await fetch(url, { headers });
+      if (res.ok) {
+        const data = await res.json();
+        setDailyUsage({
+          used: data.used ?? 0,
+          limit: data.limit ?? 5,
+          remaining: data.remaining ?? 5,
+          isPremium: Boolean(data.isPremium),
+        });
+      }
+    } catch (e) {
+      console.warn('Failed to fetch AI usage stats:', e);
+    }
+  };
+
+  useEffect(() => {
+    fetchUsageStats();
+  }, []);
 
   const fetchAnalysis = async (word: string, category: string) => {
     setLoading(true);
     setError(null);
+    setLimitNotice(null);
 
     try {
+      const user = auth.currentUser;
+      const token = user ? await user.getIdToken() : undefined;
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       const res = await fetch('/api/gemini/explain', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           wordOrPhrase: word,
           category: category,
           meaning: question?.meaning || 'Exam vocabulary term',
           examHistory: question?.examHistory || ['SSC CGL 2023', 'RRB NTPC'],
+          userId: user?.uid,
         }),
       });
 
+      const data = await res.json();
+
+      if (res.status === 429 || data.limitReached) {
+        setLimitNotice(data.message || 'Daily AI explanation limit reached.');
+        if (data.used !== undefined) {
+          setDailyUsage(prev => ({
+            used: data.used,
+            limit: data.limit,
+            remaining: 0,
+            isPremium: Boolean(data.isPremium),
+          }));
+        }
+        return;
+      }
+
       if (res.ok) {
-        const data = await res.json();
+        if (data.dailyUsage) {
+          setDailyUsage(data.dailyUsage);
+        } else {
+          fetchUsageStats();
+        }
+
         if (data.analysis && data.analysis.mnemonicHook) {
           setAnalysis(data.analysis);
           return;
         }
       }
       
-      // If server returned error or non-200, use smart knowledge engine
+      // Fallback to local offline smart engine if server had an error
       const smartResult = generateSmartAnalysis(word, category);
       setAnalysis(smartResult);
     } catch (err: unknown) {
@@ -94,7 +163,14 @@ export const AiTutorModal: React.FC<AiTutorModalProps> = ({ question, onClose })
             </div>
             <div>
               <h3 className="font-extrabold text-sm text-slate-100">AI Exam Vocabulary Coach</h3>
-              <p className="text-[10px] text-purple-300">Powered by Gemini 3.7 Flash</p>
+              <div className="flex items-center gap-2">
+                <p className="text-[10px] text-purple-300">Gemini Flash AI</p>
+                {dailyUsage && (
+                  <span className="text-[10px] text-slate-400">
+                    • Quota: <strong className={dailyUsage.remaining === 0 ? 'text-amber-400' : 'text-emerald-400'}>{dailyUsage.used}/{dailyUsage.limit}</strong>
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
@@ -108,6 +184,35 @@ export const AiTutorModal: React.FC<AiTutorModalProps> = ({ question, onClose })
             <X className="w-4 h-4" />
           </button>
         </div>
+
+        {/* Limit Warning if reached */}
+        {limitNotice && (
+          <div className="bg-amber-950/40 border border-amber-500/50 rounded-2xl p-3.5 text-xs text-amber-200 flex flex-col gap-2 shadow-lg">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold text-amber-300">Daily Limit Reached</p>
+                <p className="text-slate-300 text-[11px] leading-relaxed mt-0.5">{limitNotice}</p>
+                <p className="text-slate-400 text-[10px] mt-1">
+                  Cached words & PYQ terms are always free and unlimited!
+                </p>
+              </div>
+            </div>
+            {onOpenPremium && !dailyUsage?.isPremium && (
+              <button
+                type="button"
+                onClick={() => {
+                  soundManager.playTap();
+                  onOpenPremium();
+                }}
+                className="self-start mt-1 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-extrabold text-xs px-3.5 py-1.5 rounded-xl shadow transition-all flex items-center gap-1.5"
+              >
+                <Crown className="w-3.5 h-3.5" />
+                <span>Upgrade to Pro (50/day)</span>
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Search any word */}
         <form onSubmit={handleSearchCustom} className="flex gap-2">

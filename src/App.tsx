@@ -1259,7 +1259,7 @@ export default function App() {
             )}
 
             {currentTab === 'ai_coach' && (
-              <AiTutorTab />
+              <AiTutorTab onOpenPremium={() => setShowPremiumModal(true)} />
             )}
           </>
         )}
@@ -1352,6 +1352,7 @@ export default function App() {
         <AiTutorModal
           question={activeAiQuestion}
           onClose={() => setShowAiModal(false)}
+          onOpenPremium={() => setShowPremiumModal(true)}
         />
       )}
 

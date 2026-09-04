@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { soundManager } from '../utils/audio';
 import { generateSmartAnalysis, AiAnalysisResult } from '../utils/aiTutorEngine';
+import { auth } from '../services/firebaseService';
 import { 
   Sparkles, 
   BookOpen, 
@@ -13,7 +14,8 @@ import {
   Brain,
   GraduationCap,
   BookMarked,
-  Languages
+  Languages,
+  Crown
 } from 'lucide-react';
 
 const SUGGESTED_EXAM_WORDS = [
@@ -27,32 +29,102 @@ const SUGGESTED_EXAM_WORDS = [
   { word: 'CANDID', category: 'antonyms', tag: 'Top PYQ' }
 ];
 
-export const AiTutorTab: React.FC = () => {
+interface DailyUsageInfo {
+  used: number;
+  limit: number;
+  remaining: number;
+  isPremium: boolean;
+}
+
+interface AiTutorTabProps {
+  onOpenPremium?: () => void;
+}
+
+export const AiTutorTab: React.FC<AiTutorTabProps> = ({ onOpenPremium }) => {
   const [searchInput, setSearchInput] = useState<string>('');
   const [activeWord, setActiveWord] = useState<string>('TACITURN');
   const [activeCategory, setActiveCategory] = useState<string>('antonyms');
   const [loading, setLoading] = useState<boolean>(false);
+  const [dailyUsage, setDailyUsage] = useState<DailyUsageInfo | null>(null);
+  const [limitNotice, setLimitNotice] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<AiAnalysisResult | null>(() => 
     generateSmartAnalysis('TACITURN', 'antonyms')
   );
 
+  const fetchUsageStats = async () => {
+    try {
+      const user = auth.currentUser;
+      const token = user ? await user.getIdToken() : undefined;
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      const url = user ? `/api/gemini/usage?userId=${encodeURIComponent(user.uid)}` : '/api/gemini/usage';
+      const res = await fetch(url, { headers });
+      if (res.ok) {
+        const data = await res.json();
+        setDailyUsage({
+          used: data.used ?? 0,
+          limit: data.limit ?? 5,
+          remaining: data.remaining ?? 5,
+          isPremium: Boolean(data.isPremium),
+        });
+      }
+    } catch (e) {
+      console.warn('Failed to fetch AI usage stats:', e);
+    }
+  };
+
+  useEffect(() => {
+    fetchUsageStats();
+  }, []);
+
   const fetchAnalysis = async (word: string, category: string) => {
     setLoading(true);
+    setLimitNotice(null);
 
     try {
+      const user = auth.currentUser;
+      const token = user ? await user.getIdToken() : undefined;
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       const res = await fetch('/api/gemini/explain', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           wordOrPhrase: word,
           category: category,
           meaning: 'Exam vocabulary term',
           examHistory: ['SSC CGL 2024', 'SSC CPO', 'RRB NTPC'],
+          userId: user?.uid,
         }),
       });
 
+      const data = await res.json();
+
+      if (res.status === 429 || data.limitReached) {
+        setLimitNotice(data.message || 'Daily AI limit reached for today.');
+        if (data.used !== undefined) {
+          setDailyUsage(prev => ({
+            used: data.used,
+            limit: data.limit,
+            remaining: 0,
+            isPremium: Boolean(data.isPremium),
+          }));
+        }
+        return;
+      }
+
       if (res.ok) {
-        const data = await res.json();
+        if (data.dailyUsage) {
+          setDailyUsage(data.dailyUsage);
+        } else {
+          fetchUsageStats();
+        }
+
         if (data.analysis && data.analysis.mnemonicHook) {
           setAnalysis(data.analysis);
           return;
@@ -89,7 +161,7 @@ export const AiTutorTab: React.FC = () => {
   return (
     <div className="p-3.5 sm:p-5 lg:p-6 space-y-4 pb-8 max-w-5xl mx-auto w-full">
       {/* Header Banner */}
-      <div className="bg-gradient-to-r from-purple-950/80 via-slate-900 to-indigo-950/80 border border-purple-800/40 rounded-2xl p-4 sm:p-5 shadow-lg flex items-center justify-between">
+      <div className="bg-gradient-to-r from-purple-950/80 via-slate-900 to-indigo-950/80 border border-purple-800/40 rounded-2xl p-4 sm:p-5 shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <span className="p-1.5 rounded-lg bg-purple-600/30 text-purple-400 border border-purple-500/40">
@@ -106,7 +178,56 @@ export const AiTutorTab: React.FC = () => {
             Instant Hinglish root word mnemonics, repeat trends & exam traps.
           </p>
         </div>
+
+        {/* Daily Quota Indicator */}
+        {dailyUsage && (
+          <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-1 shrink-0 bg-slate-900/90 sm:bg-transparent p-2 sm:p-0 rounded-xl border border-purple-900/30 sm:border-0">
+            <div className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-950/80 border border-purple-500/40 text-purple-200 shadow-inner">
+              {dailyUsage.isPremium ? (
+                <Crown className="w-3.5 h-3.5 text-amber-400" />
+              ) : (
+                <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+              )}
+              <span>AI Quota:</span>
+              <span className={dailyUsage.remaining === 0 ? 'text-amber-400 font-bold' : 'text-emerald-400 font-bold'}>
+                {dailyUsage.used} / {dailyUsage.limit}
+              </span>
+            </div>
+            <span className="text-[10px] text-slate-400 font-medium">
+              {dailyUsage.isPremium ? 'VocabClash Pro (50/day)' : 'Free Tier (5/day)'}
+            </span>
+          </div>
+        )}
       </div>
+
+      {/* Daily Limit Notice Banner */}
+      {limitNotice && (
+        <div className="bg-amber-950/40 border border-amber-500/50 rounded-2xl p-3.5 sm:p-4 text-xs text-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg">
+          <div className="flex items-start gap-2.5">
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold text-amber-300">Daily AI Limit Reached</p>
+              <p className="text-slate-300 text-[11px] leading-relaxed mt-0.5">{limitNotice}</p>
+              <p className="text-slate-400 text-[10px] mt-1">
+                Tip: All question bank terms and cached words remain 100% accessible!
+              </p>
+            </div>
+          </div>
+          {onOpenPremium && !dailyUsage?.isPremium && (
+            <button
+              type="button"
+              onClick={() => {
+                soundManager.playTap();
+                onOpenPremium();
+              }}
+              className="bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-extrabold text-xs px-3.5 py-2 rounded-xl shadow-md transition-all shrink-0 cursor-pointer self-start sm:self-center flex items-center gap-1.5"
+            >
+              <Crown className="w-3.5 h-3.5" />
+              <span>Upgrade to Pro (50/day)</span>
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Search Bar */}
       <form onSubmit={handleSearch} className="flex gap-2">

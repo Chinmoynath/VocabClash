@@ -65,5 +65,19 @@ service cloud.firestore {
     match /pyq_import_conflicts/{conflictId} {
       allow read, write: if isPyqAdmin();
     }
+
+    // Global Shared AI Tutor Cache: Public read, server/client cache writes
+    match /ai_tutor_cache/{wordId} {
+      allow read, write: if true;
+    }
+
+    // AI Tutor Daily Usage Tracking (Asia/Kolkata date shards)
+    match /ai_tutor_usage/{uid} {
+      allow read, write: if true;
+
+      match /days/{dateId} {
+        allow read, write: if true;
+      }
+    }
   }
 }
