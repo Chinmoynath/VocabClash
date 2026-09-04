@@ -158,45 +158,6 @@
         "updatedAt": { "type": "number", "description": "Timestamp updated in ms" }
       },
       "required": ["id", "uid", "name", "rankPoints", "updatedAt"]
-    },
-    "AiTutorCacheItem": {
-      "title": "AiTutorCacheItem",
-      "description": "Shared global cache for AI Tutor vocabulary explanations with Hinglish mnemonics, roots, and exam trap tips",
-      "type": "object",
-      "properties": {
-        "word": { "type": "string", "description": "Original vocabulary word or phrase" },
-        "normalizedWord": { "type": "string", "description": "Clean lowercase trimmed lookup key" },
-        "meaning": { "type": "string", "description": "English meaning and definition" },
-        "definition": { "type": "string", "description": "Alias for meaning" },
-        "hindiMeaning": { "type": "string", "description": "Hindi translation and meaning" },
-        "partOfSpeech": { "type": "string", "description": "Grammatical part of speech" },
-        "rootEtymology": { "type": "string", "description": "Root word origins, prefix/suffix breakdown" },
-        "rootWord": { "type": "string", "description": "Alias for rootEtymology" },
-        "mnemonicHook": { "type": "string", "description": "Hinglish memory hook / mnemonic trick" },
-        "mnemonic": { "type": "string", "description": "Alias for mnemonicHook" },
-        "examTrapTip": { "type": "string", "description": "Exam insight and common trap tips" },
-        "examInsight": { "type": "string", "description": "Alias for examTrapTip" },
-        "sampleUsage": { "type": "string", "description": "Contextual usage sentence" },
-        "example": { "type": "string", "description": "Alias for sampleUsage" },
-        "relatedWords": { "type": "array", "description": "Synonyms, antonyms, and related words" },
-        "generatedBy": { "type": "string", "description": "gemini, pyq_store, or system" },
-        "schemaVersion": { "type": "number", "description": "Schema version" },
-        "createdAt": { "type": "number", "description": "Timestamp created in ms" },
-        "updatedAt": { "type": "number", "description": "Timestamp updated in ms" }
-      },
-      "required": ["word", "normalizedWord", "meaning", "hindiMeaning", "mnemonicHook", "rootEtymology"]
-    },
-    "AiTutorDailyUsage": {
-      "title": "AiTutorDailyUsage",
-      "description": "Daily count of successful new AI Tutor Gemini generations per user",
-      "type": "object",
-      "properties": {
-        "uid": { "type": "string", "description": "Authenticated user UID" },
-        "date": { "type": "string", "description": "Date string in Asia/Kolkata timezone (YYYY-MM-DD)" },
-        "successfulGenerations": { "type": "number", "description": "Count of successful new Gemini generations used today" },
-        "updatedAt": { "type": "number", "description": "Timestamp updated in ms" }
-      },
-      "required": ["uid", "date", "successfulGenerations"]
     }
   },
   "firestore": {
@@ -235,14 +196,6 @@
     "/pyq_import_batches/{batchId}": {
       "schema": "PyqImportBatch",
       "description": "Admin batch ingestion logs and tracking"
-    },
-    "/ai_tutor_cache/{wordId}": {
-      "schema": "AiTutorCacheItem",
-      "description": "Global shared cache for VocabClash AI Tutor vocabulary explanations"
-    },
-    "/ai_tutor_usage/{uid}/days/{dateId}": {
-      "schema": "AiTutorDailyUsage",
-      "description": "Per-user daily quota and usage tracking for AI Tutor"
     }
   }
 }

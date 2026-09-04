@@ -7,7 +7,6 @@ import nodemailer from 'nodemailer';
 import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import { processPyqEnrichmentBatch } from './server/pyqEnrichmentLogic';
-import { handleAiTutorExplain, handleAiTutorUsage } from './server/aiTutorService';
 
 dotenv.config();
 
@@ -959,32 +958,96 @@ const handleEnrichmentRequest = async (req: express.Request, res: express.Respon
 app.post('/api/gemini/enrich-pyq', handleEnrichmentRequest);
 app.post('/api/gemini/enrich-pyq-batch', handleEnrichmentRequest);
 
-// Scalable AI Tutor Vocabulary Explanation Endpoint with Shared Firestore Cache & Quotas
+// Gemini AI Tutor Vocabulary Explanation Endpoint
 app.post('/api/gemini/explain', async (req, res) => {
-  try {
-    const result = await handleAiTutorExplain(getGenAI(), req.body, req.headers.authorization);
-    return res.status(result.status).json(result.body);
-  } catch (error: any) {
-    console.error('Error in /api/gemini/explain:', error);
-    return res.status(500).json({
-      error: 'internal_error',
-      message: 'Failed to process AI Tutor explanation request',
-    });
+  const { wordOrPhrase, category, meaning, examHistory } = req.body;
+  if (!wordOrPhrase) {
+    return res.status(400).json({ error: 'Word or phrase is required' });
   }
-});
 
-// AI Tutor Daily Usage Query Endpoint
-app.get('/api/gemini/usage', async (req, res) => {
-  try {
-    const result = await handleAiTutorUsage(req.headers.authorization, req.query.userId as string);
-    return res.status(result.status).json(result.body);
-  } catch (error: any) {
-    console.error('Error in /api/gemini/usage:', error);
-    return res.status(500).json({
-      error: 'internal_error',
-      message: 'Failed to fetch AI Tutor usage data',
-    });
+  const prompt = `You are an expert English Faculty for SSC CGL, CHSL, CPO, CDS & Banking Govt examinations in India.
+Analyze the following English vocabulary term for an aspirant preparing for SSC/Govt exams:
+Word/Phrase: "${wordOrPhrase}"
+Category: "${category || 'General Vocabulary'}"
+Context Meaning: "${meaning || ''}"
+Past Exam Appearances: "${Array.isArray(examHistory) ? examHistory.join(', ') : (examHistory || 'SSC CGL')}"
+
+Respond strictly with a JSON object in this exact schema without markdown formatting or code fences:
+{
+  "meaning": "clear, precise, and complete English dictionary and exam definition of the word/phrase",
+  "hindiMeaning": "accurate Hindi meaning with Devanagari script and clear explanation (e.g. अल्पभाषी / कम बोलने वाला)",
+  "partOfSpeech": "part of speech (e.g. Adjective, Noun, Verb, Adverb, Idiom/Phrase)",
+  "rootEtymology": "concise root word origin, Latin/Greek components and meanings in 1-2 lines",
+  "mnemonicHook": "a clever, humorous, or highly effective memory trick / Hinglish trick (like how KD Campus / Neetu Singh / Jaideep Sir teach) to never forget this word",
+  "examTrapTip": "common traps set by TCS / SSC examiners (e.g. confuse with similar sounding words, synonym vs antonym trap)",
+  "sampleUsage": "a crisp sentence demonstrating authentic usage in an administrative / exam context",
+  "relatedWords": ["word1", "word2", "word3", "word4"]
+}`;
+
+  const ai = getGenAI();
+  if (ai) {
+    // Model candidates with fallback if a model experiences high traffic (503)
+    const modelCandidates = ['gemini-3.1-flash-lite', 'gemini-3.7-flash', 'gemini-flash-latest'];
+    for (const modelName of modelCandidates) {
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          const response = await ai.models.generateContent({
+            model: modelName,
+            contents: prompt,
+            config: {
+              responseMimeType: 'application/json',
+            },
+          });
+
+          const responseText = response.text || '';
+          if (responseText) {
+            let parsedData: any = null;
+            try {
+              parsedData = JSON.parse(responseText.trim());
+            } catch {
+              const cleaned = responseText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+              try {
+                parsedData = JSON.parse(cleaned);
+              } catch {
+                const firstBrace = cleaned.indexOf('{');
+                const lastBrace = cleaned.lastIndexOf('}');
+                if (firstBrace !== -1 && lastBrace > firstBrace) {
+                  try {
+                    parsedData = JSON.parse(cleaned.substring(firstBrace, lastBrace + 1));
+                  } catch {}
+                }
+              }
+            }
+            if (parsedData && (parsedData.mnemonicHook || parsedData.rootEtymology)) {
+              return res.json({ analysis: parsedData });
+            }
+          }
+        } catch (err: any) {
+          const isTransient = err?.status === 503 || err?.status === 429 || err?.message?.includes('503') || err?.message?.includes('429');
+          if (attempt === 1 && isTransient) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+            continue;
+          }
+          console.warn(`[GEMINI EXPLAIN] Model ${modelName} unavailable (${err?.status || err?.message}), trying next candidate...`);
+          break;
+        }
+      }
+    }
   }
+
+  // Graceful structured response if API key is not configured or all live model endpoints are experiencing temporary spikes
+  res.json({
+    analysis: {
+      meaning: `Primary definition and competitive exam usage context for "${wordOrPhrase}".`,
+      hindiMeaning: `महत्वपूर्ण परीक्षा शब्दावली अर्थ / सटीक हिंदी भावार्थ`,
+      partOfSpeech: `Vocabulary Term`,
+      rootEtymology: `Derived from classical roots frequently appearing in SSC CGL, CHSL & Banking exams. Focus on root affixes to decode antonyms/synonyms instantly.`,
+      mnemonicHook: `Memory Hook: Connect "${wordOrPhrase}" phonetically with an everyday Hindi phrase or vivid mental image to lock it into long-term memory.`,
+      examTrapTip: `High-frequency in SSC Tier-1 & Tier-2 shifts. Watch out for near-synonym options engineered to mislead hurried candidates.`,
+      sampleUsage: `The candidate demonstrated thorough mastery of "${wordOrPhrase}" in the competitive examination.`,
+      relatedWords: ['High-Frequency PYQ', 'Exam Pair', 'Root Cognate', 'Repeated Term']
+    }
+  });
 });
 
 // Monetag Service Worker Verification & Ad Delivery Endpoint
