@@ -10,6 +10,9 @@ export interface AiAnalysisResult {
   examTrapTip: string;
   sampleUsage: string;
   relatedWords: string[];
+  phonetic?: string;
+  synonyms?: string[];
+  antonyms?: string[];
 }
 
 interface WordKnowledge {
@@ -176,12 +179,12 @@ const VOCAB_KNOWLEDGE_BASE: Record<string, WordKnowledge> = {
   }
 };
 
-export function generateSmartAnalysis(word: string, category: string): AiAnalysisResult {
+export function generateSmartAnalysis(word: string, _category?: string): AiAnalysisResult | null {
   const cleanWord = word.trim().toLowerCase();
   
-  // 1. Direct match in curated knowledge base
+  // Direct match in curated knowledge base
   for (const [key, data] of Object.entries(VOCAB_KNOWLEDGE_BASE)) {
-    if (cleanWord === key || cleanWord.includes(key) || key.includes(cleanWord)) {
+    if (cleanWord === key || (cleanWord.length > 3 && key.includes(cleanWord))) {
       return {
         meaning: data.meaning,
         hindiMeaning: data.hindiMeaning,
@@ -195,18 +198,6 @@ export function generateSmartAnalysis(word: string, category: string): AiAnalysi
     }
   }
 
-  // 2. Intelligent pattern extraction & heuristic generation for any other vocabulary term
-  const capitalized = word.toUpperCase();
-  const catName = category.toUpperCase();
-
-  return {
-    meaning: `Primary exam definition and context for "${capitalized}" as tested in competitive SSC and Banking examinations.`,
-    hindiMeaning: `महत्वपूर्ण परीक्षा शब्दावली अर्थ / सटीक हिंदी भावार्थ`,
-    partOfSpeech: `Vocabulary Term`,
-    rootEtymology: `Derived from classical roots frequently appearing across SSC CGL, CHSL & Banking examination shifts. Understanding prefix/suffix affixes helps eliminate incorrect options instantly.`,
-    mnemonicHook: `Memory Hook for "${capitalized}": Associate the sound/phonetics with an everyday Hindi phrase or vivid visual scenario to anchor the meaning in long-term memory.`,
-    examTrapTip: `Repeated in SSC Tier-1 & Tier-2 question banks. Watch out for near-synonym options engineered to mislead hurried aspirants. Check whether the question asks for SYNONYM or ANTONYM before marking.`,
-    sampleUsage: `The presiding officer used the term "${word}" in the official gazette notification.`,
-    relatedWords: [`Synonym of ${word}`, `Antonym of ${word}`, `Govt Exam PYQ Term`, `Root Pair`]
-  };
+  // Never return fake/fabricated fallback placeholders.
+  return null;
 }

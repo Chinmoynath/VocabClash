@@ -251,26 +251,13 @@ export class QuestionBankEngine {
     this.initialized = true;
   }
 
-  // Load imported questions from persistent client storage if available
+  // Clear obsolete bulky local storage question bank if present to prevent QuotaExceededError
   private loadImportedQuestionsFromLocal() {
     if (typeof window === 'undefined') return;
     try {
-      const stored = localStorage.getItem('vocabclash_imported_pyqs');
-      if (stored) {
-        const parsed: Question[] = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          this.importedPool = parsed.map(q => ({
-            ...q,
-            isPYQ: true,
-            verified: true,
-            sourceType: 'verified_pyq',
-            memoryKey: q.memoryKey || buildMemoryKey(q.category, q.wordOrPhrase, q.options, q.correctIndex),
-            conceptKey: q.conceptKey || buildMemoryKey(q.category, q.wordOrPhrase, q.options, q.correctIndex),
-          }));
-        }
-      }
-    } catch (e) {
-      console.warn('Failed to load imported questions from storage:', e);
+      localStorage.removeItem('vocabclash_imported_pyqs');
+    } catch {
+      // Safe ignore
     }
   }
 
@@ -498,15 +485,6 @@ export class QuestionBankEngine {
 
         this.importedPool.push(q);
         added++;
-      }
-    }
-
-    // Persist to local storage cache
-    if (persistLocal && typeof window !== 'undefined') {
-      try {
-        localStorage.setItem('vocabclash_imported_pyqs', JSON.stringify(this.importedPool));
-      } catch (e) {
-        console.warn('Failed to save imported questions:', e);
       }
     }
 

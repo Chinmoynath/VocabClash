@@ -303,6 +303,9 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
       responseTimeMs: elapsedMs,
       category: currentQ.category,
       pyqPoints: isCorrect ? 10 : -2,
+      questionId: currentQ.id,
+      conceptKey: currentQ.wordOrPhrase || currentQ.memoryKey,
+      source: 'practice',
     });
 
     const nextStreak = isCorrect ? streak + 1 : 0;

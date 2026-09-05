@@ -20,7 +20,7 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
     { id: 'practice' as TabType, label: 'PYQ Drill', icon: Target, color: 'text-sky-400' },
     { id: 'leaderboard' as TabType, label: 'Ranks', icon: Trophy, color: 'text-yellow-400' },
     { id: 'mistakes' as TabType, label: 'Vault', icon: BookOpen, color: 'text-rose-400', badge: mistakeCount },
-    { id: 'ai_coach' as TabType, label: 'AI Tutor', icon: Sparkles, color: 'text-purple-400' },
+    { id: 'ai_coach' as TabType, label: 'AI Mentor', icon: Sparkles, color: 'text-purple-400' },
   ];
 
   return (

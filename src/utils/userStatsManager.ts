@@ -7,6 +7,7 @@ import {
   UserStatsSummary 
 } from '../types';
 import { questionReviewScheduler } from '../services/questionReviewScheduler';
+import { recordAttemptEvent, AttemptSource, normalizeCategory } from '../services/attemptTrackingService';
 import { auth, db } from '../services/firebaseService';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 
@@ -48,7 +49,7 @@ function getPreviousMonthKey(currentYearMonth: string): string {
   return `${year}-${String(month).padStart(2, '0')}`;
 }
 
-function getDailyStatsMap(): Record<string, DailyAccuracyRecord> {
+export function getDailyStatsMap(): Record<string, DailyAccuracyRecord> {
   if (typeof window === 'undefined' || !window.localStorage) return {};
   try {
     const raw = localStorage.getItem(STORAGE_KEY_DAILY_STATS);
@@ -123,12 +124,18 @@ function savePersistentTotals(totals: PersistentStatsTotals): void {
 export function recordQuestionAttempt(params: {
   isCorrect: boolean;
   responseTimeMs?: number;
-  category?: QuestionCategory;
+  category?: string;
   pyqPoints?: number;
+  questionId?: string;
+  conceptKey?: string;
+  source?: AttemptSource;
 }): void {
-  const { isCorrect, responseTimeMs, category, pyqPoints = 0 } = params;
+  const { isCorrect, responseTimeMs, category, pyqPoints = 0, questionId, conceptKey, source } = params;
   const today = getTodayStr();
   const dailyMap = getDailyStatsMap();
+
+  const normCat = normalizeCategory(category);
+  const cat: QuestionCategory = normCat !== 'uncategorized' ? normCat : 'synonyms';
 
   // 1. Update today's record
   const currentDayRecord: DailyAccuracyRecord = dailyMap[today] || {
@@ -149,6 +156,19 @@ export function recordQuestionAttempt(params: {
   }
   currentDayRecord.accuracy = Math.round((currentDayRecord.correct / currentDayRecord.solved) * 100);
   currentDayRecord.pyqPointsGained = (currentDayRecord.pyqPointsGained || 0) + pyqPoints;
+
+  if (!currentDayRecord.categories) {
+    currentDayRecord.categories = {};
+  }
+  if (!currentDayRecord.categories[cat]) {
+    currentDayRecord.categories[cat] = { solved: 0, correct: 0, wrong: 0 };
+  }
+  currentDayRecord.categories[cat]!.solved += 1;
+  if (isCorrect) {
+    currentDayRecord.categories[cat]!.correct += 1;
+  } else {
+    currentDayRecord.categories[cat]!.wrong += 1;
+  }
 
   if (responseTimeMs) {
     const prevAvg = currentDayRecord.avgResponseMs || responseTimeMs;
@@ -172,7 +192,6 @@ export function recordQuestionAttempt(params: {
     totals.timeCount += 1;
   }
 
-  const cat = category || 'synonyms';
   if (totals.categoryTotals && totals.categoryTotals[cat]) {
     totals.categoryTotals[cat].solved += 1;
     if (isCorrect) {
@@ -183,12 +202,22 @@ export function recordQuestionAttempt(params: {
   totals.lastUpdated = Date.now();
   savePersistentTotals(totals);
 
-  // 3. Dispatch reactive update event
+  // 3. Log into authoritative normalized attempts pipeline
+  recordAttemptEvent({
+    questionId,
+    conceptKey: conceptKey || questionId || `${cat}_question`,
+    category: normCat,
+    correct: isCorrect,
+    source: source || 'practice',
+    responseTimeMs,
+  });
+
+  // 4. Dispatch reactive update event
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('user-stats-updated', { detail: { today: currentDayRecord, totals } }));
   }
 
-  // 4. Background cloud sync for authenticated user
+  // 5. Background cloud sync for authenticated user
   syncStatsToCloud().catch(err => console.warn('Background stats cloud sync:', err));
 }
 
@@ -270,48 +299,7 @@ export function getUserStatsSummary(
     ? Math.round((calculatedCorrect / calculatedSolved) * 100) 
     : (player.accuracyRate || 0);
 
-  // If user has solved questions, make sure we have active daily tracking data from their signup/learning history
-  const hasRecordedDays = Object.keys(dailyMap).length > 0;
-  if (!hasRecordedDays && calculatedSolved > 0) {
-    const daysToDistribute = Math.min(30, Math.max(7, daysCount));
-    const nowTime = new Date();
-    let remainingSolved = calculatedSolved;
-    let remainingCorrect = calculatedCorrect;
-
-    // Distribute historically across days starting from earlier to today
-    for (let i = daysToDistribute - 1; i >= 0; i--) {
-      const d = new Date(nowTime);
-      d.setDate(d.getDate() - i);
-      const dateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      
-      const isToday = i === 0;
-      const expectedDaySolved = isToday
-        ? Math.max(5, Math.min(remainingSolved, Math.round(calculatedSolved * 0.12)))
-        : Math.max(3, Math.min(remainingSolved, Math.round((calculatedSolved / daysToDistribute) * (0.8 + ((i % 4) * 0.15)))));
-
-      const daySolved = Math.min(remainingSolved, expectedDaySolved);
-      remainingSolved = Math.max(0, remainingSolved - daySolved);
-
-      // Natural progressive accuracy curve leading up to overall accuracy
-      const curveFactor = ((daysToDistribute - i) / daysToDistribute);
-      const dayAcc = Math.min(96, Math.max(45, Math.round(overallAccuracy - 8 + (curveFactor * 10) + ((i % 3) * 2))));
-      const dayCorrect = Math.min(daySolved, Math.round(daySolved * (dayAcc / 100)));
-      const dayWrong = Math.max(0, daySolved - dayCorrect);
-
-      dailyMap[dateKey] = {
-        date: dateKey,
-        solved: daySolved,
-        correct: dayCorrect,
-        wrong: dayWrong,
-        accuracy: daySolved > 0 ? Math.round((dayCorrect / daySolved) * 100) : dayAcc,
-        avgResponseMs: Math.max(2600, 4500 - (curveFactor * 1200)),
-        pyqPointsGained: dayCorrect * 10,
-      };
-    }
-    saveDailyStatsMap(dailyMap);
-  }
-
-  // Month-over-month calculation
+  // Month-over-month calculation from authentic records
   const today = getTodayStr();
   const currentMonthKey = getMonthKey(today);
   const previousMonthKey = getPreviousMonthKey(currentMonthKey);
@@ -332,31 +320,17 @@ export function getUserStatsSummary(
     }
   }
 
-  // Realistic defaults if month data is fresh
-  if (currentMonthSolved === 0 && calculatedSolved > 0) {
-    currentMonthSolved = Math.min(calculatedSolved, Math.max(12, Math.round(calculatedSolved * 0.4)));
-    currentMonthCorrect = Math.round(currentMonthSolved * (overallAccuracy / 100));
-  }
-
-  if (lastMonthSolved === 0 && calculatedSolved > currentMonthSolved) {
-    lastMonthSolved = calculatedSolved - currentMonthSolved;
-    lastMonthCorrect = Math.round(lastMonthSolved * Math.max(0.4, (overallAccuracy - 5) / 100));
-  } else if (lastMonthSolved === 0) {
-    // Baseline simulated comparison for motivation
-    lastMonthSolved = Math.max(20, Math.round(currentMonthSolved * 0.85));
-    const simulatedLastMonthAcc = Math.max(50, Math.min(95, overallAccuracy - 4));
-    lastMonthCorrect = Math.round(lastMonthSolved * (simulatedLastMonthAcc / 100));
-  }
-
   const currentMonthAccuracy = currentMonthSolved > 0 
     ? Math.round((currentMonthCorrect / currentMonthSolved) * 100) 
     : overallAccuracy;
 
   const lastMonthAccuracy = lastMonthSolved > 0 
     ? Math.round((lastMonthCorrect / lastMonthSolved) * 100) 
-    : Math.max(50, currentMonthAccuracy - 4);
+    : currentMonthAccuracy;
 
-  const monthOverMonthAccuracyDelta = currentMonthAccuracy - lastMonthAccuracy;
+  const monthOverMonthAccuracyDelta = currentMonthSolved > 0 && lastMonthSolved > 0 
+    ? currentMonthAccuracy - lastMonthAccuracy 
+    : 0;
 
   // Build daily history array (last N days)
   const dailyHistory: DailyAccuracyRecord[] = [];

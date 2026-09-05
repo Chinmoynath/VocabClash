@@ -243,6 +243,66 @@ export interface DailyAccuracyRecord {
   accuracy: number; // 0 - 100 percentage
   avgResponseMs?: number;
   pyqPointsGained?: number;
+  categories?: Partial<Record<QuestionCategory, { solved: number; correct: number; wrong: number }>>;
+}
+
+export type MentorPeriod = 'week' | 'month' | 'all_time';
+
+export interface MentorCategoryStat {
+  category: QuestionCategory;
+  name: string;
+  hindiName: string;
+  attempted: number;
+  correct: number;
+  wrong: number;
+  accuracy: number | null; // null if attempted === 0
+  hasEnoughData: boolean; // attempted >= MIN_SAMPLE_THRESHOLD (5)
+  status: 'unattempted' | 'limited_data' | 'critical' | 'moderate' | 'strong';
+}
+
+export interface RepeatedMistakeItem {
+  wordOrPhrase: string;
+  category: QuestionCategory;
+  wrongCount: number;
+  meaning?: string;
+  hindiMeaning?: string;
+  lastMissedAt?: number;
+}
+
+export interface MentorAnalytics {
+  period: MentorPeriod;
+  periodLabel: string;
+  previousPeriodLabel?: string;
+  totalAttempted: number;
+  totalCorrect: number;
+  totalWrong: number;
+  overallAccuracy: number | null;
+  currentPeriodAccuracy: number | null;
+  previousPeriodAccuracy: number | null;
+  accuracyDeltaPp: number | null; // percentage points delta (e.g. +7 or -4)
+  trend: 'improving' | 'declining' | 'stable' | 'insufficient_data';
+  categoryStats: Record<QuestionCategory, MentorCategoryStat>;
+  strongestCategory: QuestionCategory | null;
+  weakestCategory: QuestionCategory | null;
+  repeatedMistakes: RepeatedMistakeItem[];
+  dueReviews: number;
+  unresolvedMistakesCount: number;
+  examReadinessScore: number;
+  targetExam: string;
+  hasEnoughUserData: boolean; // totalAttempted >= 20
+  activeDaysCount: number;
+}
+
+export interface MentorAiReport {
+  diagnosis: string;
+  whatImproved: string;
+  mainWeakness: string;
+  whatToDoNext: string[];
+  encouragement: string;
+  generatedAt: number;
+  isFallback: boolean;
+  period: MentorPeriod;
+  periodKey: string;
 }
 
 export interface CategoryStatsRecord {

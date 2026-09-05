@@ -1,26 +1,52 @@
 import { db } from './firebaseService';
 import { doc, getDoc, setDoc, collection, query, limit, getDocs } from 'firebase/firestore';
 import { generateSmartAnalysis, AiAnalysisResult } from '../utils/aiTutorEngine';
+import { HIGH_YIELD_EXAM_VOCAB } from '../utils/questionEducationResolver';
+import { fetchFreeDictionaryEntry, DictionaryEntry } from './freeDictionaryService';
 
-export interface CachedWordRecord extends AiAnalysisResult {
+export interface CachedWordRecord {
   word: string;
   wordOrPhrase: string;
   category?: string;
-  updatedAt?: number;
+  partOfSpeech?: string;
+  meaning?: string;
+  definition?: string;
+  hindiMeaning?: string;
+  rootEtymology?: string;
+  rootWord?: string;
+  mnemonicHook?: string;
+  mnemonic?: string;
+  examTrapTip?: string;
+  sampleUsage?: string;
+  example?: string;
+  relatedWords?: string[];
+  synonyms?: string[];
+  antonyms?: string[];
+  phonetic?: string;
+  source?: {
+    dictionary: boolean;
+    geminiEnrichment: boolean;
+  };
+  sourceType?: 'cache' | 'dictionary' | 'gemini_enriched' | 'curated';
   cachedAt?: number;
-  source?: 'gemini' | 'curated';
+  createdAt?: number;
+  updatedAt?: number;
 }
 
 export interface ExplanationResponse {
   analysis: AiAnalysisResult;
   fromCache: boolean;
+  source?: 'cache' | 'dictionary' | 'gemini' | 'curated';
+  aiEnrichmentAvailable?: boolean;
   limitReached?: boolean;
   remainingDailyGenerations: number;
   isFreeTier: boolean;
+  notFound?: boolean;
+  message?: string;
 }
 
 const STORAGE_KEY_DAILY_AI_USAGE = 'vocabclash_ai_daily_gen_v2';
-const FREE_TIER_DAILY_LIMIT = 5;
+const FREE_TIER_DAILY_LIMIT = 100;
 
 function getTodayKey(): string {
   const d = new Date();
@@ -67,6 +93,7 @@ export function getDailyAiGenerationStatus(isPremium: boolean = false): {
 
 /**
  * Increments the local usage count for a new AI word generation.
+ * ONLY called after a genuinely successful Gemini generation.
  */
 export function recordAiGenerationUsed(): number {
   if (typeof window === 'undefined' || !window.localStorage) return 0;
@@ -83,13 +110,22 @@ export function recordAiGenerationUsed(): number {
 }
 
 /**
- * Retrieves explanation for a vocabulary term:
- * 1. Checks local memory / curated knowledge base.
- * 2. Checks Firestore `ai_tutor_cache` (never costs quota, never regenerates).
- * 3. If missing: checks daily quota (Free 5/day, Pro unlimited).
- * 4. Calls Gemini server endpoint if quota available.
- * 5. Saves result to Firestore `ai_tutor_cache`.
- * 6. Gracefully falls back to smart engine if offline / quota exceeded / error.
+ * Normalizes searched word string: trims, lowercases, removes extra internal spaces.
+ */
+export function normalizeWordKey(word: string): string {
+  return word.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+/**
+ * Robust Word Search & AI Tutor Explanation Pipeline:
+ *
+ * STEP 1: Normalize word.
+ * STEP 2: Check global Firestore `ai_tutor_cache`. If HIT -> return immediately (no Gemini call).
+ * STEP 3: Free Dictionary lookup (`https://api.dictionaryapi.dev/api/v2/entries/en/{word}`).
+ * STEP 4: If dictionary succeeds, attempt optional Gemini enrichment.
+ * STEP 5: If Gemini fails (405, 429, 500, timeout), fallback gracefully to dictionary result.
+ * STEP 6: Save valid results to Firestore `ai_tutor_cache` (never save placeholders or errors).
+ * STEP 7: If word is not found anywhere, return clear notFound state without breaking UI.
  */
 export async function getWordExplanationWithCache(
   wordOrPhrase: string,
@@ -97,40 +133,55 @@ export async function getWordExplanationWithCache(
   isPremium: boolean = false,
   examHistory?: string[]
 ): Promise<ExplanationResponse> {
-  const cleanKey = wordOrPhrase.trim().toLowerCase();
+  const cleanKey = normalizeWordKey(wordOrPhrase);
   const usage = getDailyAiGenerationStatus(isPremium);
 
-  // 1. Check local curated knowledge base
-  const localCurated = generateSmartAnalysis(cleanKey, category);
-  const isDirectCurated = localCurated.mnemonicHook && !localCurated.mnemonicHook.startsWith('Memory Hook for');
-  if (isDirectCurated) {
+  if (!cleanKey) {
     return {
-      analysis: localCurated,
-      fromCache: true,
+      analysis: {
+        rootEtymology: '',
+        mnemonicHook: '',
+        examTrapTip: '',
+        sampleUsage: '',
+        relatedWords: [],
+      },
+      fromCache: false,
+      notFound: true,
+      message: "We couldn't find this word. Check the spelling and try again.",
       remainingDailyGenerations: usage.remaining,
       isFreeTier: !isPremium,
     };
   }
 
-  // 2. Check Firestore collection `ai_tutor_cache`
+  // =========================================================================
+  // STEP 2: Check existing global Firestore cache (ai_tutor_cache)
+  // =========================================================================
   try {
     const cacheDocRef = doc(db, 'ai_tutor_cache', cleanKey);
     const snap = await getDoc(cacheDocRef);
     if (snap.exists()) {
       const data = snap.data() as CachedWordRecord;
-      if (data && (data.meaning || data.mnemonicHook)) {
+      const validDefinition = data.meaning || data.definition;
+      if (data && validDefinition && !validDefinition.startsWith('Primary exam definition and context for')) {
+        console.log(`Word lookup: ${cleanKey}\nCache: HIT\nReturned: CACHE HIT`);
+        const isEnriched = data.source?.geminiEnrichment ?? (data.sourceType === 'gemini_enriched' || !!data.mnemonicHook);
         return {
           analysis: {
-            meaning: data.meaning,
-            hindiMeaning: data.hindiMeaning,
-            partOfSpeech: data.partOfSpeech,
-            rootEtymology: data.rootEtymology,
-            mnemonicHook: data.mnemonicHook,
-            examTrapTip: data.examTrapTip,
-            sampleUsage: data.sampleUsage,
-            relatedWords: data.relatedWords || [],
+            meaning: validDefinition,
+            hindiMeaning: data.hindiMeaning || '',
+            partOfSpeech: data.partOfSpeech || 'Vocabulary Term',
+            rootEtymology: data.rootEtymology || data.rootWord || '',
+            mnemonicHook: data.mnemonicHook || data.mnemonic || '',
+            examTrapTip: data.examTrapTip || '',
+            sampleUsage: data.sampleUsage || data.example || '',
+            relatedWords: data.relatedWords || data.synonyms || [],
+            phonetic: data.phonetic,
+            synonyms: data.synonyms,
+            antonyms: data.antonyms,
           },
           fromCache: true,
+          source: 'cache',
+          aiEnrichmentAvailable: isEnriched,
           remainingDailyGenerations: usage.remaining,
           isFreeTier: !isPremium,
         };
@@ -140,78 +191,232 @@ export async function getWordExplanationWithCache(
     console.warn('[AI Tutor Cache] Firestore cache read error:', err);
   }
 
-  // 3. If word is NOT in cache, check Free vs Pro generation quota
-  if (!isPremium && usage.remaining <= 0) {
-    // Quota reached: provide deterministic smart analysis with limitReached flag
-    return {
-      analysis: localCurated,
-      fromCache: false,
-      limitReached: true,
-      remainingDailyGenerations: 0,
-      isFreeTier: true,
+  console.log(`Word lookup: ${cleanKey}\nCache: MISS`);
+
+  // =========================================================================
+  // STEP 3: Free Dictionary Fallback
+  // =========================================================================
+  const dictEntry: DictionaryEntry | null = await fetchFreeDictionaryEntry(cleanKey);
+  if (dictEntry) {
+    console.log('Dictionary: SUCCESS');
+  } else {
+    console.log('Dictionary: NOT_FOUND');
+  }
+
+  // Check local curated knowledge base if dictionary did not have it
+  const localCurated = generateSmartAnalysis(cleanKey, category);
+  const highYieldRecord = HIGH_YIELD_EXAM_VOCAB[cleanKey];
+
+  // Baseline dictionary analysis if available
+  let baseAnalysis: AiAnalysisResult | null = null;
+  if (dictEntry) {
+    baseAnalysis = {
+      meaning: dictEntry.definition,
+      partOfSpeech: dictEntry.partOfSpeech,
+      sampleUsage: dictEntry.example || '',
+      rootEtymology: '',
+      mnemonicHook: '',
+      examTrapTip: '',
+      relatedWords: dictEntry.synonyms || [],
+      phonetic: dictEntry.phonetic,
+      synonyms: dictEntry.synonyms,
+      antonyms: dictEntry.antonyms,
+    };
+  } else if (localCurated) {
+    baseAnalysis = localCurated;
+  } else if (highYieldRecord) {
+    baseAnalysis = {
+      meaning: highYieldRecord.english,
+      hindiMeaning: highYieldRecord.hindi,
+      partOfSpeech: 'Exam Vocabulary',
+      rootEtymology: highYieldRecord.root || '',
+      mnemonicHook: highYieldRecord.mnemonic || '',
+      examTrapTip: 'High-frequency PYQ term. Verify synonym vs antonym requirement in the question statement.',
+      sampleUsage: highYieldRecord.example || `The term "${cleanKey}" is frequently tested in SSC and Banking exams.`,
+      relatedWords: [cleanKey, 'High-Yield PYQ', 'Exam Essential'],
     };
   }
 
-  // 4. Word is not cached and user has remaining generations: Call server-side Gemini
-  try {
-    const res = await fetch('/api/gemini/explain', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        wordOrPhrase: wordOrPhrase.trim(),
-        category,
-        meaning: 'Exam vocabulary term',
-        examHistory: examHistory || ['SSC CGL', 'SSC CHSL', 'RRB NTPC'],
-      }),
-    });
+  // =========================================================================
+  // STEP 4: Optional Gemini Enrichment
+  // =========================================================================
+  const canAttemptGemini = isPremium || usage.remaining > 0;
+  let geminiSuccess = false;
+  let enrichedAnalysis: AiAnalysisResult | null = null;
 
-    if (res.ok) {
-      const json = await res.json();
-      if (json.analysis && (json.analysis.mnemonicHook || json.analysis.rootEtymology)) {
-        const generatedAnalysis: AiAnalysisResult = json.analysis;
+  if (canAttemptGemini) {
+    try {
+      const res = await fetch('/api/gemini/explain', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          wordOrPhrase: cleanKey,
+          category,
+          meaning: baseAnalysis?.meaning || 'Exam vocabulary term',
+          examHistory: examHistory || ['SSC CGL', 'SSC CHSL', 'RRB NTPC'],
+        }),
+      });
 
-        // Record usage for free users
-        let newRemaining = usage.remaining;
-        if (!isPremium) {
-          newRemaining = recordAiGenerationUsed();
+      if (res.ok) {
+        const json = await res.json();
+        const geminiAnalysis = json?.analysis;
+        // Verify genuine response
+        if (
+          geminiAnalysis &&
+          (geminiAnalysis.mnemonicHook || geminiAnalysis.rootEtymology || geminiAnalysis.meaning) &&
+          !geminiAnalysis.meaning?.startsWith('Primary definition and competitive exam usage context')
+        ) {
+          console.log('Gemini: SUCCESS');
+          geminiSuccess = true;
+
+          enrichedAnalysis = {
+            meaning: geminiAnalysis.meaning || baseAnalysis?.meaning || '',
+            hindiMeaning: geminiAnalysis.hindiMeaning || baseAnalysis?.hindiMeaning || '',
+            partOfSpeech: geminiAnalysis.partOfSpeech || baseAnalysis?.partOfSpeech || 'Vocabulary Term',
+            rootEtymology: geminiAnalysis.rootEtymology || baseAnalysis?.rootEtymology || '',
+            mnemonicHook: geminiAnalysis.mnemonicHook || baseAnalysis?.mnemonicHook || '',
+            examTrapTip: geminiAnalysis.examTrapTip || baseAnalysis?.examTrapTip || '',
+            sampleUsage: geminiAnalysis.sampleUsage || baseAnalysis?.sampleUsage || '',
+            relatedWords: geminiAnalysis.relatedWords?.length
+              ? geminiAnalysis.relatedWords
+              : (baseAnalysis?.relatedWords || []),
+            phonetic: baseAnalysis?.phonetic,
+            synonyms: baseAnalysis?.synonyms,
+            antonyms: baseAnalysis?.antonyms,
+          };
+
+          // Increment generation count ONLY on genuine Gemini success
+          if (!isPremium) {
+            recordAiGenerationUsed();
+          }
         }
-
-        // 5. Store into Firestore collection `ai_tutor_cache` asynchronously
-        try {
-          const cacheDocRef = doc(db, 'ai_tutor_cache', cleanKey);
-          await setDoc(
-            cacheDocRef,
-            {
-              ...generatedAnalysis,
-              word: cleanKey,
-              wordOrPhrase: wordOrPhrase.trim(),
-              category: category || 'synonyms',
-              cachedAt: Date.now(),
-              updatedAt: Date.now(),
-              source: 'gemini',
-            },
-            { merge: true }
-          );
-        } catch (saveErr) {
-          console.warn('[AI Tutor Cache] Could not write to Firestore cache:', saveErr);
-        }
-
-        return {
-          analysis: generatedAnalysis,
-          fromCache: false,
-          remainingDailyGenerations: newRemaining,
-          isFreeTier: !isPremium,
-        };
+      } else {
+        console.log(`Gemini: ${res.status}`);
       }
+    } catch (apiErr: any) {
+      console.log(`Gemini: ${apiErr?.message || 'FAILED'}`);
     }
-  } catch (apiErr) {
-    console.warn('[AI Tutor Cache] Gemini explain fetch error, falling back:', apiErr);
   }
 
-  // 6. Graceful degradation: Fallback to smart analysis
+  // =========================================================================
+  // STEP 5: Final Result Selection & Valid Firestore Cache Saving
+  // =========================================================================
+
+  // Scenario A: Gemini Enriched Result
+  if (geminiSuccess && enrichedAnalysis) {
+    try {
+      const cacheDocRef = doc(db, 'ai_tutor_cache', cleanKey);
+      await setDoc(
+        cacheDocRef,
+        {
+          word: cleanKey,
+          wordOrPhrase: cleanKey,
+          meaning: enrichedAnalysis.meaning,
+          definition: enrichedAnalysis.meaning,
+          partOfSpeech: enrichedAnalysis.partOfSpeech,
+          hindiMeaning: enrichedAnalysis.hindiMeaning,
+          rootEtymology: enrichedAnalysis.rootEtymology,
+          rootWord: enrichedAnalysis.rootEtymology,
+          mnemonicHook: enrichedAnalysis.mnemonicHook,
+          mnemonic: enrichedAnalysis.mnemonicHook,
+          examTrapTip: enrichedAnalysis.examTrapTip,
+          sampleUsage: enrichedAnalysis.sampleUsage,
+          example: enrichedAnalysis.sampleUsage,
+          relatedWords: enrichedAnalysis.relatedWords,
+          synonyms: enrichedAnalysis.synonyms || [],
+          antonyms: enrichedAnalysis.antonyms || [],
+          phonetic: enrichedAnalysis.phonetic || '',
+          source: {
+            dictionary: !!dictEntry,
+            geminiEnrichment: true,
+          },
+          sourceType: 'gemini_enriched',
+          cachedAt: Date.now(),
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        },
+        { merge: true }
+      );
+      console.log('Cache write: SUCCESS\nReturned: GEMINI ENRICHED RESULT');
+    } catch (saveErr) {
+      console.warn('[AI Tutor Cache] Firestore cache write warning:', saveErr);
+    }
+
+    return {
+      analysis: enrichedAnalysis,
+      fromCache: false,
+      source: 'gemini',
+      aiEnrichmentAvailable: true,
+      remainingDailyGenerations: getDailyAiGenerationStatus(isPremium).remaining,
+      isFreeTier: !isPremium,
+    };
+  }
+
+  // Scenario B: Dictionary / Curated Result (Gemini failed or was bypassed)
+  if (baseAnalysis && baseAnalysis.meaning) {
+    console.log('Returned: DICTIONARY FALLBACK');
+    // Save clean verified dictionary definition to Firestore cache so subsequent lookups are instant
+    try {
+      const cacheDocRef = doc(db, 'ai_tutor_cache', cleanKey);
+      await setDoc(
+        cacheDocRef,
+        {
+          word: cleanKey,
+          wordOrPhrase: cleanKey,
+          meaning: baseAnalysis.meaning,
+          definition: baseAnalysis.meaning,
+          partOfSpeech: baseAnalysis.partOfSpeech || 'Vocabulary Term',
+          hindiMeaning: baseAnalysis.hindiMeaning || '',
+          rootEtymology: baseAnalysis.rootEtymology || '',
+          rootWord: baseAnalysis.rootEtymology || '',
+          mnemonicHook: baseAnalysis.mnemonicHook || '',
+          mnemonic: baseAnalysis.mnemonicHook || '',
+          examTrapTip: baseAnalysis.examTrapTip || '',
+          sampleUsage: baseAnalysis.sampleUsage || '',
+          example: baseAnalysis.sampleUsage || '',
+          relatedWords: baseAnalysis.relatedWords || [],
+          synonyms: baseAnalysis.synonyms || [],
+          antonyms: baseAnalysis.antonyms || [],
+          phonetic: baseAnalysis.phonetic || '',
+          source: {
+            dictionary: !!dictEntry,
+            geminiEnrichment: false,
+          },
+          sourceType: dictEntry ? 'dictionary' : 'curated',
+          cachedAt: Date.now(),
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        },
+        { merge: true }
+      );
+      console.log('Cache write: SUCCESS');
+    } catch (saveErr) {
+      console.warn('[AI Tutor Cache] Firestore cache write warning:', saveErr);
+    }
+
+    return {
+      analysis: baseAnalysis,
+      fromCache: false,
+      source: dictEntry ? 'dictionary' : 'curated',
+      aiEnrichmentAvailable: false,
+      remainingDailyGenerations: usage.remaining,
+      isFreeTier: !isPremium,
+    };
+  }
+
+  // Scenario C: Word Not Found (Neither in Dictionary, Curated, nor Gemini)
+  console.log(`Word lookup: ${cleanKey}\nReturned: WORD NOT FOUND`);
   return {
-    analysis: localCurated,
+    analysis: {
+      rootEtymology: '',
+      mnemonicHook: '',
+      examTrapTip: '',
+      sampleUsage: '',
+      relatedWords: [],
+    },
     fromCache: false,
+    notFound: true,
+    message: "We couldn't find this word. Check the spelling and try again.",
     remainingDailyGenerations: usage.remaining,
     isFreeTier: !isPremium,
   };
@@ -228,11 +433,12 @@ export async function getRecentCachedWords(limitCount: number = 8): Promise<{ wo
       const items: { word: string; category?: string; tag?: string }[] = [];
       snap.forEach(docSnap => {
         const data = docSnap.data();
-        if (data && data.wordOrPhrase) {
+        if (data && (data.wordOrPhrase || data.word)) {
+          const w = (data.wordOrPhrase || data.word).toUpperCase();
           items.push({
-            word: data.wordOrPhrase.toUpperCase(),
+            word: w,
             category: data.category || 'synonyms',
-            tag: 'Cached',
+            tag: data.source?.geminiEnrichment ? 'AI Enriched' : 'Cached',
           });
         }
       });
@@ -242,15 +448,15 @@ export async function getRecentCachedWords(limitCount: number = 8): Promise<{ wo
     console.warn('[AI Tutor Cache] Failed to load recent cached words from Firestore:', err);
   }
 
-  // Fallback curated words
+  // Fallback curated high-yield exam words
   return [
-    { word: 'TACITURN', category: 'antonyms', tag: 'High-Frequency' },
+    { word: 'ABERRATION', category: 'synonyms', tag: 'High-Yield' },
+    { word: 'TACITURN', category: 'antonyms', tag: 'SSC CGL' },
     { word: 'EPHEMERAL', category: 'synonyms', tag: 'Repeated 6x' },
     { word: 'OBSEQUIOUS', category: 'synonyms', tag: 'Bank PO' },
     { word: 'METICULOUS', category: 'synonyms', tag: 'SSC CHSL' },
     { word: 'LACONIC', category: 'antonyms', tag: 'CPO SI' },
     { word: 'BELLIGERENT', category: 'synonyms', tag: 'CDS Exam' },
-    { word: 'UBIQUITOUS', category: 'synonyms', tag: 'SSC CGL 2024' },
-    { word: 'CANDID', category: 'antonyms', tag: 'Top PYQ' },
+    { word: 'UBIQUITOUS', category: 'synonyms', tag: 'Tier-1 PYQ' },
   ];
 }

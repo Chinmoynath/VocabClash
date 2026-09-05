@@ -4,12 +4,17 @@ import {
   PlayerProfile, 
   DailyStreakState, 
   SavedWord, 
-  ExamType 
+  ExamType,
+  MentorAnalytics,
+  MentorAiReport
 } from '../types';
 import { getUserStatsSummary } from '../utils/userStatsManager';
 import { questionReviewScheduler } from './questionReviewScheduler';
 import { questionBankEngine } from './questionBankEngine';
 import { isItemMistake } from '../utils/vaultManager';
+import { getPeriodKey, CATEGORY_DISPLAY_NAMES } from './mentorAnalyticsService';
+import { auth, db } from './firebaseService';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 export interface CategoryDiagnosis {
   category: QuestionCategory;
@@ -41,6 +46,10 @@ export interface MentorDiagnostics {
 
 export interface MentorAiInsight {
   diagnosis: string;
+  whatImproved?: string;
+  mainWeakness?: string;
+  whatToDoNext?: string[];
+  encouragement?: string;
   recommendedFocus: string[];
   tacticalTip: string;
   motivationalQuote: string;
@@ -48,19 +57,381 @@ export interface MentorAiInsight {
   isFallback?: boolean;
 }
 
-const STORAGE_KEY_MENTOR_INSIGHT = 'vocabclash_mentor_cached_insight_v3';
+const STORAGE_KEY_REPORT_PREFIX = 'vocabclash_mentor_report_v4_';
 
-function getTodayStr(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+/**
+ * Creates a strictly grounded deterministic coaching report directly from MentorAnalytics.
+ * Runs instantly locally with ZERO Gemini API calls.
+ */
+export function generateDeterministicReport(analytics: MentorAnalytics): MentorAiReport {
+  const periodKey = getPeriodKey(analytics.period);
+  const weakCat = analytics.weakestCategory;
+  const strongCat = analytics.strongestCategory;
+  const target = analytics.targetExam || 'SSC CGL';
+
+  const weakStat = weakCat ? analytics.categoryStats[weakCat] : null;
+  const strongStat = strongCat ? analytics.categoryStats[strongCat] : null;
+
+  let diagnosis = '';
+  if (analytics.totalAttempted === 0) {
+    diagnosis = `You haven't attempted any vocabulary questions during ${analytics.periodLabel.toLowerCase()}. Begin with a 10-question practice drill to start generating diagnostic metrics.`;
+  } else if (!analytics.hasEnoughUserData) {
+    diagnosis = `You have completed ${analytics.totalAttempted} questions with an overall accuracy of ${analytics.overallAccuracy ?? 0}%. Complete at least 20 questions across categories to unlock comprehensive diagnostics.`;
+  } else if (weakStat && weakStat.accuracy !== null) {
+    diagnosis = `During ${analytics.periodLabel.toLowerCase()}, your overall accuracy stands at ${analytics.overallAccuracy}%. Your lowest accuracy is in ${weakStat.name} at ${weakStat.accuracy}% (${weakStat.correct}/${weakStat.attempted} correct).`;
+  } else {
+    diagnosis = `During ${analytics.periodLabel.toLowerCase()}, your overall accuracy is ${analytics.overallAccuracy}% across ${analytics.totalAttempted} attempted questions.`;
+  }
+
+  let whatImproved = '';
+  if (analytics.accuracyDeltaPp !== null) {
+    if (analytics.accuracyDeltaPp > 0) {
+      whatImproved = `Your accuracy improved by ${analytics.accuracyDeltaPp} percentage points ${analytics.previousPeriodLabel || 'vs previous period'} (${analytics.currentPeriodAccuracy}% vs ${analytics.previousPeriodAccuracy}%).`;
+    } else if (analytics.accuracyDeltaPp < 0) {
+      whatImproved = `Overall accuracy shifted by ${analytics.accuracyDeltaPp} percentage points ${analytics.previousPeriodLabel || 'vs previous period'} as you tackled fresh or challenging vocabulary.`;
+    } else {
+      whatImproved = `Your accuracy remained consistent at ${analytics.overallAccuracy}% ${analytics.previousPeriodLabel || 'vs previous period'}.`;
+    }
+  } else if (strongStat && strongStat.accuracy !== null && strongStat.hasEnoughData) {
+    whatImproved = `${strongStat.name} is currently your strongest category with ${strongStat.accuracy}% accuracy (${strongStat.correct}/${strongStat.attempted} correct).`;
+  } else {
+    whatImproved = 'Consistent daily practice creates durable neural pathways for high-frequency exam words.';
+  }
+
+  let mainWeakness = '';
+  if (weakStat && weakStat.accuracy !== null && weakStat.hasEnoughData) {
+    mainWeakness = `${weakStat.name} needs attention: ${weakStat.wrong} incorrect answers recorded (${weakStat.accuracy}% accuracy).`;
+  } else if (analytics.repeatedMistakes.length > 0) {
+    const topMistake = analytics.repeatedMistakes[0];
+    mainWeakness = `You have repeatedly missed "${topMistake.wordOrPhrase}" (${topMistake.wrongCount} times). Review its context and meaning.`;
+  } else if (analytics.unresolvedMistakesCount > 0) {
+    mainWeakness = `You have ${analytics.unresolvedMistakesCount} unresolved words in your Mistake Vault awaiting revision.`;
+  } else {
+    mainWeakness = 'Complete at least 5 questions in each category to isolate category-specific weaknesses.';
+  }
+
+  const whatToDoNext: string[] = [];
+  if (weakStat) {
+    whatToDoNext.push(`Complete a 10-question Weak Areas Drill in ${weakStat.name}`);
+  } else {
+    whatToDoNext.push('Complete practice questions across all 4 vocabulary categories');
+  }
+
+  if (analytics.dueReviews > 0) {
+    whatToDoNext.push(`Clear your ${analytics.dueReviews} due spaced repetition reviews before new learning`);
+  } else if (analytics.repeatedMistakes.length > 0) {
+    whatToDoNext.push(`Review your top repeated mistakes (${analytics.repeatedMistakes.slice(0, 3).map(m => m.wordOrPhrase).join(', ')})`);
+  } else {
+    whatToDoNext.push('Practice daily to build spaced repetition review intervals');
+  }
+
+  whatToDoNext.push(`Maintain your practice streak to lock in vocabulary retention for ${target}`);
+
+  const encouragement = analytics.overallAccuracy !== null && analytics.overallAccuracy >= 75
+    ? 'Solid accuracy foundation. Keep testing high-frequency exam words daily.'
+    : 'Disciplined daily revision systematically converts weak areas into high-scoring strengths.';
+
+  return {
+    diagnosis,
+    whatImproved,
+    mainWeakness,
+    whatToDoNext,
+    encouragement,
+    generatedAt: Date.now(),
+    isFallback: true,
+    period: analytics.period,
+    periodKey,
+  };
 }
 
-const CATEGORY_NAMES: Record<QuestionCategory, string> = {
-  antonyms: 'Antonyms (विलोम शब्द)',
-  synonyms: 'Synonyms (समानार्थी शब्द)',
-  ows: 'One Word Substitution (अनेक शब्दों के लिए एक शब्द)',
-  idioms: 'Idioms & Phrases (मुहावरे एवं लोकोक्तियाँ)',
-};
+/**
+ * Retrieves the grounded Vocab Mentor Report.
+ * CACHING RULES:
+ * - Checks localStorage first, then Firestore under users/{uid}/mentor_reports/{periodKey}.
+ * - Reuses cached report unless:
+ *   1. forceRefresh is true, OR
+ *   2. The user has attempted 10+ more questions since the report was generated, OR
+ *   3. No cached report exists for this period.
+ * - If Gemini fails, gracefully falls back to deterministic grounded report.
+ */
+export async function getVocabMentorReport(
+  analytics: MentorAnalytics,
+  forceRefresh: boolean = false
+): Promise<MentorAiReport> {
+  const periodKey = getPeriodKey(analytics.period);
+  const storageKey = `${STORAGE_KEY_REPORT_PREFIX}${periodKey}`;
+
+  // 1. Check local storage cache
+  if (!forceRefresh && typeof window !== 'undefined' && window.localStorage) {
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (raw) {
+        const cached = JSON.parse(raw);
+        if (cached && cached.report && cached.periodKey === periodKey) {
+          const questionDiff = Math.abs((cached.totalAttempted || 0) - analytics.totalAttempted);
+          // If within 10 questions and generated recently, reuse!
+          if (questionDiff < 10) {
+            return cached.report;
+          }
+        }
+      }
+    } catch {}
+  }
+
+  // 2. Check cloud Firestore cache for authenticated user
+  const currentUser = auth.currentUser;
+  if (!forceRefresh && currentUser) {
+    try {
+      const reportDocRef = doc(db, 'users', currentUser.uid, 'mentor_reports', periodKey);
+      const snap = await getDoc(reportDocRef);
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data && data.report) {
+          const questionDiff = Math.abs((data.totalAttempted || 0) - analytics.totalAttempted);
+          if (questionDiff < 10) {
+            // Save to localStorage for instant offline access
+            try {
+              localStorage.setItem(storageKey, JSON.stringify({
+                report: data.report,
+                periodKey,
+                totalAttempted: analytics.totalAttempted,
+                savedAt: Date.now(),
+              }));
+            } catch {}
+            return data.report;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[AI Mentor] Cloud cache read warning:', e);
+    }
+  }
+
+  // 3. For users with < 20 total questions, provide starter report without burning Gemini calls
+  if (!analytics.hasEnoughUserData) {
+    const starterReport = generateDeterministicReport(analytics);
+    saveReportToCache(starterReport, analytics, periodKey, storageKey);
+    return starterReport;
+  }
+
+  // 4. Request grounded coaching evaluation from server Gemini endpoint
+  try {
+    const res = await fetch('/api/gemini/mentor-insight', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        analytics,
+        targetExam: analytics.targetExam,
+      }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      const serverReport = data.report || data.insight;
+      if (serverReport && serverReport.diagnosis) {
+        const fullReport: MentorAiReport = {
+          diagnosis: serverReport.diagnosis,
+          whatImproved: serverReport.whatImproved || 'Keep practicing daily to build steady vocabulary recall.',
+          mainWeakness: serverReport.mainWeakness || 'Focus on your lowest-accuracy category to eliminate marks loss.',
+          whatToDoNext: Array.isArray(serverReport.whatToDoNext) ? serverReport.whatToDoNext : [
+            'Practice questions in your weakest category',
+            'Clear due spaced repetition reviews',
+            'Review repeatedly missed words'
+          ],
+          encouragement: serverReport.encouragement || serverReport.motivationalQuote || 'Consistent revision converts weak areas into high-scoring strengths.',
+          generatedAt: Date.now(),
+          isFallback: false,
+          period: analytics.period,
+          periodKey,
+        };
+
+        saveReportToCache(fullReport, analytics, periodKey, storageKey);
+        return fullReport;
+      }
+    }
+  } catch (err) {
+    console.warn('[AI Mentor] Server insight fetch failed, using deterministic grounded advice:', err);
+  }
+
+  // 5. Deterministic fallback grounded strictly in the same analytics
+  const fallback = generateDeterministicReport(analytics);
+  saveReportToCache(fallback, analytics, periodKey, storageKey);
+  return fallback;
+}
+
+function saveReportToCache(
+  report: MentorAiReport,
+  analytics: MentorAnalytics,
+  periodKey: string,
+  storageKey: string
+): void {
+  // Save locally
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      localStorage.setItem(
+        storageKey,
+        JSON.stringify({
+          report,
+          periodKey,
+          totalAttempted: analytics.totalAttempted,
+          savedAt: Date.now(),
+        })
+      );
+    } catch {}
+  }
+
+  // Save to Firestore in background
+  const currentUser = auth.currentUser;
+  if (currentUser) {
+    const reportDocRef = doc(db, 'users', currentUser.uid, 'mentor_reports', periodKey);
+    setDoc(
+      reportDocRef,
+      {
+        report,
+        periodKey,
+        period: analytics.period,
+        totalAttempted: analytics.totalAttempted,
+        overallAccuracy: analytics.overallAccuracy,
+        updatedAt: Date.now(),
+      },
+      { merge: true }
+    ).catch(e => console.warn('[AI Mentor] Cloud cache save warning:', e));
+  }
+}
+
+/**
+ * Backward compatibility adapter for legacy components expecting MentorAiInsight
+ */
+export async function getPersonalizedMentorInsight(
+  diagnostics: MentorDiagnostics,
+  forceRefresh: boolean = false
+): Promise<MentorAiInsight> {
+  const weakCat = diagnostics.weakestCategory || 'antonyms';
+  const weakAcc = diagnostics.categoryBreakdown[weakCat]?.accuracy ?? 0;
+
+  // Build a minimal analytics adapter
+  const mockAnalytics: MentorAnalytics = {
+    period: 'week',
+    periodLabel: 'This Week',
+    previousPeriodLabel: 'vs last week',
+    totalAttempted: diagnostics.totalSolved,
+    totalCorrect: diagnostics.totalCorrect,
+    totalWrong: diagnostics.totalWrong,
+    overallAccuracy: diagnostics.overallAccuracy,
+    currentPeriodAccuracy: diagnostics.overallAccuracy,
+    previousPeriodAccuracy: null,
+    accuracyDeltaPp: null,
+    trend: 'insufficient_data',
+    categoryStats: {
+      antonyms: { category: 'antonyms', name: 'Antonyms', hindiName: 'विलोम शब्द', attempted: diagnostics.categoryBreakdown.antonyms?.solved || 0, correct: diagnostics.categoryBreakdown.antonyms?.correct || 0, wrong: diagnostics.categoryBreakdown.antonyms?.wrong || 0, accuracy: diagnostics.categoryBreakdown.antonyms?.accuracy ?? null, hasEnoughData: (diagnostics.categoryBreakdown.antonyms?.solved || 0) >= 5, status: diagnostics.categoryBreakdown.antonyms?.status || 'unattempted' },
+      synonyms: { category: 'synonyms', name: 'Synonyms', hindiName: 'समानार्थी शब्द', attempted: diagnostics.categoryBreakdown.synonyms?.solved || 0, correct: diagnostics.categoryBreakdown.synonyms?.correct || 0, wrong: diagnostics.categoryBreakdown.synonyms?.wrong || 0, accuracy: diagnostics.categoryBreakdown.synonyms?.accuracy ?? null, hasEnoughData: (diagnostics.categoryBreakdown.synonyms?.solved || 0) >= 5, status: diagnostics.categoryBreakdown.synonyms?.status || 'unattempted' },
+      ows: { category: 'ows', name: 'One Word Substitution', hindiName: 'अनेक शब्दों के लिए एक शब्द', attempted: diagnostics.categoryBreakdown.ows?.solved || 0, correct: diagnostics.categoryBreakdown.ows?.correct || 0, wrong: diagnostics.categoryBreakdown.ows?.wrong || 0, accuracy: diagnostics.categoryBreakdown.ows?.accuracy ?? null, hasEnoughData: (diagnostics.categoryBreakdown.ows?.solved || 0) >= 5, status: diagnostics.categoryBreakdown.ows?.status || 'unattempted' },
+      idioms: { category: 'idioms', name: 'Idioms & Phrases', hindiName: 'मुहावरे एवं लोकोक्तियाँ', attempted: diagnostics.categoryBreakdown.idioms?.solved || 0, correct: diagnostics.categoryBreakdown.idioms?.correct || 0, wrong: diagnostics.categoryBreakdown.idioms?.wrong || 0, accuracy: diagnostics.categoryBreakdown.idioms?.accuracy ?? null, hasEnoughData: (diagnostics.categoryBreakdown.idioms?.solved || 0) >= 5, status: diagnostics.categoryBreakdown.idioms?.status || 'unattempted' },
+    },
+    strongestCategory: diagnostics.strongestCategory,
+    weakestCategory: diagnostics.weakestCategory,
+    repeatedMistakes: [],
+    dueReviews: diagnostics.dueReviewsCount,
+    unresolvedMistakesCount: diagnostics.mistakesCount,
+    examReadinessScore: diagnostics.examReadinessScore,
+    targetExam: diagnostics.targetExam,
+    hasEnoughUserData: diagnostics.totalSolved >= 20,
+    activeDaysCount: 3,
+  };
+
+  const report = await getVocabMentorReport(mockAnalytics, forceRefresh);
+
+  return {
+    diagnosis: report.diagnosis,
+    whatImproved: report.whatImproved,
+    mainWeakness: report.mainWeakness,
+    whatToDoNext: report.whatToDoNext,
+    encouragement: report.encouragement,
+    recommendedFocus: report.whatToDoNext,
+    tacticalTip: report.mainWeakness,
+    motivationalQuote: report.encouragement,
+    cachedAt: report.generatedAt,
+    isFallback: report.isFallback,
+  };
+}
+
+/**
+ * Builds a curated, targeted 10-question drill session for "Train My Weak Areas".
+ * Prioritizes:
+ * 1. Repeatedly incorrect concepts (from analytics repeatedMistakes)
+ * 2. Due review concepts from Spaced Repetition Scheduler
+ * 3. Authentic exam questions from user's weakest category
+ * 4. Recent mistakes from Mistake Vault
+ */
+export function buildWeakAreasDrillQuestions(
+  diagnosticsOrAnalytics: MentorDiagnostics | MentorAnalytics,
+  targetExam: ExamType = 'SSC_CGL',
+  desiredCount: number = 10
+): Question[] {
+  questionBankEngine.init();
+  const selected: Question[] = [];
+  const seenFingerprints = new Set<string>();
+
+  const pushQuestion = (q: Question, reason: Question['reviewReason']) => {
+    if (!q || !q.id) return false;
+    const fp = (q.wordOrPhrase || q.id).toLowerCase().trim();
+    if (seenFingerprints.has(fp)) return false;
+    seenFingerprints.add(fp);
+    selected.push({
+      ...q,
+      reviewReason: reason,
+    });
+    return true;
+  };
+
+  const playablePool = questionBankEngine.getPlayablePool('mixed');
+
+  // 1. Up to 4 questions from repeatedly incorrect concepts
+  const repeated = (diagnosticsOrAnalytics as any).repeatedMistakes || [];
+  for (const item of repeated) {
+    if (selected.length >= 4) break;
+    const term = (item.wordOrPhrase || '').toLowerCase().trim();
+    const matched = playablePool.find(
+      q => (q.wordOrPhrase || q.memoryKey || '').toLowerCase().trim() === term
+    );
+    if (matched) {
+      pushQuestion(matched, 'mistake_review');
+    }
+  }
+
+  // 2. Up to 3 questions from due spaced repetition reviews
+  const dueStates = questionReviewScheduler.getAllReviewStates().filter(s => questionReviewScheduler.isConceptDue(s.memoryKey));
+  for (const due of dueStates) {
+    if (selected.length >= 7) break;
+    const matchedQ = playablePool.find(
+      q => (q.memoryKey || q.wordOrPhrase).toLowerCase() === due.memoryKey.toLowerCase()
+    );
+    if (matchedQ) {
+      pushQuestion(matchedQ, 'due_review');
+    }
+  }
+
+  // 3. Questions from weakest category
+  const weakestCat: QuestionCategory = diagnosticsOrAnalytics.weakestCategory || 'antonyms';
+  const weakPool = questionBankEngine.getPlayablePool(weakestCat);
+  const matchingExamQuestions = weakPool.filter(q => questionBankEngine.matchesExam(q, targetExam));
+  const candidatePool = matchingExamQuestions.length >= 10 ? matchingExamQuestions : weakPool;
+
+  for (const q of candidatePool) {
+    if (selected.length >= desiredCount) break;
+    pushQuestion(q, 'fresh');
+  }
+
+  // 4. Fill any remaining with questions from general pool
+  if (selected.length < desiredCount) {
+    for (const q of playablePool) {
+      if (selected.length >= desiredCount) break;
+      pushQuestion(q, 'fresh');
+    }
+  }
+
+  return selected.slice(0, desiredCount);
+}
 
 /**
  * Deterministically computes user diagnostics from existing progress and history.
@@ -103,7 +474,7 @@ export function calculateMentorDiagnostics(
 
     breakdown[cat] = {
       category: cat,
-      name: CATEGORY_NAMES[cat] || cat,
+      name: CATEGORY_DISPLAY_NAMES[cat]?.name || cat,
       accuracy: acc,
       solved: rec.solved,
       correct: correctCount,
@@ -115,13 +486,11 @@ export function calculateMentorDiagnostics(
     };
   }
 
-  // Identify weakest and strongest strictly from tested categories
-  const testedCategories = categories.filter(c => breakdown[c].isTested);
+  const testedCategories = categories.filter(c => breakdown[c].isTested && breakdown[c].solved >= 5);
   let weakestCat: QuestionCategory = 'antonyms';
   let strongestCat: QuestionCategory = 'synonyms';
 
   if (testedCategories.length === 0) {
-    // Unattempted state: default to antonyms as priority practice
     weakestCat = 'antonyms';
     strongestCat = 'synonyms';
   } else if (testedCategories.length === 1) {
@@ -133,276 +502,25 @@ export function calculateMentorDiagnostics(
       breakdown[weakestCat].isStrongest = true;
     }
   } else {
-    // Sort tested categories ascending by accuracy
     testedCategories.sort((a, b) => breakdown[a].accuracy - breakdown[b].accuracy);
     weakestCat = testedCategories[0];
     strongestCat = testedCategories[testedCategories.length - 1];
-
     breakdown[weakestCat].isWeakest = true;
-    if (breakdown[strongestCat].accuracy > breakdown[weakestCat].accuracy) {
-      breakdown[strongestCat].isStrongest = true;
-    }
+    breakdown[strongestCat].isStrongest = true;
   }
-
-  // Vault mistakes check: if user has 3+ unresolved mistakes in any category, that category gets focus
-  const categoryMistakeCounts: Record<QuestionCategory, number> = {
-    antonyms: 0,
-    synonyms: 0,
-    ows: 0,
-    idioms: 0,
-  };
-  for (const m of unresolvedMistakes) {
-    if (m.question?.category && categoryMistakeCounts[m.question.category] !== undefined) {
-      categoryMistakeCounts[m.question.category]++;
-    }
-  }
-  let maxMistakesCat: QuestionCategory = weakestCat;
-  let highestMistakes = 0;
-  for (const cat of categories) {
-    if (categoryMistakeCounts[cat] > highestMistakes) {
-      highestMistakes = categoryMistakeCounts[cat];
-      maxMistakesCat = cat;
-    }
-  }
-  if (highestMistakes >= 3) {
-    if (breakdown[weakestCat]) breakdown[weakestCat].isWeakest = false;
-    weakestCat = maxMistakesCat;
-    if (breakdown[weakestCat]) breakdown[weakestCat].isWeakest = true;
-  }
-
-  // Accurate aggregate totals
-  const totalSolved = statsSummary.totalSolved || 0;
-  const totalCorrect = statsSummary.totalCorrect || 0;
-  const totalWrong = statsSummary.totalWrong || Math.max(0, totalSolved - totalCorrect);
-  const overallAccuracy = totalSolved > 0
-    ? Math.round((totalCorrect / totalSolved) * 100)
-    : (player.accuracyRate || 0);
 
   return {
-    overallAccuracy,
-    totalSolved,
-    totalCorrect,
-    totalWrong,
+    overallAccuracy: statsSummary.overallAccuracy,
+    totalSolved: statsSummary.totalSolved,
+    totalCorrect: statsSummary.totalCorrect,
+    totalWrong: statsSummary.totalWrong,
     categoryBreakdown: breakdown,
     weakestCategory: weakestCat,
     strongestCategory: strongestCat,
     mistakesCount: unresolvedMistakes.length,
     unresolvedMistakes,
     dueReviewsCount: schedulerStats.dueCount || 0,
-    examReadinessScore: statsSummary.examReadinessScore || 68,
+    examReadinessScore: statsSummary.examReadinessScore || 65,
     targetExam: player.targetExam || 'SSC CGL',
   };
-}
-
-/**
- * Returns deterministic faculty advice without Gemini (used for instant loading and fallback).
- */
-export function getDeterministicFacultyAdvice(
-  weakestCat: QuestionCategory,
-  targetExam: string,
-  weakAcc: number
-): MentorAiInsight {
-  const fallbackAdviceMap: Record<QuestionCategory, MentorAiInsight> = {
-    antonyms: {
-      diagnosis: `Your Antonyms accuracy (${weakAcc}%) requires immediate focus for ${targetExam}. Examiners frequently plant the synonym as Option A to trap candidates who read quickly without checking polarity.`,
-      recommendedFocus: [
-        'IN- / IM- / UN- (Negative prefixes: Ineffable, Impudent)',
-        'MAL- (Negative root: Malevolent, Maladroit, Malice)',
-        'BENE- / BON- (Positive root: Beneficent, Benign, Bonanza)',
-      ],
-      tacticalTip: 'Check the question polarity first: if the prompt word is positive (+), immediately eliminate all positive options before selecting your antonym.',
-      motivationalQuote: 'Eliminating hasty antonym mistakes directly translates to +4 to +6 raw marks in Tier-1.',
-      cachedAt: Date.now(),
-      isFallback: true,
-    },
-    synonyms: {
-      diagnosis: `Your Synonyms accuracy (${weakAcc}%) indicates difficulty when words have secondary or nuanced meanings in recent exam shifts.`,
-      recommendedFocus: [
-        'LOQ- / LOC- (Speech roots: Loquacious, Circumlocution)',
-        'ANIM- (Mind/Spirit: Equanimity, Magnanimous, Pusillanimous)',
-        'VER- (Truth: Veracity, Veritable, Aver)',
-      ],
-      tacticalTip: 'Substitute the given options into an authentic context sentence. The closest contextual synonym will preserve sentence tone.',
-      motivationalQuote: 'Mastering high-yield Latin roots unlocks 10+ exam words simultaneously.',
-      cachedAt: Date.now(),
-      isFallback: true,
-    },
-    ows: {
-      diagnosis: `One Word Substitution requires structural root word identification rather than blind memorization.`,
-      recommendedFocus: [
-        '-CRACY / -ARCHY (Governance & Rule: Plutocracy, Oligarchy)',
-        '-LOGY / -IST (Specialists: Paleontology, Numismatist)',
-        'PHIL- / PHOB- (Affinity & Aversion: Bibliophile, Claustrophobia)',
-      ],
-      tacticalTip: 'Break the long English word into Prefix + Root + Suffix. 85% of exam OWS questions can be answered simply by recognizing the suffix.',
-      motivationalQuote: 'Consistency in One Word Substitution is the highest-scoring shortcut in SSC English.',
-      cachedAt: Date.now(),
-      isFallback: true,
-    },
-    idioms: {
-      diagnosis: `Idioms accuracy (${weakAcc}%) reflects unfamiliarity with historical origins. Official exams repeat 70%+ of idioms from previous 5 years.`,
-      recommendedFocus: [
-        'Color Idioms (Red-letter day, Blue blood, White elephant)',
-        'Body Parts Idioms (Bite the bullet, Turn a blind eye, Cold feet)',
-        'Animal Metaphors (Barking up wrong tree, Bull in china shop)',
-      ],
-      tacticalTip: 'Never pick the literal physical meaning of an idiom option. The exam answer is almost always metaphorical or figurative.',
-      motivationalQuote: 'Master 10 idioms every single day and convert this into your strongest scoring section.',
-      cachedAt: Date.now(),
-      isFallback: true,
-    },
-  };
-
-  return fallbackAdviceMap[weakestCat] || fallbackAdviceMap.antonyms;
-}
-
-/**
- * Retrieves personalized coaching insight.
- * Checks local cache first: NEVER sends a Gemini request on every page open.
- * Only calls server if missing from cache or user explicitly clicks "Refresh".
- */
-export async function getPersonalizedMentorInsight(
-  diagnostics: MentorDiagnostics,
-  forceRefresh: boolean = false
-): Promise<MentorAiInsight> {
-  const today = getTodayStr();
-  const cacheKey = `${today}_${diagnostics.weakestCategory}`;
-
-  // 1. Check local cache unless force refreshed
-  if (!forceRefresh && typeof window !== 'undefined' && window.localStorage) {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY_MENTOR_INSIGHT);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed && parsed.cacheKey === cacheKey && parsed.insight) {
-          return parsed.insight;
-        }
-      }
-    } catch {}
-  }
-
-  // 2. Fetch fresh insight from server endpoint
-  try {
-    const res = await fetch('/api/gemini/mentor-insight', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        targetExam: diagnostics.targetExam,
-        overallAccuracy: diagnostics.overallAccuracy,
-        weakestCategory: diagnostics.weakestCategory,
-        weakestCategoryAccuracy: diagnostics.categoryBreakdown[diagnostics.weakestCategory]?.accuracy || 52,
-        strongestCategory: diagnostics.strongestCategory,
-        strongestCategoryAccuracy: diagnostics.categoryBreakdown[diagnostics.strongestCategory]?.accuracy || 78,
-        mistakesCount: diagnostics.mistakesCount,
-        totalSolved: diagnostics.totalSolved,
-      }),
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      if (data.insight && data.insight.diagnosis) {
-        const insightResult: MentorAiInsight = {
-          ...data.insight,
-          cachedAt: Date.now(),
-          isFallback: false,
-        };
-
-        // Cache locally for the rest of today
-        if (typeof window !== 'undefined' && window.localStorage) {
-          try {
-            localStorage.setItem(
-              STORAGE_KEY_MENTOR_INSIGHT,
-              JSON.stringify({ cacheKey, insight: insightResult, savedAt: Date.now() })
-            );
-          } catch {}
-        }
-
-        return insightResult;
-      }
-    }
-  } catch (err) {
-    console.warn('[AI Mentor] Server insight error, using deterministic faculty advice:', err);
-  }
-
-  // 3. Graceful fallback to deterministic faculty advice
-  const fallback = getDeterministicFacultyAdvice(
-    diagnostics.weakestCategory,
-    diagnostics.targetExam,
-    diagnostics.categoryBreakdown[diagnostics.weakestCategory]?.accuracy || 52
-  );
-  return fallback;
-}
-
-/**
- * Builds a curated, targeted 10-question drill session for "Train My Weak Areas".
- * Reuses authentic questions from:
- * 1. Unresolved mistakes from Mistake Vault
- * 2. Due review questions from Spaced Repetition Scheduler
- * 3. Authentic exam questions from the user's weakest category
- */
-export function buildWeakAreasDrillQuestions(
-  diagnostics: MentorDiagnostics,
-  targetExam: ExamType = 'SSC_CGL',
-  desiredCount: number = 10
-): Question[] {
-  questionBankEngine.init();
-  const selected: Question[] = [];
-  const seenFingerprints = new Set<string>();
-
-  const pushQuestion = (q: Question, reason: Question['reviewReason']) => {
-    if (!q || !q.id) return false;
-    const fp = (q.wordOrPhrase || q.id).toLowerCase().trim();
-    if (seenFingerprints.has(fp)) return false;
-    seenFingerprints.add(fp);
-    selected.push({
-      ...q,
-      reviewReason: reason,
-    });
-    return true;
-  };
-
-  // 1. Up to 4 questions from unresolved mistakes
-  const mistakeItems = [...diagnostics.unresolvedMistakes];
-  for (const item of mistakeItems) {
-    if (selected.length >= 4) break;
-    if (item.question) {
-      pushQuestion(item.question, 'mistake_review');
-    }
-  }
-
-  // 2. Up to 3 questions from due spaced repetition reviews
-  const dueStates = questionReviewScheduler.getAllReviewStates().filter(s => questionReviewScheduler.isConceptDue(s.memoryKey));
-  const playablePool = questionBankEngine.getPlayablePool('mixed');
-  for (const due of dueStates) {
-    if (selected.length >= 7) break;
-    const matchedQ = playablePool.find(
-      q => (q.memoryKey || q.wordOrPhrase).toLowerCase() === due.memoryKey.toLowerCase()
-    );
-    if (matchedQ) {
-      pushQuestion(matchedQ, 'due_review');
-    }
-  }
-
-  // 3. Fill the remaining spots with authentic questions from the user's WEAKEST category
-  const weakPool = questionBankEngine.getPlayablePool(diagnostics.weakestCategory);
-  // Filter for matching exam or high repeat count
-  const matchingExamQuestions = weakPool.filter(q => questionBankEngine.matchesExam(q, targetExam));
-  const candidatePool = matchingExamQuestions.length >= 10 ? matchingExamQuestions : weakPool;
-  const shuffledCandidates = questionBankEngine.shuffle(candidatePool);
-
-  for (const candidate of shuffledCandidates) {
-    if (selected.length >= desiredCount) break;
-    pushQuestion(candidate, 'saved_review');
-  }
-
-  // If still under desired count, fill from mixed pool
-  if (selected.length < desiredCount) {
-    const mixedShuffled = questionBankEngine.shuffle(playablePool);
-    for (const q of mixedShuffled) {
-      if (selected.length >= desiredCount) break;
-      pushQuestion(q, 'fresh');
-    }
-  }
-
-  return selected.slice(0, desiredCount);
 }

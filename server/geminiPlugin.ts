@@ -27,7 +27,22 @@ export function geminiApiPlugin(): Plugin {
           return next();
         }
 
-        if (req.method !== 'POST') {
+        const parsedUrl = new URL(req.url, 'http://localhost');
+        const pathname = parsedUrl.pathname;
+
+        // Handle OPTIONS preflight
+        if (req.method === 'OPTIONS') {
+          res.statusCode = 204;
+          res.setHeader('Allow', 'POST, GET, OPTIONS');
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
+          res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+          res.end();
+          return;
+        }
+
+        // Only allow POST and GET
+        if (req.method !== 'POST' && req.method !== 'GET') {
           res.statusCode = 405;
           res.setHeader('Content-Type', 'application/json');
           res.end(JSON.stringify({ error: 'Method not allowed' }));
@@ -35,80 +50,120 @@ export function geminiApiPlugin(): Plugin {
         }
 
         let bodyStr = '';
-        req.on('data', chunk => {
-          bodyStr += chunk;
-        });
+        if (req.method === 'POST') {
+          req.on('data', chunk => {
+            bodyStr += chunk;
+          });
+        }
 
-        req.on('end', async () => {
+        const handleProcessing = async () => {
           try {
-            const body = bodyStr ? JSON.parse(bodyStr) : {};
+            let body: any = {};
+            if (req.method === 'POST' && bodyStr) {
+              try {
+                body = JSON.parse(bodyStr);
+              } catch {}
+            } else if (req.method === 'GET') {
+              body = {
+                wordOrPhrase: parsedUrl.searchParams.get('wordOrPhrase') || parsedUrl.searchParams.get('word'),
+                category: parsedUrl.searchParams.get('category'),
+                meaning: parsedUrl.searchParams.get('meaning'),
+                examHistory: parsedUrl.searchParams.get('examHistory')?.split(','),
+              };
+            }
+
             const ai = getGeminiClient();
 
-            if (req.url === '/api/gemini/explain') {
+            if (pathname === '/api/gemini/explain') {
               const { wordOrPhrase, category, meaning, examHistory } = body;
-
-              if (!ai) {
-                // Fallback rich response if no API key is set
-                res.statusCode = 200;
+              if (!wordOrPhrase) {
+                res.statusCode = 400;
                 res.setHeader('Content-Type', 'application/json');
-                res.end(
-                  JSON.stringify({
-                    analysis: {
-                      rootEtymology: `Root breakdown for "${wordOrPhrase}": Classic Latin/Greek origin tested repeatedly in SSC CGL & RRB exams.`,
-                      mnemonicHook: `Memory Hack: Relate "${wordOrPhrase}" to a vivid daily Hindi/English visual situation.`,
-                      tcsExamTip: `Frequently repeated in SSC Tier-1 & Tier-2 (appeared in ${examHistory?.join(', ') || 'multiple past papers'}). Watch out for trap close-synonym options.`,
-                      sampleUsage: `The inspector used the term "${wordOrPhrase}" during the official briefing.`,
-                      relatedWords: ['Cognate 1', 'Cognate 2', 'Antonym equivalent'],
-                    },
-                  })
-                );
+                res.end(JSON.stringify({ error: 'Word or phrase is required' }));
                 return;
               }
 
-              const prompt = `You are a master English teacher for Indian Government Competitive Exams (SSC CGL, CHSL, CPO, MTS, RRB NTPC, Banking).
-Analyze the following vocabulary item:
-- Word/Phrase: "${wordOrPhrase}"
-- Category: ${category}
-- Current Meaning: "${meaning}"
-- Exam Context: ${examHistory ? examHistory.join(', ') : 'SSC CGL / Railway PYQs'}
+              if (!ai) {
+                res.statusCode = 503;
+                res.setHeader('Content-Type', 'application/json');
+                res.end(JSON.stringify({
+                  success: false,
+                  error: 'Gemini AI key not configured',
+                  aiEnrichmentAvailable: false,
+                }));
+                return;
+              }
 
-Provide a structured, engaging, memorable breakdown with:
-1. rootEtymology: Clear root word breakdown (Latin/Greek roots, prefix, suffix).
-2. mnemonicHook: Super memorable Hinglish/English trick to never forget this in the exam hall.
-3. tcsExamTip: Why TCS/SSC asks this repeatedly, what common confusing trap options they put in exams.
-4. sampleUsage: High-standard formal sentence relevant to administration, government, or literature.
-5. relatedWords: Array of 3 to 4 high-frequency synonyms/antonyms from SSC PYQs.`;
+              const prompt = `You are an expert English Faculty for SSC CGL, CHSL, CPO, CDS & Banking Govt examinations in India.
+Analyze the following English vocabulary term for an aspirant preparing for SSC/Govt exams:
+Word/Phrase: "${wordOrPhrase}"
+Category: "${category || 'General Vocabulary'}"
+Context Meaning: "${meaning || ''}"
+Past Exam Appearances: "${Array.isArray(examHistory) ? examHistory.join(', ') : (examHistory || 'SSC CGL')}"
 
-              const response = await ai.models.generateContent({
-                model: 'gemini-3.7-flash',
-                contents: prompt,
-                config: {
-                  responseMimeType: 'application/json',
-                  responseSchema: {
-                    type: Type.OBJECT,
-                    properties: {
-                      rootEtymology: { type: Type.STRING, description: 'Root word breakdown' },
-                      mnemonicHook: { type: Type.STRING, description: 'Memorable Hinglish mnemonic' },
-                      tcsExamTip: { type: Type.STRING, description: 'SSC / Railway exam trap tip' },
-                      sampleUsage: { type: Type.STRING, description: 'Exemplary sentence' },
-                      relatedWords: {
-                        type: Type.ARRAY,
-                        items: { type: Type.STRING },
-                        description: 'Related exam vocabulary words',
-                      },
-                    },
-                    required: ['rootEtymology', 'mnemonicHook', 'tcsExamTip', 'sampleUsage', 'relatedWords'],
+Respond strictly with a JSON object in this exact schema without markdown formatting or code fences:
+{
+  "meaning": "clear, precise, and complete English dictionary and exam definition of the word/phrase",
+  "hindiMeaning": "accurate Hindi meaning with Devanagari script and clear explanation (e.g. अल्पभाषी / कम बोलने वाला)",
+  "partOfSpeech": "part of speech (e.g. Adjective, Noun, Verb, Adverb, Idiom/Phrase)",
+  "rootEtymology": "concise root word origin, Latin/Greek components and meanings in 1-2 lines",
+  "mnemonicHook": "a clever, humorous, or highly effective memory trick / Hinglish trick (like how KD Campus / Neetu Singh / Jaideep Sir teach) to never forget this word",
+  "examTrapTip": "common traps set by exam paper setters (e.g. confuse with similar sounding words, synonym vs antonym trap, trap risk)",
+  "sampleUsage": "a crisp sentence demonstrating authentic usage in an administrative / exam context",
+  "relatedWords": ["word1", "word2", "word3", "word4"]
+}`;
+
+              try {
+                const response = await ai.models.generateContent({
+                  model: 'gemini-2.5-flash',
+                  contents: prompt,
+                  config: {
+                    responseMimeType: 'application/json',
                   },
-                },
-              });
+                });
 
-              res.statusCode = 200;
-              res.setHeader('Content-Type', 'application/json');
-              res.end(JSON.stringify({ analysis: JSON.parse(response.text || '{}') }));
-              return;
+                const responseText = response.text || '';
+                let parsedData: any = null;
+                try {
+                  parsedData = JSON.parse(responseText.trim());
+                } catch {
+                  const cleaned = responseText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+                  try {
+                    parsedData = JSON.parse(cleaned);
+                  } catch {
+                    const firstBrace = cleaned.indexOf('{');
+                    const lastBrace = cleaned.lastIndexOf('}');
+                    if (firstBrace !== -1 && lastBrace > firstBrace) {
+                      try {
+                        parsedData = JSON.parse(cleaned.substring(firstBrace, lastBrace + 1));
+                      } catch {}
+                    }
+                  }
+                }
+
+                if (parsedData && (parsedData.mnemonicHook || parsedData.rootEtymology || parsedData.meaning)) {
+                  res.statusCode = 200;
+                  res.setHeader('Content-Type', 'application/json');
+                  res.end(JSON.stringify({ success: true, analysis: parsedData, source: 'gemini' }));
+                  return;
+                } else {
+                  throw new Error('Incomplete response from AI model');
+                }
+              } catch (aiErr: any) {
+                const isQuota = aiErr?.status === 429 || aiErr?.message?.includes('429') || aiErr?.message?.includes('RESOURCE_EXHAUSTED');
+                res.statusCode = isQuota ? 429 : 503;
+                res.setHeader('Content-Type', 'application/json');
+                res.end(JSON.stringify({
+                  success: false,
+                  status: isQuota ? 429 : 503,
+                  error: isQuota ? 'Gemini rate limit exceeded' : (aiErr?.message || 'AI enrichment error'),
+                  aiEnrichmentAvailable: false,
+                }));
+                return;
+              }
             }
 
-            if (req.url === '/api/gemini/generate-battle') {
+            if (pathname === '/api/gemini/generate-battle') {
               const { category = 'mixed', examType = 'SSC_CGL', count = 5 } = body;
 
               if (!ai) {
@@ -170,7 +225,7 @@ Include accurate Hindi meanings, realistic 4 options, exact correct answer index
               return;
             }
 
-            if (req.url === '/api/gemini/enrich-pyq-batch' || req.url === '/api/gemini/enrich-pyq') {
+            if (pathname === '/api/gemini/enrich-pyq-batch' || pathname === '/api/gemini/enrich-pyq') {
               let questionsList: any[] = [];
               if (Array.isArray(body.questions)) {
                 questionsList = body.questions;
@@ -208,7 +263,13 @@ Include accurate Hindi meanings, realistic 4 options, exact correct answer index
             res.setHeader('Content-Type', 'application/json');
             res.end(JSON.stringify({ error: (err as Error).message || 'Internal error' }));
           }
-        });
+        };
+
+        if (req.method === 'POST') {
+          req.on('end', handleProcessing);
+        } else {
+          handleProcessing();
+        }
       });
     },
   };

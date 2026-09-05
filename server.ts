@@ -959,9 +959,17 @@ app.post('/api/gemini/enrich-pyq', handleEnrichmentRequest);
 app.post('/api/gemini/enrich-pyq-batch', handleEnrichmentRequest);
 
 // Gemini AI Tutor Vocabulary Explanation Endpoint
-app.post('/api/gemini/explain', async (req, res) => {
-  const { wordOrPhrase, category, meaning, examHistory } = req.body;
-  if (!wordOrPhrase) {
+const handleExplainRequest = async (req: express.Request, res: express.Response) => {
+  if (req.method !== 'POST' && req.method !== 'GET') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  const wordOrPhrase = req.method === 'POST' ? req.body?.wordOrPhrase : (req.query?.wordOrPhrase || req.query?.word);
+  const category = req.method === 'POST' ? req.body?.category : req.query?.category;
+  const meaning = req.method === 'POST' ? req.body?.meaning : req.query?.meaning;
+  const examHistory = req.method === 'POST' ? req.body?.examHistory : req.query?.examHistory;
+
+  if (!wordOrPhrase || typeof wordOrPhrase !== 'string') {
     return res.status(400).json({ error: 'Word or phrase is required' });
   }
 
@@ -985,74 +993,101 @@ Respond strictly with a JSON object in this exact schema without markdown format
 }`;
 
   const ai = getGenAI();
-  if (ai) {
-    // Model candidates with fallback if a model experiences high traffic (503)
-    const modelCandidates = ['gemini-3.1-flash-lite', 'gemini-3.7-flash', 'gemini-flash-latest'];
-    for (const modelName of modelCandidates) {
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        try {
-          const response = await ai.models.generateContent({
-            model: modelName,
-            contents: prompt,
-            config: {
-              responseMimeType: 'application/json',
-            },
-          });
+  if (!ai) {
+    return res.status(503).json({
+      success: false,
+      error: 'Gemini AI API key not configured',
+      aiEnrichmentAvailable: false,
+    });
+  }
 
-          const responseText = response.text || '';
-          if (responseText) {
-            let parsedData: any = null;
+  // Model candidates with fallback if a model experiences high traffic (503)
+  const modelCandidates = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest'];
+  let lastErrorStatus = 500;
+  let lastErrorMessage = 'Gemini AI unavailable';
+
+  for (const modelName of modelCandidates) {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const response = await ai.models.generateContent({
+          model: modelName,
+          contents: prompt,
+          config: {
+            responseMimeType: 'application/json',
+          },
+        });
+
+        const responseText = response.text || '';
+        if (responseText) {
+          let parsedData: any = null;
+          try {
+            parsedData = JSON.parse(responseText.trim());
+          } catch {
+            const cleaned = responseText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
             try {
-              parsedData = JSON.parse(responseText.trim());
+              parsedData = JSON.parse(cleaned);
             } catch {
-              const cleaned = responseText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-              try {
-                parsedData = JSON.parse(cleaned);
-              } catch {
-                const firstBrace = cleaned.indexOf('{');
-                const lastBrace = cleaned.lastIndexOf('}');
-                if (firstBrace !== -1 && lastBrace > firstBrace) {
-                  try {
-                    parsedData = JSON.parse(cleaned.substring(firstBrace, lastBrace + 1));
-                  } catch {}
-                }
+              const firstBrace = cleaned.indexOf('{');
+              const lastBrace = cleaned.lastIndexOf('}');
+              if (firstBrace !== -1 && lastBrace > firstBrace) {
+                try {
+                  parsedData = JSON.parse(cleaned.substring(firstBrace, lastBrace + 1));
+                } catch {}
               }
             }
-            if (parsedData && (parsedData.mnemonicHook || parsedData.rootEtymology)) {
-              return res.json({ analysis: parsedData });
-            }
           }
-        } catch (err: any) {
-          const isTransient = err?.status === 503 || err?.status === 429 || err?.message?.includes('503') || err?.message?.includes('429');
-          if (attempt === 1 && isTransient) {
-            await new Promise(resolve => setTimeout(resolve, 500));
-            continue;
+          if (parsedData && (parsedData.mnemonicHook || parsedData.rootEtymology || parsedData.meaning)) {
+            return res.json({ success: true, analysis: parsedData, source: 'gemini' });
           }
-          console.warn(`[GEMINI EXPLAIN] Model ${modelName} unavailable (${err?.status || err?.message}), trying next candidate...`);
-          break;
         }
+      } catch (err: any) {
+        const isQuota = err?.status === 429 || err?.message?.includes('429') || err?.message?.includes('RESOURCE_EXHAUSTED');
+        if (isQuota) {
+          console.warn(`[GEMINI EXPLAIN] Model ${modelName} hit quota limit (429).`);
+          return res.status(429).json({
+            success: false,
+            status: 429,
+            error: 'Gemini rate limit exceeded',
+            aiEnrichmentAvailable: false,
+          });
+        }
+
+        const isTransient = err?.status === 503 || err?.message?.includes('503');
+        if (attempt === 1 && isTransient) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+          continue;
+        }
+
+        lastErrorStatus = err?.status || 500;
+        lastErrorMessage = err?.message || 'Gemini error';
+        console.warn(`[GEMINI EXPLAIN] Model ${modelName} unavailable (${err?.status || err?.message}), trying next candidate...`);
+        break;
       }
     }
   }
 
-  // Graceful structured response if API key is not configured or all live model endpoints are experiencing temporary spikes
-  res.json({
-    analysis: {
-      meaning: `Primary definition and competitive exam usage context for "${wordOrPhrase}".`,
-      hindiMeaning: `महत्वपूर्ण परीक्षा शब्दावली अर्थ / सटीक हिंदी भावार्थ`,
-      partOfSpeech: `Vocabulary Term`,
-      rootEtymology: `Derived from classical roots frequently appearing in SSC CGL, CHSL & Banking exams. Focus on root affixes to decode antonyms/synonyms instantly.`,
-      mnemonicHook: `Memory Hook: Connect "${wordOrPhrase}" phonetically with an everyday Hindi phrase or vivid mental image to lock it into long-term memory.`,
-      examTrapTip: `High-frequency in SSC Tier-1 & Tier-2 shifts. Watch out for near-synonym options engineered to mislead hurried candidates.`,
-      sampleUsage: `The candidate demonstrated thorough mastery of "${wordOrPhrase}" in the competitive examination.`,
-      relatedWords: ['High-Frequency PYQ', 'Exam Pair', 'Root Cognate', 'Repeated Term']
-    }
+  // Do NOT return fake placeholder content. Return truthful status so client uses dictionary fallback.
+  return res.status(lastErrorStatus).json({
+    success: false,
+    status: lastErrorStatus,
+    error: lastErrorMessage,
+    aiEnrichmentAvailable: false,
   });
+};
+
+app.post('/api/gemini/explain', handleExplainRequest);
+app.get('/api/gemini/explain', handleExplainRequest);
+app.options('/api/gemini/explain', (_req, res) => {
+  res.setHeader('Allow', 'POST, GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.sendStatus(204);
 });
 
 // Gemini AI Vocab Mentor Personalized Coaching Insight Endpoint
 app.post('/api/gemini/mentor-insight', async (req, res) => {
   const {
+    analytics,
     targetExam,
     overallAccuracy,
     weakestCategory,
@@ -1063,29 +1098,75 @@ app.post('/api/gemini/mentor-insight', async (req, res) => {
     totalSolved,
   } = req.body;
 
-  const target = targetExam || 'SSC CGL';
-  const weakCat = (weakestCategory || 'antonyms').toLowerCase();
-  const weakAcc = typeof weakestCategoryAccuracy === 'number' ? weakestCategoryAccuracy : 52;
-  const strongCat = (strongestCategory || 'synonyms').toLowerCase();
-  const strongAcc = typeof strongestCategoryAccuracy === 'number' ? strongestCategoryAccuracy : 76;
-  const mistakes = mistakesCount || 0;
-  const solved = totalSolved || 0;
+  // Extract from unified analytics object if provided
+  const target = (analytics?.targetExam || targetExam || 'SSC CGL').trim();
+  const periodLabel = analytics?.periodLabel || 'This Week';
+  const solved = typeof analytics?.totalAttempted === 'number' ? analytics.totalAttempted : (totalSolved || 0);
+  const correct = typeof analytics?.totalCorrect === 'number' ? analytics.totalCorrect : 0;
+  const overallAcc = typeof analytics?.overallAccuracy === 'number' 
+    ? `${analytics.overallAccuracy}%` 
+    : (overallAccuracy ? `${overallAccuracy}%` : (solved > 0 ? `${Math.round((correct / solved) * 100)}%` : 'Not enough data'));
+  
+  const weakCat = analytics?.weakestCategory || (weakestCategory ? String(weakestCategory).toLowerCase() : null);
+  const strongCat = analytics?.strongestCategory || (strongestCategory ? String(strongestCategory).toLowerCase() : null);
 
-  const prompt = `You are an elite Senior English Faculty & Exam Mentor for Indian Competitive Examinations (SSC CGL, CHSL, CPO, CDS, Banking).
-The student has the following deterministic performance diagnostics on VocabClash:
+  const weakStat = weakCat && analytics?.categoryStats?.[weakCat];
+  const weakAccStr = weakStat && typeof weakStat.accuracy === 'number' 
+    ? `${weakStat.accuracy}% (${weakStat.correct}/${weakStat.attempted})` 
+    : (typeof weakestCategoryAccuracy === 'number' ? `${weakestCategoryAccuracy}%` : 'Not enough data');
+
+  const strongStat = strongCat && analytics?.categoryStats?.[strongCat];
+  const strongAccStr = strongStat && typeof strongStat.accuracy === 'number'
+    ? `${strongStat.accuracy}% (${strongStat.correct}/${strongStat.attempted})`
+    : (typeof strongestCategoryAccuracy === 'number' ? `${strongestCategoryAccuracy}%` : 'Not enough data');
+
+  const mistakes = typeof analytics?.unresolvedMistakesCount === 'number' 
+    ? analytics.unresolvedMistakesCount 
+    : (mistakesCount || 0);
+  const dueReviews = typeof analytics?.dueReviews === 'number' ? analytics.dueReviews : 0;
+  const repeatedWords = Array.isArray(analytics?.repeatedMistakes)
+    ? analytics.repeatedMistakes.slice(0, 5).map((m: any) => `${m.wordOrPhrase} (missed ${m.wrongCount}x)`).join(', ')
+    : '';
+
+  const deltaStr = typeof analytics?.accuracyDeltaPp === 'number'
+    ? `${analytics.accuracyDeltaPp >= 0 ? '+' : ''}${analytics.accuracyDeltaPp} percentage points vs previous period`
+    : 'No previous period comparison available';
+
+  // Category summary string
+  let categorySummary = '';
+  if (analytics?.categoryStats) {
+    categorySummary = Object.entries(analytics.categoryStats).map(([cat, stat]: [string, any]) => {
+      const acc = typeof stat.accuracy === 'number' ? `${stat.accuracy}%` : 'Not attempted';
+      return `${cat.toUpperCase()}: ${acc} (${stat.correct || 0}/${stat.attempted || 0} correct)`;
+    }).join('; ');
+  }
+
+  const prompt = `You are an elite, objective Senior English Vocabulary Mentor for Indian Competitive Exams (${target}).
+Here is the student's real, deterministic performance analytics on VocabClash:
 - Target Exam: ${target}
-- Questions Solved: ${solved}
-- Overall Accuracy: ${overallAccuracy || 60}%
-- Weakest Area: ${weakCat.toUpperCase()} with ${weakAcc}% accuracy
-- Strongest Area: ${strongCat.toUpperCase()} with ${strongAcc}% accuracy
-- Active Mistakes in Revision Vault: ${mistakes} words
+- Period: ${periodLabel}
+- Questions Attempted: ${solved} (Correct: ${correct})
+- Overall Accuracy: ${overallAcc}
+- Accuracy Trend: ${deltaStr}
+- Category Breakdown: ${categorySummary || 'N/A'}
+- Weakest Category: ${weakCat ? `${weakCat.toUpperCase()} at ${weakAccStr}` : 'Not enough category data yet (<5 questions)'}
+- Strongest Category: ${strongCat ? `${strongCat.toUpperCase()} at ${strongAccStr}` : 'Not enough category data yet (<5 questions)'}
+- Repeatedly Missed Words: ${repeatedWords || 'None recorded'}
+- Concepts Due for Spaced Repetition Review: ${dueReviews}
+- Active Mistakes in Vault: ${mistakes}
 
-Provide a highly personalized, empathetic yet sharp coaching evaluation strictly in JSON format without markdown code blocks:
+STRICT GROUNDING RULES:
+1. You may ONLY make claims strictly supported by the supplied analytics.
+2. NEVER invent accuracy percentages, question counts, marks, exam patterns, user behavior or question statistics.
+3. NEVER make unsupported claims like "examiners frequently put synonyms in Option A" or promises like "This will increase your score by 4-6 marks".
+4. If a metric is "Not enough data" or "Not attempted", state that clearly rather than assuming 0% or fabricating a reason.
+5. Provide a crisp, professional coaching report strictly in JSON format without markdown code blocks:
 {
-  "diagnosis": "2 sharp sentences in bilingual Hinglish/English explaining why they struggle in ${weakCat} and the specific examiner traps responsible (e.g. confusing synonyms with antonyms, near-miss trap options, trap risk).",
-  "recommendedFocus": ["Root/Pattern 1 with quick meaning", "Root/Pattern 2 with quick meaning", "Root/Pattern 3 with quick meaning"],
-  "tacticalTip": "1 crisp, actionable exam elimination technique tailored specifically for ${weakCat} in ${target}.",
-  "motivationalQuote": "1 crisp, uplifting competitive exam mantra (10-15 words)."
+  "diagnosis": "2 sharp, objective sentences diagnosing their current vocabulary performance and accuracy based strictly on the provided numbers.",
+  "whatImproved": "1-2 sentences highlighting positive trends or areas with solid accuracy, referencing actual figures if applicable.",
+  "mainWeakness": "1-2 sentences describing their lowest-accuracy category or repeated mistakes without making ungrounded claims.",
+  "whatToDoNext": ["Actionable step 1 based on weakest category or due reviews", "Actionable step 2", "Actionable step 3"],
+  "encouragement": "1 crisp, uplifting competitive exam mantra (10-15 words)."
 }`;
 
   const ai = getGenAI();
@@ -1122,7 +1203,18 @@ Provide a highly personalized, empathetic yet sharp coaching evaluation strictly
               }
             }
             if (parsedData && parsedData.diagnosis) {
-              return res.json({ insight: parsedData });
+              const report = {
+                diagnosis: parsedData.diagnosis,
+                whatImproved: parsedData.whatImproved || 'Keep practicing daily to build steady vocabulary recall.',
+                mainWeakness: parsedData.mainWeakness || (weakCat ? `${weakCat.toUpperCase()} is currently your lowest-scoring area.` : 'Continue practicing all categories to identify specific patterns.'),
+                whatToDoNext: Array.isArray(parsedData.whatToDoNext) ? parsedData.whatToDoNext : ['Practice questions in your weakest category', 'Clear due spaced repetition reviews', 'Review repeatedly missed words'],
+                encouragement: parsedData.encouragement || parsedData.motivationalQuote || 'Consistent daily vocabulary practice builds long-term exam mastery.',
+                // Legacy compatibility fields
+                recommendedFocus: Array.isArray(parsedData.whatToDoNext) ? parsedData.whatToDoNext : ['Root words and prefixes', 'High-frequency exam words', 'Daily mistake vault review'],
+                tacticalTip: parsedData.mainWeakness || 'Analyze question context and eliminate wrong options systematically.',
+                motivationalQuote: parsedData.encouragement || 'Consistent daily revision separates the aspirants from the selected officers.',
+              };
+              return res.json({ insight: report, report });
             }
           }
         } catch (err: any) {
@@ -1138,36 +1230,46 @@ Provide a highly personalized, empathetic yet sharp coaching evaluation strictly
     }
   }
 
-  // Deterministic fallback if Gemini is offline or experiencing quota limits
-  const fallbackTips: Record<string, { diagnosis: string; recommendedFocus: string[]; tacticalTip: string; motivationalQuote: string }> = {
-    antonyms: {
-      diagnosis: `Your Antonyms accuracy (${weakAcc}%) is pulling down your ${target} score. Examiners deliberately place the synonym as Option A to trap hurried candidates.`,
-      recommendedFocus: ['IN/IM/UN- (Negative Prefixes: Ineffable, Impudent)', 'MAL- (Bad: Malevolent, Maladroit)', 'BENE- (Good: Beneficent, Benevolent)'],
-      tacticalTip: 'Before marking an Antonym, confirm word polarity: (+) word needs (-) antonym. Eliminate options with the same charge first.',
-      motivationalQuote: 'Every antonym mastered today secures +2 raw marks in the final merit list.'
-    },
-    synonyms: {
-      diagnosis: `Your Synonyms accuracy (${weakAcc}%) indicates difficulty with subtle nuance and secondary word meanings tested in recent shifts.`,
-      recommendedFocus: ['LOQ/LOC (Speech: Loquacious, Circumlocution)', 'ANIM (Mind/Spirit: Equanimity, Magnanimous)', 'VER (Truth: Veracity, Veritable)'],
-      tacticalTip: 'Replace the target word with the options in a sample sentence to test contextual fitness instead of relying on gut feeling.',
-      motivationalQuote: 'Precision in vocabulary separates the aspirants from the selected officers.'
-    },
-    ows: {
-      diagnosis: `One Word Substitution requires identifying Greek/Latin root stems rather than rote memorization.`,
-      recommendedFocus: ['-CRACY / -ARCHY (Rule/Government)', '-LOGY / -IST (Study & Specialists)', 'PHIL / PHOBIA (Love & Fear)'],
-      tacticalTip: 'Split complex words into prefix + root + suffix. 80% of OWS options can be decoded directly through root morphology.',
-      motivationalQuote: 'Master the root, and you automatically master 20 related words.'
-    },
-    idioms: {
-      diagnosis: `Idioms accuracy (${weakAcc}%) reflects unfamiliarity with metaphorical origin stories. Examiners repeat 75% of previous year idioms.`,
-      recommendedFocus: ['Color Idioms (Green-eyed, Red-letter day)', 'Body Part Idioms (Cold shoulder, Achilles heel)', 'Animal Metaphors (Bull in a china shop)'],
-      tacticalTip: 'Never pick the literal physical meaning of an idiom; the correct answer is almost always figurative.',
-      motivationalQuote: 'Consistently reviewing 10 idioms daily guarantees full marks in the idioms section.'
-    }
+  // Strictly grounded deterministic fallback if Gemini is offline or unavailable
+  const fallbackDiagnosis = weakCat && weakStat && typeof weakStat.accuracy === 'number'
+    ? `Your ${weakCat.toUpperCase()} accuracy is currently ${weakStat.accuracy}% across ${weakStat.attempted} questions, while overall accuracy is ${overallAcc}.`
+    : solved > 0 
+    ? `You have completed ${solved} vocabulary questions with an overall accuracy of ${overallAcc}.`
+    : `Complete at least 20 vocabulary questions across categories to establish detailed diagnostics.`;
+
+  const fallbackImproved = typeof analytics?.accuracyDeltaPp === 'number' && analytics.accuracyDeltaPp > 0
+    ? `Your accuracy improved by ${analytics.accuracyDeltaPp} percentage points compared to the previous period.`
+    : strongCat && strongStat && typeof strongStat.accuracy === 'number'
+    ? `${strongCat.toUpperCase()} is your strongest category at ${strongStat.accuracy}% accuracy (${strongStat.correct}/${strongStat.attempted} correct).`
+    : `Daily consistent practice creates durable memory traces.`;
+
+  const fallbackWeakness = weakCat && weakStat && typeof weakStat.accuracy === 'number'
+    ? `${weakCat.toUpperCase()} requires targeted focus (${weakStat.wrong} incorrect answers recorded).`
+    : repeatedWords
+    ? `Repeatedly missed words like ${repeatedWords} need focused revision.`
+    : `More category attempts are needed to isolate specific weaknesses.`;
+
+  const fallbackReport = {
+    diagnosis: fallbackDiagnosis,
+    whatImproved: fallbackImproved,
+    mainWeakness: fallbackWeakness,
+    whatToDoNext: [
+      weakCat ? `Complete a 10-question Weak Areas Drill in ${weakCat.toUpperCase()}` : 'Complete questions across all 4 categories',
+      dueReviews > 0 ? `Review your ${dueReviews} due spaced repetition concepts` : 'Check your Mistake Vault for unresolved words',
+      'Maintain your daily practice streak to consolidate long-term retention',
+    ],
+    encouragement: 'Consistent daily vocabulary practice builds steady long-term exam mastery.',
+    // Legacy fields
+    recommendedFocus: [
+      'Negative prefixes: IN-, IM-, DIS-, UN-',
+      'Root morphology: LOQ-, BENE-, MAL-, CHRON-',
+      'Frequently repeated exam concepts'
+    ],
+    tacticalTip: 'Verify word polarity and context before confirming your choice.',
+    motivationalQuote: 'Consistency in revision converts weak areas into strengths.',
   };
 
-  const fallback = fallbackTips[weakCat] || fallbackTips.antonyms;
-  res.json({ insight: fallback });
+  res.json({ insight: fallbackReport, report: fallbackReport });
 });
 
 // Monetag Service Worker Verification & Ad Delivery Endpoint
