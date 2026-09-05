@@ -67,7 +67,7 @@ export const SEO_PAGES: Record<string, SeoPageData> = {
     },
     strategySteps: [
       {
-        title: '1. Target 2018-2025 TCS Pattern PYQs First',
+        title: '1. Target 2018-2025 Latest Examiner Pattern PYQs First',
         description: 'Prioritize words tested repeatedly in SSC CGL, CHSL, and CPO since 2018. Over 70% of exam questions are direct repeats or derived from answer options of previous shifts.'
       },
       {
@@ -656,7 +656,7 @@ export const SEO_PAGES: Record<string, SeoPageData> = {
     badge: 'Previous Year Question Arena',
     readingTime: '8 min read',
     examFocus: 'SSC CGL, CHSL, CPO, MTS, Selection Posts (2018-2025)',
-    intro: 'Previous Year Questions (PYQs) form the bedrock of SSC English preparation. With over 24,000 official questions administered across shifts from 2018 to 2025 under the TCS testing pattern, analyzing recurring patterns, vocabulary frequency, and common error traps provides the highest return on study time.',
+    intro: 'Previous Year Questions (PYQs) form the bedrock of SSC English preparation. With over 24,000 official questions administered across shifts from 2018 to 2025 under official examination testing patterns, analyzing recurring patterns, vocabulary frequency, and common error traps provides the highest return on study time.',
     whyItMatters: [
       'Over 70% of questions in upcoming shifts are direct repeats or closely patterned on 2018-2025 PYQs.',
       'Solving PYQs under timed constraints builds accurate intuition and prevents exam-hall panic.',
@@ -714,7 +714,7 @@ export const SEO_PAGES: Record<string, SeoPageData> = {
     faqs: [
       {
         question: 'Which years of SSC English PYQs are most relevant for 2025-2026 exams?',
-        answer: 'Questions from 2018 onwards (when TCS began conducting SSC exams) are the most critical. Ensure you have thoroughly covered 2021, 2022, 2023, and 2024 CGL, CHSL, and CPO shifts.'
+        answer: 'Questions from 2018 onwards (reflecting modern computer-based testing patterns) are the most critical. Ensure you have thoroughly covered 2021, 2022, 2023, and 2024 CGL, CHSL, and CPO shifts.'
       },
       {
         question: 'How does VocabClash help in PYQ retention?',

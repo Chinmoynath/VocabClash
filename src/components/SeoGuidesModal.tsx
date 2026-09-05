@@ -88,7 +88,7 @@ export const SeoGuidesModal: React.FC<SeoGuidesModalProps> = ({
         {/* Footer info */}
         <div className="p-4 bg-slate-950/80 border-t border-slate-800 text-center shrink-0">
           <p className="text-xs text-slate-400">
-            All guides contain official SSC CGL, CHSL, CPO and TCS-pattern Previous Year Questions with full explanations.
+            All guides contain official SSC CGL, CHSL, CPO and latest examiner pattern Previous Year Questions with full explanations.
           </p>
         </div>
       </div>

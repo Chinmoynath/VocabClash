@@ -1,4 +1,5 @@
 import { Question, SavedWord } from '../types';
+import { enrichQuestionWithEducation } from './questionEducationResolver';
 
 /**
  * Checks if a vault item was explicitly saved / bookmarked by the user.
@@ -54,8 +55,10 @@ export function sanitizeVaultItem(raw: any): SavedWord | null {
     return null;
   }
 
+  const enrichedQuestion = enrichQuestionWithEducation(raw.question);
+
   return {
-    question: raw.question,
+    question: enrichedQuestion,
     savedAt: typeof raw.savedAt === 'number' ? raw.savedAt : Date.now(),
     mistakeCount,
     correctCount: Math.max(0, typeof raw.correctCount === 'number' ? raw.correctCount : 0),
@@ -98,8 +101,10 @@ export function recordMistakeInVault(vault: SavedWord[], question: Question): Sa
   if (existingIndex >= 0) {
     const existing = vault[existingIndex];
     const currentlySaved = isItemSaved(existing);
+    const updatedQuestion = enrichQuestionWithEducation(existing.question || question);
     const updated: SavedWord = {
       ...existing,
+      question: updatedQuestion,
       mistakeCount: (existing.mistakeCount || 0) + 1,
       isMistake: true,
       // Saved state remains COMPLETELY UNCHANGED
@@ -113,8 +118,9 @@ export function recordMistakeInVault(vault: SavedWord[], question: Question): Sa
     return nextVault;
   } else {
     // Brand new mistake item (NOT saved)
+    const enrichedQuestion = enrichQuestionWithEducation(question);
     const newMistakeItem: SavedWord = {
-      question,
+      question: enrichedQuestion,
       savedAt: Date.now(),
       mistakeCount: 1,
       correctCount: 0,
@@ -152,8 +158,10 @@ export function toggleSaveInVault(
       return { updatedVault: filtered, isNowSaved: false };
     }
 
+    const updatedQuestion = enrichQuestionWithEducation(existing.question || question);
     const updated: SavedWord = {
       ...existing,
+      question: updatedQuestion,
       isSaved: nextSaved,
       isUserSaved: nextSaved,
       isBookmarked: nextSaved,
@@ -172,8 +180,9 @@ export function toggleSaveInVault(
     }
 
     // Brand new saved item (NOT a mistake)
+    const enrichedQuestion = enrichQuestionWithEducation(question);
     const newSavedItem: SavedWord = {
-      question,
+      question: enrichedQuestion,
       savedAt: Date.now(),
       mistakeCount: 0,
       correctCount: 0,

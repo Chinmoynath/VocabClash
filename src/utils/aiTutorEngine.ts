@@ -170,7 +170,7 @@ const VOCAB_KNOWLEDGE_BASE: Record<string, WordKnowledge> = {
     partOfSpeech: "Verb / Noun",
     root: "Derived from Old French 'dancier', likely of Germanic origin linked to Old High German 'danson' (to stretch or drag).",
     mnemonic: "D-ANCE: When you DANCE around a direct question, you delay giving a firm answer.",
-    trap: "In SSC & TCS passages, tested in Idioms/Phrases: 'Dance attendance on someone' (चापलूसी करना / to obey servilely) and 'Lead someone a merry dance' (परेशान करना).",
+    trap: "In SSC & competitive exam passages, tested in Idioms/Phrases: 'Dance attendance on someone' (चापलूसी करना / to obey servilely) and 'Lead someone a merry dance' (परेशान करना).",
     usage: "The minister tried to dance around the controversial question during the press conference.",
     related: ['Prance', 'Oscillate', 'Caprice', 'Evade', 'Equivocate']
   }

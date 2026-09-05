@@ -979,7 +979,7 @@ Respond strictly with a JSON object in this exact schema without markdown format
   "partOfSpeech": "part of speech (e.g. Adjective, Noun, Verb, Adverb, Idiom/Phrase)",
   "rootEtymology": "concise root word origin, Latin/Greek components and meanings in 1-2 lines",
   "mnemonicHook": "a clever, humorous, or highly effective memory trick / Hinglish trick (like how KD Campus / Neetu Singh / Jaideep Sir teach) to never forget this word",
-  "examTrapTip": "common traps set by TCS / SSC examiners (e.g. confuse with similar sounding words, synonym vs antonym trap)",
+  "examTrapTip": "common traps set by exam paper setters (e.g. confuse with similar sounding words, synonym vs antonym trap, trap risk)",
   "sampleUsage": "a crisp sentence demonstrating authentic usage in an administrative / exam context",
   "relatedWords": ["word1", "word2", "word3", "word4"]
 }`;
@@ -1048,6 +1048,126 @@ Respond strictly with a JSON object in this exact schema without markdown format
       relatedWords: ['High-Frequency PYQ', 'Exam Pair', 'Root Cognate', 'Repeated Term']
     }
   });
+});
+
+// Gemini AI Vocab Mentor Personalized Coaching Insight Endpoint
+app.post('/api/gemini/mentor-insight', async (req, res) => {
+  const {
+    targetExam,
+    overallAccuracy,
+    weakestCategory,
+    weakestCategoryAccuracy,
+    strongestCategory,
+    strongestCategoryAccuracy,
+    mistakesCount,
+    totalSolved,
+  } = req.body;
+
+  const target = targetExam || 'SSC CGL';
+  const weakCat = (weakestCategory || 'antonyms').toLowerCase();
+  const weakAcc = typeof weakestCategoryAccuracy === 'number' ? weakestCategoryAccuracy : 52;
+  const strongCat = (strongestCategory || 'synonyms').toLowerCase();
+  const strongAcc = typeof strongestCategoryAccuracy === 'number' ? strongestCategoryAccuracy : 76;
+  const mistakes = mistakesCount || 0;
+  const solved = totalSolved || 0;
+
+  const prompt = `You are an elite Senior English Faculty & Exam Mentor for Indian Competitive Examinations (SSC CGL, CHSL, CPO, CDS, Banking).
+The student has the following deterministic performance diagnostics on VocabClash:
+- Target Exam: ${target}
+- Questions Solved: ${solved}
+- Overall Accuracy: ${overallAccuracy || 60}%
+- Weakest Area: ${weakCat.toUpperCase()} with ${weakAcc}% accuracy
+- Strongest Area: ${strongCat.toUpperCase()} with ${strongAcc}% accuracy
+- Active Mistakes in Revision Vault: ${mistakes} words
+
+Provide a highly personalized, empathetic yet sharp coaching evaluation strictly in JSON format without markdown code blocks:
+{
+  "diagnosis": "2 sharp sentences in bilingual Hinglish/English explaining why they struggle in ${weakCat} and the specific examiner traps responsible (e.g. confusing synonyms with antonyms, near-miss trap options, trap risk).",
+  "recommendedFocus": ["Root/Pattern 1 with quick meaning", "Root/Pattern 2 with quick meaning", "Root/Pattern 3 with quick meaning"],
+  "tacticalTip": "1 crisp, actionable exam elimination technique tailored specifically for ${weakCat} in ${target}.",
+  "motivationalQuote": "1 crisp, uplifting competitive exam mantra (10-15 words)."
+}`;
+
+  const ai = getGenAI();
+  if (ai) {
+    const modelCandidates = ['gemini-3.1-flash-lite', 'gemini-3.7-flash', 'gemini-flash-latest'];
+    for (const modelName of modelCandidates) {
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          const response = await ai.models.generateContent({
+            model: modelName,
+            contents: prompt,
+            config: {
+              responseMimeType: 'application/json',
+            },
+          });
+
+          const responseText = response.text || '';
+          if (responseText) {
+            let parsedData: any = null;
+            try {
+              parsedData = JSON.parse(responseText.trim());
+            } catch {
+              const cleaned = responseText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+              try {
+                parsedData = JSON.parse(cleaned);
+              } catch {
+                const firstBrace = cleaned.indexOf('{');
+                const lastBrace = cleaned.lastIndexOf('}');
+                if (firstBrace !== -1 && lastBrace > firstBrace) {
+                  try {
+                    parsedData = JSON.parse(cleaned.substring(firstBrace, lastBrace + 1));
+                  } catch {}
+                }
+              }
+            }
+            if (parsedData && parsedData.diagnosis) {
+              return res.json({ insight: parsedData });
+            }
+          }
+        } catch (err: any) {
+          const isTransient = err?.status === 503 || err?.status === 429 || err?.message?.includes('503') || err?.message?.includes('429');
+          if (attempt === 1 && isTransient) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+            continue;
+          }
+          console.warn(`[GEMINI MENTOR INSIGHT] Model ${modelName} unavailable, trying next candidate...`);
+          break;
+        }
+      }
+    }
+  }
+
+  // Deterministic fallback if Gemini is offline or experiencing quota limits
+  const fallbackTips: Record<string, { diagnosis: string; recommendedFocus: string[]; tacticalTip: string; motivationalQuote: string }> = {
+    antonyms: {
+      diagnosis: `Your Antonyms accuracy (${weakAcc}%) is pulling down your ${target} score. Examiners deliberately place the synonym as Option A to trap hurried candidates.`,
+      recommendedFocus: ['IN/IM/UN- (Negative Prefixes: Ineffable, Impudent)', 'MAL- (Bad: Malevolent, Maladroit)', 'BENE- (Good: Beneficent, Benevolent)'],
+      tacticalTip: 'Before marking an Antonym, confirm word polarity: (+) word needs (-) antonym. Eliminate options with the same charge first.',
+      motivationalQuote: 'Every antonym mastered today secures +2 raw marks in the final merit list.'
+    },
+    synonyms: {
+      diagnosis: `Your Synonyms accuracy (${weakAcc}%) indicates difficulty with subtle nuance and secondary word meanings tested in recent shifts.`,
+      recommendedFocus: ['LOQ/LOC (Speech: Loquacious, Circumlocution)', 'ANIM (Mind/Spirit: Equanimity, Magnanimous)', 'VER (Truth: Veracity, Veritable)'],
+      tacticalTip: 'Replace the target word with the options in a sample sentence to test contextual fitness instead of relying on gut feeling.',
+      motivationalQuote: 'Precision in vocabulary separates the aspirants from the selected officers.'
+    },
+    ows: {
+      diagnosis: `One Word Substitution requires identifying Greek/Latin root stems rather than rote memorization.`,
+      recommendedFocus: ['-CRACY / -ARCHY (Rule/Government)', '-LOGY / -IST (Study & Specialists)', 'PHIL / PHOBIA (Love & Fear)'],
+      tacticalTip: 'Split complex words into prefix + root + suffix. 80% of OWS options can be decoded directly through root morphology.',
+      motivationalQuote: 'Master the root, and you automatically master 20 related words.'
+    },
+    idioms: {
+      diagnosis: `Idioms accuracy (${weakAcc}%) reflects unfamiliarity with metaphorical origin stories. Examiners repeat 75% of previous year idioms.`,
+      recommendedFocus: ['Color Idioms (Green-eyed, Red-letter day)', 'Body Part Idioms (Cold shoulder, Achilles heel)', 'Animal Metaphors (Bull in a china shop)'],
+      tacticalTip: 'Never pick the literal physical meaning of an idiom; the correct answer is almost always figurative.',
+      motivationalQuote: 'Consistently reviewing 10 idioms daily guarantees full marks in the idioms section.'
+    }
+  };
+
+  const fallback = fallbackTips[weakCat] || fallbackTips.antonyms;
+  res.json({ insight: fallback });
 });
 
 // Monetag Service Worker Verification & Ad Delivery Endpoint

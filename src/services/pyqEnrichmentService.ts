@@ -2,6 +2,7 @@ import { Question, QuestionOptionDetail } from '../types';
 import { ExtractedQuestion } from '../types/pyqImport';
 import { backfillBatchEnrichments, fetchPublishedQuestionBank } from './pyqFirestoreService';
 import { questionBankEngine } from './questionBankEngine';
+import { resolveCardEducation } from '../utils/questionEducationResolver';
 
 export interface EnrichmentProgress {
   current: number;
@@ -406,10 +407,14 @@ function generateContextualFallback(q: ExtractedQuestion): Partial<ExtractedQues
   const correctOption = q.options[correctIdx] || 'Correct Option';
   const targetWord = (q.wordOrPhrase || q.question || '').trim();
 
-  let meaning = q.meaning || '';
-  let hindiMeaning = q.hindiMeaning || '';
+  // Resolve educational fields with comprehensive dictionary & fallback logic
+  const cardEdu = resolveCardEducation(q as any);
+
+  let meaning = q.meaning || cardEdu.meaning;
+  let hindiMeaning = q.hindiMeaning || cardEdu.hindiMeaning;
   let explanation = q.explanation || '';
-  let mnemonic = q.mnemonic || '';
+  let mnemonic = q.mnemonic || cardEdu.mnemonic;
+  let exampleSentence = q.exampleSentence || cardEdu.exampleSentence;
   let rootWordInfo = q.rootWordInfo || '';
 
   // Determine root/etymology heuristic if not set

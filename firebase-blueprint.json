@@ -158,9 +158,32 @@
         "updatedAt": { "type": "number", "description": "Timestamp updated in ms" }
       },
       "required": ["id", "uid", "name", "rankPoints", "updatedAt"]
+    },
+    "AiTutorCacheItem": {
+      "title": "AiTutorCacheItem",
+      "description": "Globally shared cached AI word explanation with root words, mnemonics, and exam traps",
+      "type": "object",
+      "properties": {
+        "word": { "type": "string", "description": "Normalized vocabulary term or phrase" },
+        "meaning": { "type": "string", "description": "English definition" },
+        "hindiMeaning": { "type": "string", "description": "Hindi meaning" },
+        "partOfSpeech": { "type": "string", "description": "Part of speech" },
+        "rootEtymology": { "type": "string", "description": "Etymology origin" },
+        "mnemonicHook": { "type": "string", "description": "Hinglish mnemonic memory hook" },
+        "examTrapTip": { "type": "string", "description": "TCS/SSC trap breakdown" },
+        "sampleUsage": { "type": "string", "description": "Sentence usage" },
+        "relatedWords": { "type": "array", "description": "List of related words" },
+        "category": { "type": "string", "description": "Category (synonyms, antonyms, etc.)" },
+        "updatedAt": { "type": "number", "description": "Timestamp cached" }
+      },
+      "required": ["word", "meaning", "mnemonicHook", "rootEtymology"]
     }
   },
   "firestore": {
+    "/ai_tutor_cache/{wordId}": {
+      "schema": "AiTutorCacheItem",
+      "description": "Global shared cache for AI Vocab Mentor vocabulary explanations"
+    },
     "/users/{userId}": {
       "schema": "UserProfile",
       "description": "Private user profile and synchronization state"

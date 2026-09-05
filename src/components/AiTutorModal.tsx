@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Question } from '../types';
 import { soundManager } from '../utils/audio';
-import { generateSmartAnalysis, AiAnalysisResult } from '../utils/aiTutorEngine';
+import { getWordExplanationWithCache, ExplanationResponse } from '../services/aiTutorCacheService';
 import { 
   Sparkles, 
   X, 
@@ -19,14 +19,15 @@ import {
 interface AiTutorModalProps {
   question: Question | null;
   onClose: () => void;
+  isPremium?: boolean;
 }
 
-export const AiTutorModal: React.FC<AiTutorModalProps> = ({ question, onClose }) => {
+export const AiTutorModal: React.FC<AiTutorModalProps> = ({ question, onClose, isPremium = false }) => {
   const [customWord, setCustomWord] = useState<string>('');
   const [activeWord, setActiveWord] = useState<string>(question?.wordOrPhrase || 'TACITURN');
   const [activeCategory, setActiveCategory] = useState<string>(question?.category || 'antonyms');
   const [loading, setLoading] = useState<boolean>(false);
-  const [analysis, setAnalysis] = useState<AiAnalysisResult | null>(null);
+  const [explanationData, setExplanationData] = useState<ExplanationResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const fetchAnalysis = async (word: string, category: string) => {
@@ -34,32 +35,15 @@ export const AiTutorModal: React.FC<AiTutorModalProps> = ({ question, onClose })
     setError(null);
 
     try {
-      const res = await fetch('/api/gemini/explain', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          wordOrPhrase: word,
-          category: category,
-          meaning: question?.meaning || 'Exam vocabulary term',
-          examHistory: question?.examHistory || ['SSC CGL 2023', 'RRB NTPC'],
-        }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        if (data.analysis && data.analysis.mnemonicHook) {
-          setAnalysis(data.analysis);
-          return;
-        }
-      }
-      
-      // If server returned error or non-200, use smart knowledge engine
-      const smartResult = generateSmartAnalysis(word, category);
-      setAnalysis(smartResult);
+      const res = await getWordExplanationWithCache(
+        word,
+        category,
+        isPremium,
+        question?.examHistory || ['SSC CGL 2024', 'RRB NTPC']
+      );
+      setExplanationData(res);
     } catch (err: unknown) {
-      console.warn('AI analysis fallback to smart engine:', err);
-      const smartResult = generateSmartAnalysis(word, category);
-      setAnalysis(smartResult);
+      console.warn('AI analysis error in modal:', err);
     } finally {
       setLoading(false);
     }
@@ -129,9 +113,16 @@ export const AiTutorModal: React.FC<AiTutorModalProps> = ({ question, onClose })
 
         {/* Current Word Banner */}
         <div className="bg-gradient-to-r from-purple-950/60 to-slate-800 border border-purple-700/60 rounded-2xl p-3.5 text-center">
-          <span className="text-[10px] uppercase font-mono font-bold text-purple-300 bg-purple-900/60 px-2 py-0.5 rounded-full border border-purple-600/40">
-            {activeCategory}
-          </span>
+          <div className="flex items-center justify-center gap-1.5 flex-wrap">
+            <span className="text-[10px] uppercase font-mono font-bold text-purple-300 bg-purple-900/60 px-2 py-0.5 rounded-full border border-purple-600/40">
+              {activeCategory}
+            </span>
+            {explanationData?.fromCache && (
+              <span className="text-[10px] font-bold text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-500/40">
+                Cached Explanation
+              </span>
+            )}
+          </div>
           <h2 className="text-2xl font-black text-amber-300 mt-1 break-words">
             "{activeWord}"
           </h2>
@@ -145,7 +136,10 @@ export const AiTutorModal: React.FC<AiTutorModalProps> = ({ question, onClose })
               Analyzing root words, Hinglish mnemonics & 100% Guaranteed PYQ Pool...
             </div>
           </div>
-        ) : analysis ? (
+        ) : explanationData?.analysis ? (
+          (() => {
+            const analysis = explanationData.analysis;
+            return (
           <div className="space-y-3 text-xs">
             {/* 1. Meaning & Definition */}
             <div className="bg-gradient-to-br from-slate-800 to-indigo-950/30 border border-indigo-500/40 rounded-2xl p-3.5 space-y-2">
@@ -242,6 +236,8 @@ export const AiTutorModal: React.FC<AiTutorModalProps> = ({ question, onClose })
               </div>
             )}
           </div>
+            );
+          })()
         ) : null}
       </div>
     </div>

@@ -10,9 +10,17 @@ service cloud.firestore {
       return request.auth != null && request.auth.token.email == 'nathchinmoy777@gmail.com';
     }
 
-    // User Profile Document (Authenticated Owner access)
+    // User Profile Document and subcollections (Authenticated Owner access)
     match /users/{userId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    match /users/{userId}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Shared AI Vocab Mentor Word Explanation Cache
+    match /ai_tutor_cache/{wordId} {
+      allow read, write: if true;
     }
 
     // Real-time Matchmaking Queue

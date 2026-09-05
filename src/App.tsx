@@ -252,6 +252,10 @@ export default function App() {
   const [selectedExam, setSelectedExam] = useState<ExamType>('SSC_CGL');
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
 
+  // Targeted Coaching Drill Queue (from AI Vocab Mentor)
+  const [practiceCustomQueue, setPracticeCustomQueue] = useState<Question[] | null>(null);
+  const [practiceModeBannerTitle, setPracticeModeBannerTitle] = useState<string | null>(null);
+
   // Matchmaking & Game state
   const [isMatchmaking, setIsMatchmaking] = useState<boolean>(false);
   const [matchMode, setMatchMode] = useState<'1v1_ranked' | 'quick_duel' | 'daily_challenge'>('1v1_ranked');
@@ -1240,6 +1244,13 @@ export default function App() {
                 onSolveQuestion={handleRecordQuestionSolved}
                 bookmarkedIds={bookmarkedIds}
                 isPremium={subscription.isPremium}
+                customTargetQueue={practiceCustomQueue}
+                customSessionTitle={practiceModeBannerTitle}
+                onExitCustomQueue={() => {
+                  setPracticeCustomQueue(null);
+                  setPracticeModeBannerTitle(null);
+                  setCurrentTab('ai_coach');
+                }}
               />
             )}
 
@@ -1259,7 +1270,19 @@ export default function App() {
             )}
 
             {currentTab === 'ai_coach' && (
-              <AiTutorTab />
+              <AiTutorTab
+                player={player}
+                streak={streak}
+                savedWords={savedWords}
+                subscription={subscription}
+                onStartTargetedPractice={(drillQuestions, title) => {
+                  setPracticeCustomQueue(drillQuestions);
+                  setPracticeModeBannerTitle(title);
+                  setCurrentTab('practice');
+                }}
+                onOpenUpgradeModal={() => setShowPremiumModal(true)}
+                onBookmarkQuestion={handleBookmarkQuestion}
+              />
             )}
           </>
         )}
@@ -1352,6 +1375,7 @@ export default function App() {
         <AiTutorModal
           question={activeAiQuestion}
           onClose={() => setShowAiModal(false)}
+          isPremium={subscription.isPremium}
         />
       )}
 

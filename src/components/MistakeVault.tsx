@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence, PanInfo } from 'motion/react';
 import { SavedWord, Question } from '../types';
 import { soundManager } from '../utils/audio';
 import { isItemSaved, isItemMistake } from '../utils/vaultManager';
@@ -6,7 +7,6 @@ import {
   BookOpen, 
   Trash2, 
   RotateCw, 
-  Sparkles, 
   Bookmark, 
   BookmarkCheck,
   Search,
@@ -18,17 +18,22 @@ import {
   Swords,
   Target,
   ArrowRight,
-  Brain
+  Brain,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight
 } from 'lucide-react';
 import { ReportQuestionModal } from './ReportQuestionModal';
 import { formatExamTag } from '../services/jsonPyqParser';
 import { ExamAppearancesBadge } from './ExamAppearancesBadge';
+import { resolveCardEducation } from '../utils/questionEducationResolver';
 
 interface MistakeVaultProps {
   savedWords: SavedWord[];
   onRemoveWord: (questionId: string, scope?: 'all' | 'saved_by_me' | 'mistakes') => void;
   onToggleUserSaved?: (questionId: string, question?: Question) => void;
-  onOpenAiTutor: (question: Question) => void;
+  onOpenAiTutor?: (question: Question) => void;
   onGoToArena?: () => void;
   onGoToPractice?: () => void;
 }
@@ -47,7 +52,9 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [currentFlashcardIndex, setCurrentFlashcardIndex] = useState<number>(0);
   const [isFlipped, setIsFlipped] = useState<boolean>(false);
+  const [swipeDirection, setSwipeDirection] = useState<number>(1);
   const [reportingQuestion, setReportingQuestion] = useState<Question | null>(null);
+  const isDraggingRef = useRef<boolean>(false);
 
   // Independent counts for top tabs
   const totalCount = savedWords.length;
@@ -86,6 +93,96 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
   };
 
   const currentCard = filteredWords[currentFlashcardIndex];
+
+  const handleNextCard = () => {
+    if (currentFlashcardIndex < filteredWords.length - 1) {
+      soundManager.playTap();
+      setSwipeDirection(1);
+      setIsFlipped(false);
+      setCurrentFlashcardIndex(prev => prev + 1);
+    }
+  };
+
+  const handlePrevCard = () => {
+    if (currentFlashcardIndex > 0) {
+      soundManager.playTap();
+      setSwipeDirection(-1);
+      setIsFlipped(false);
+      setCurrentFlashcardIndex(prev => prev - 1);
+    }
+  };
+
+  const handleDragEnd = (_: any, info: PanInfo) => {
+    const threshold = 45;
+    const velocityThreshold = 250;
+
+    if (info.offset.x < -threshold || info.velocity.x < -velocityThreshold) {
+      if (currentFlashcardIndex < filteredWords.length - 1) {
+        handleNextCard();
+      }
+    } else if (info.offset.x > threshold || info.velocity.x > velocityThreshold) {
+      if (currentFlashcardIndex > 0) {
+        handlePrevCard();
+      }
+    }
+
+    setTimeout(() => {
+      isDraggingRef.current = false;
+    }, 80);
+  };
+
+  // Keyboard navigation for flashcards
+  useEffect(() => {
+    if (activeView !== 'flashcards') return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+        return;
+      }
+
+      if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        handleNextCard();
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        handlePrevCard();
+      } else if (e.key === ' ' || e.key === 'Enter') {
+        e.preventDefault();
+        soundManager.playTap();
+        setIsFlipped(prev => !prev);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeView, currentFlashcardIndex, filteredWords.length]);
+
+  const cardVariants = {
+    enter: (direction: number) => ({
+      x: direction > 0 ? 100 : -100,
+      opacity: 0,
+      scale: 0.95,
+    }),
+    center: {
+      x: 0,
+      opacity: 1,
+      scale: 1,
+      transition: {
+        x: { type: 'spring', stiffness: 360, damping: 28 },
+        opacity: { duration: 0.18 },
+        scale: { duration: 0.18 },
+      },
+    },
+    exit: (direction: number) => ({
+      x: direction > 0 ? -100 : 100,
+      opacity: 0,
+      scale: 0.95,
+      transition: {
+        duration: 0.16,
+      },
+    }),
+  };
 
   return (
     <div className="flex-1 min-h-0 flex flex-col p-3 sm:p-5 lg:p-6 space-y-3 sm:space-y-4 pb-3 sm:pb-6 max-w-4xl mx-auto w-full">
@@ -253,108 +350,169 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
 
       {/* FLASHCARD VIEW */}
       {activeView === 'flashcards' && currentCard ? (
-        <div className="max-w-xl mx-auto space-y-4 pt-1 w-full flex-1 min-h-0 flex flex-col justify-between">
-          {/* Card Counter & Badges */}
-          <div className="flex items-center justify-between text-xs text-slate-400 font-medium shrink-0">
-            <span>Card {currentFlashcardIndex + 1} of {filteredWords.length}</span>
-            <div className="flex items-center gap-1.5 flex-wrap">
-              {isItemSaved(currentCard) && (
-                <span className="text-[10px] bg-amber-950/90 text-amber-300 border border-amber-700/80 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
-                  <Star className="w-2.5 h-2.5 fill-amber-300 text-amber-300" />
-                  Saved
+        <div className="max-w-xl mx-auto space-y-3 pt-1 w-full flex-1 min-h-0 flex flex-col justify-between">
+          {/* Card Counter & Badges & Progress */}
+          <div className="space-y-1.5 shrink-0">
+            <div className="flex items-center justify-between text-xs text-slate-400 font-medium">
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-slate-300">Card {currentFlashcardIndex + 1} of {filteredWords.length}</span>
+                <span className="text-[10px] text-slate-500 font-mono">({Math.round(((currentFlashcardIndex + 1) / filteredWords.length) * 100)}%)</span>
+              </div>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {isItemSaved(currentCard) && (
+                  <span className="text-[10px] bg-amber-950/90 text-amber-300 border border-amber-700/80 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                    <Star className="w-2.5 h-2.5 fill-amber-300 text-amber-300" />
+                    Saved
+                  </span>
+                )}
+                {isItemMistake(currentCard) && (
+                  <span className="text-[10px] bg-rose-950/80 text-rose-300 border border-rose-800 px-2 py-0.5 rounded-full font-bold">
+                    {currentCard.mistakeCount}x Mistake
+                  </span>
+                )}
+                <span className="text-sky-400 uppercase font-mono text-[10px] bg-sky-950/80 px-2 py-0.5 rounded-full border border-sky-800">
+                  {currentCard.question.category}
                 </span>
-              )}
-              {isItemMistake(currentCard) && (
-                <span className="text-[10px] bg-rose-950/80 text-rose-300 border border-rose-800 px-2 py-0.5 rounded-full font-bold">
-                  {currentCard.mistakeCount}x Mistake
-                </span>
-              )}
-              <span className="text-sky-400 uppercase font-mono text-[10px] bg-sky-950/80 px-2 py-0.5 rounded-full border border-sky-800">
-                {currentCard.question.category}
-              </span>
+              </div>
+            </div>
+
+            {/* Deck Progress Bar */}
+            <div className="w-full h-1.5 bg-slate-800/90 rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-gradient-to-r from-amber-500 to-amber-400 transition-all duration-300 rounded-full"
+                style={{ width: `${((currentFlashcardIndex + 1) / filteredWords.length) * 100}%` }}
+              />
             </div>
           </div>
 
-          {/* Flip Container */}
-          <div
-            onClick={() => {
-              soundManager.playTap();
-              setIsFlipped(!isFlipped);
-            }}
-            className="w-full flex-1 min-h-[260px] bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700 rounded-3xl p-5 shadow-2xl flex flex-col justify-between items-center text-center cursor-pointer hover:border-amber-500/60 transition-all relative overflow-hidden"
-          >
-            {!isFlipped ? (
-              /* Front of Card */
-              <div className="my-auto space-y-3">
-                <span className="text-[10px] bg-amber-950/90 text-amber-300 border border-amber-700/60 px-2.5 py-0.5 rounded-full font-bold">
-                  TAP TO FLIP
-                </span>
-                <h3 className="text-2xl font-black text-amber-400 break-words">
-                  {currentCard.question.wordOrPhrase}
-                </h3>
-                <div className="text-xs text-slate-400">
-                  {currentCard.question.instruction || 'What is the meaning and correct answer?'}
-                </div>
-                <div className="pt-1 flex items-center justify-center">
-                  <ExamAppearancesBadge
-                    appearances={currentCard.question.appearances}
-                    exam={currentCard.question.exam}
-                    year={currentCard.question.year}
-                    tier={currentCard.question.tier}
-                    examHistory={currentCard.question.examHistory}
-                    repeatCount={currentCard.question.repeatCount}
-                    showRepeatCount={true}
-                    size="xs"
-                  />
-                </div>
-              </div>
-            ) : (
-              /* Back of Card */
-              <div className="my-auto space-y-2.5 animate-fadeIn w-full">
-                <div className="text-sm font-extrabold text-emerald-400">
-                  Correct: {currentCard.question.options[currentCard.question.correctIndex]}
-                </div>
-                {/* Meaning & Hindi Meaning for Synonyms / Antonyms / Vocab */}
-                {currentCard.question.category !== 'idioms' && currentCard.question.category !== 'ows' && (
-                  <div className="bg-slate-950/80 p-2.5 rounded-xl text-left border border-slate-800 space-y-1">
-                    <div className="text-xs text-slate-100 font-medium">
-                      <span className="font-bold text-sky-400">Meaning: </span>
-                      {currentCard.question.meaning}
-                    </div>
-                    <div className="text-xs text-amber-300 font-medium">
-                      <span className="font-bold text-amber-400">हिन्दी अर्थ: </span>
-                      {currentCard.question.hindiMeaning}
-                    </div>
-                  </div>
-                )}
-                <div className="text-xs text-slate-300 bg-slate-950/70 p-2.5 rounded-xl text-left border border-slate-800/80">
-                  <span className="font-bold text-sky-400">💡 Memory Hack: </span>
-                  {currentCard.question.mnemonic}
-                </div>
-                <div className="text-[11px] text-slate-400 italic">
-                  "{currentCard.question.exampleSentence}"
-                </div>
-              </div>
+          {/* Swipeable Flip Card Container */}
+          <div className="relative w-full flex-1 min-h-[290px] flex items-center justify-center overflow-hidden py-1">
+            {/* Desktop Side Quick Nav Arrows */}
+            {currentFlashcardIndex > 0 && (
+              <button
+                onClick={handlePrevCard}
+                className="hidden md:flex absolute left-1 top-1/2 -translate-y-1/2 z-20 w-8 h-8 rounded-full bg-slate-900/80 hover:bg-slate-800 border border-slate-700/80 text-slate-400 hover:text-white items-center justify-center transition-all shadow-lg hover:scale-105"
+                title="Previous card (Left Arrow)"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+            )}
+            {currentFlashcardIndex < filteredWords.length - 1 && (
+              <button
+                onClick={handleNextCard}
+                className="hidden md:flex absolute right-1 top-1/2 -translate-y-1/2 z-20 w-8 h-8 rounded-full bg-slate-900/80 hover:bg-slate-800 border border-slate-700/80 text-slate-400 hover:text-white items-center justify-center transition-all shadow-lg hover:scale-105"
+                title="Next card (Right Arrow)"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
             )}
 
-            <div className="text-[10px] text-slate-500 flex items-center gap-1">
-              <RotateCw className="w-3 h-3" />
-              <span>Tap anywhere to toggle answer & mnemonic</span>
-            </div>
+            <AnimatePresence mode="wait" custom={swipeDirection}>
+              <motion.div
+                key={currentCard.question.id || `card-${currentFlashcardIndex}`}
+                custom={swipeDirection}
+                variants={cardVariants}
+                initial="enter"
+                animate="center"
+                exit="exit"
+                drag="x"
+                dragConstraints={{ left: 0, right: 0 }}
+                dragElastic={0.65}
+                onDragStart={() => {
+                  isDraggingRef.current = true;
+                }}
+                onDragEnd={handleDragEnd}
+                onTap={() => {
+                  if (isDraggingRef.current) return;
+                  soundManager.playTap();
+                  setIsFlipped(!isFlipped);
+                }}
+                className="w-full h-full min-h-[280px] bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700 rounded-3xl p-5 shadow-2xl flex flex-col justify-between items-center text-center cursor-grab active:cursor-grabbing hover:border-amber-500/60 transition-colors relative overflow-hidden select-none touch-pan-y"
+              >
+                {!isFlipped ? (
+                  /* Front of Card */
+                  <div className="my-auto space-y-3 pointer-events-none">
+                    <span className="text-[10px] bg-amber-950/90 text-amber-300 border border-amber-700/60 px-2.5 py-0.5 rounded-full font-bold">
+                      TAP TO FLIP
+                    </span>
+                    <h3 className="text-2xl font-black text-amber-400 break-words">
+                      {currentCard.question.wordOrPhrase}
+                    </h3>
+                    <div className="text-xs text-slate-400">
+                      {currentCard.question.instruction || 'What is the meaning and correct answer?'}
+                    </div>
+                    <div className="pt-1 flex items-center justify-center">
+                      <ExamAppearancesBadge
+                        appearances={currentCard.question.appearances}
+                        exam={currentCard.question.exam}
+                        year={currentCard.question.year}
+                        tier={currentCard.question.tier}
+                        examHistory={currentCard.question.examHistory}
+                        repeatCount={currentCard.question.repeatCount}
+                        showRepeatCount={true}
+                        size="xs"
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  /* Back of Card */
+                  (() => {
+                    const cardEdu = resolveCardEducation(currentCard.question);
+                    return (
+                      <div className="my-auto space-y-2.5 animate-fadeIn w-full pointer-events-none">
+                        <div className="text-sm font-extrabold text-emerald-400">
+                          Correct: {currentCard.question.options[currentCard.question.correctIndex]}
+                        </div>
+                        {/* Meaning & Hindi Meaning for Synonyms / Antonyms / Vocab */}
+                        <div className="bg-slate-950/80 p-2.5 rounded-xl text-left border border-slate-800 space-y-1">
+                          <div className="text-xs text-slate-100 font-medium">
+                            <span className="font-bold text-sky-400">Meaning: </span>
+                            {cardEdu.meaning}
+                          </div>
+                          <div className="text-xs text-amber-300 font-medium">
+                            <span className="font-bold text-amber-400">हिन्दी अर्थ: </span>
+                            {cardEdu.hindiMeaning}
+                          </div>
+                        </div>
+                        <div className="text-xs text-slate-300 bg-slate-950/70 p-2.5 rounded-xl text-left border border-slate-800/80">
+                          <span className="font-bold text-sky-400">💡 Memory Hack: </span>
+                          {cardEdu.mnemonic}
+                        </div>
+                        {cardEdu.exampleSentence && (
+                          <div className="text-[11px] text-slate-400 italic">
+                            "{cardEdu.exampleSentence}"
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()
+                )}
+
+                <div className="text-[10px] text-slate-400 flex items-center justify-center gap-3 pt-2">
+                  <span className="flex items-center gap-1 text-slate-400">
+                    <RotateCw className="w-3 h-3 text-amber-400/80" />
+                    Tap to flip
+                  </span>
+                  <span className="text-slate-600">•</span>
+                  <span className="flex items-center gap-1 text-slate-400">
+                    <ChevronsLeft className="w-3 h-3 text-sky-400/80" />
+                    Swipe left/right to navigate
+                    <ChevronsRight className="w-3 h-3 text-sky-400/80" />
+                  </span>
+                </div>
+              </motion.div>
+            </AnimatePresence>
           </div>
 
           {/* Flashcard Navigation */}
           <div className="flex items-center justify-between gap-2 sm:gap-2.5 shrink-0">
             <button
               disabled={currentFlashcardIndex === 0}
-              onClick={() => {
-                soundManager.playTap();
-                setIsFlipped(false);
-                setCurrentFlashcardIndex(prev => Math.max(0, prev - 1));
-              }}
-              className="flex-1 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 p-2.5 rounded-xl text-xs font-bold border border-slate-700 text-slate-200"
+              onClick={handlePrevCard}
+              className="flex-1 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 p-2.5 rounded-xl text-xs font-bold border border-slate-700 text-slate-200 flex items-center justify-center gap-1.5 transition-colors"
             >
-              Previous
+              <ChevronLeft className="w-3.5 h-3.5" />
+              <span>Previous</span>
             </button>
 
             {onToggleUserSaved && (
@@ -375,26 +533,12 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
             )}
 
             <button
-              onClick={() => {
-                soundManager.playTap();
-                onOpenAiTutor(currentCard.question);
-              }}
-              className="bg-purple-950/80 hover:bg-purple-900 border border-purple-700 text-purple-300 p-2.5 rounded-xl text-xs font-bold flex items-center gap-1"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              AI Coach
-            </button>
-
-            <button
               disabled={currentFlashcardIndex >= filteredWords.length - 1}
-              onClick={() => {
-                soundManager.playTap();
-                setIsFlipped(false);
-                setCurrentFlashcardIndex(prev => Math.min(filteredWords.length - 1, prev + 1));
-              }}
-              className="flex-1 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 p-2.5 rounded-xl text-xs font-black shadow-md"
+              onClick={handleNextCard}
+              className="flex-1 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 p-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-1.5 transition-colors"
             >
-              Next
+              <span>Next</span>
+              <ChevronRight className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
@@ -431,7 +575,7 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
                     ? 'Tap the ⭐ Star icon during any 1v1 battle or practice session to bookmark difficult words for instant revision.'
                     : filterOrigin === 'mistakes'
                     ? 'Questions answered incorrectly during live battles automatically sync here for smart spaced repetition drills.'
-                    : 'Track your bookmarked questions and battle mistakes. Review them with flashcards, mnemonics, and AI explanations.'}
+                    : 'Track your bookmarked questions and battle mistakes. Review them with flashcards, mnemonics, and detailed explanations.'}
                 </p>
               </div>
 
@@ -477,6 +621,7 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
             {filteredWords.map(item => {
               const userSaved = isItemSaved(item);
               const mistake = isItemMistake(item);
+              const itemEdu = resolveCardEducation(item.question);
 
               return (
                 <div
@@ -505,7 +650,7 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
                         )}
                       </div>
                       <div className="text-xs text-amber-300/90 mt-1 font-medium break-words">
-                        {item.question.hindiMeaning}
+                        {itemEdu.hindiMeaning}
                       </div>
                     </div>
 
@@ -524,18 +669,6 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
                           <Star className={`w-3.5 h-3.5 ${userSaved ? 'fill-amber-400' : ''}`} />
                         </button>
                       )}
-
-                      {/* AI Tutor Deep Dive */}
-                      <button
-                        onClick={() => {
-                          soundManager.playTap();
-                          onOpenAiTutor(item.question);
-                        }}
-                        className="p-1.5 rounded-lg bg-purple-950 text-purple-300 border border-purple-800 hover:bg-purple-900"
-                        title="AI Root Word Deep Dive"
-                      >
-                        <Sparkles className="w-3.5 h-3.5" />
-                      </button>
 
                       {/* Report Question Button */}
                       <button
@@ -570,12 +703,10 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
                   </div>
 
                   {/* Meaning for Vocab */}
-                  {item.question.category !== 'idioms' && item.question.category !== 'ows' && item.question.meaning && (
-                    <div className="text-xs text-slate-300 bg-slate-900/70 p-2 rounded-xl border border-slate-800 break-words">
-                      <span className="font-bold text-sky-400">Meaning: </span>
-                      {item.question.meaning}
-                    </div>
-                  )}
+                  <div className="text-xs text-slate-300 bg-slate-900/70 p-2 rounded-xl border border-slate-800 break-words">
+                    <span className="font-bold text-sky-400">Meaning: </span>
+                    {itemEdu.meaning}
+                  </div>
 
                   {/* Correct Option */}
                   <div className="text-xs text-emerald-400 font-bold bg-emerald-950/30 border border-emerald-900/50 px-2.5 py-1 rounded-lg break-words">
@@ -585,7 +716,7 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
                   {/* Mnemonic Hook */}
                   <div className="text-[11px] text-slate-300 bg-slate-900/80 p-2 rounded-xl border border-slate-800 break-words">
                     <span className="font-bold text-amber-400">💡 Trick: </span>
-                    {item.question.mnemonic}
+                    {itemEdu.mnemonic}
                   </div>
 
                   {/* Exam Attribution */}

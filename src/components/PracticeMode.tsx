@@ -50,6 +50,10 @@ interface PracticeModeProps {
   onSolveQuestion?: () => void;
   bookmarkedIds: string[];
   isPremium?: boolean;
+  // Targeted coaching drill session support
+  customTargetQueue?: Question[] | null;
+  customSessionTitle?: string | null;
+  onExitCustomQueue?: () => void;
 }
 
 const getTodayStrKey = () => {
@@ -101,9 +105,17 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
   onSolveQuestion,
   bookmarkedIds,
   isPremium = false,
+  customTargetQueue = null,
+  customSessionTitle = null,
+  onExitCustomQueue,
 }) => {
   const [category, setCategory] = useState<QuestionCategory | 'mixed'>('mixed');
   const [exam, setExam] = useState<ExamType>('ALL');
+
+  // Custom targeted coaching drill state
+  const [customQueueIndex, setCustomQueueIndex] = useState<number>(0);
+  const [customQueueResults, setCustomQueueResults] = useState<{ isCorrect: boolean }[]>([]);
+  const [customDrillCompleted, setCustomDrillCompleted] = useState<boolean>(false);
   
   // Continuous drill session state - persists across tab switches for today and resets on a new day
   const [questionNumber, setQuestionNumber] = useState<number>(() => getStoredDailyProgress().questionNumber);
@@ -112,9 +124,23 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
 
   const [recentWordsHistory, setRecentWordsHistory] = useState<string[]>(() => getPersistentSeenWords().slice(-100));
   const [currentQ, setCurrentQ] = useState<Question>(() => {
+    if (customTargetQueue && customTargetQueue.length > 0) {
+      return customTargetQueue[0];
+    }
     const initHistory = getPersistentSeenWords().slice(-100);
     return getNextDrillQuestion('mixed', 'ALL', initHistory);
   });
+
+  useEffect(() => {
+    if (customTargetQueue && customTargetQueue.length > 0) {
+      setCustomQueueIndex(0);
+      setCustomQueueResults([]);
+      setCustomDrillCompleted(false);
+      setCurrentQ(customTargetQueue[0]);
+      setSelectedOption(null);
+      setIsAnswered(false);
+    }
+  }, [customTargetQueue]);
 
   const questionStartTimeRef = useRef<number>(Date.now());
   const isAdvancingRef = useRef<boolean>(false);
@@ -256,6 +282,11 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     const elapsedMs = Date.now() - questionStartTimeRef.current;
     const isCorrect = idx === currentQ.correctIndex;
 
+    // Track results for custom coaching session
+    if (customTargetQueue && customTargetQueue.length > 0) {
+      setCustomQueueResults(prev => [...prev, { isCorrect }]);
+    }
+
     // Record spaced repetition attempt in adaptive scheduler
     const updatedRecord = questionReviewScheduler.recordAttempt(currentQ, isCorrect, elapsedMs);
     setCurrentReviewState(updatedRecord);
@@ -302,6 +333,29 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     // Batch interval ad trigger (every 15 questions solved)
     if ((sessionSolvedCount + 1) % 15 === 0 && onBatchComplete) {
       onBatchComplete();
+    }
+
+    // Handle Custom Targeted Coaching Queue if active
+    if (customTargetQueue && customTargetQueue.length > 0) {
+      const nextIdx = customQueueIndex + 1;
+      if (nextIdx >= customTargetQueue.length) {
+        setCustomDrillCompleted(true);
+        setTimeout(() => {
+          isAdvancingRef.current = false;
+        }, 300);
+        return;
+      }
+      setCustomQueueIndex(nextIdx);
+      const nextQ = customTargetQueue[nextIdx];
+      setCurrentQ(nextQ);
+      setSelectedOption(null);
+      setIsAnswered(false);
+      setCountdown(0);
+      setIsCountdownPaused(false);
+      setTimeout(() => {
+        isAdvancingRef.current = false;
+      }, 400);
+      return;
     }
 
     // Pull next adaptive repetition question
@@ -437,8 +491,105 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
         </div>
       )}
 
-      {/* Header */}
-      <div className="flex items-center justify-between">
+      {/* Custom Targeted Coaching Drill Banner */}
+      {customTargetQueue && customTargetQueue.length > 0 && !customDrillCompleted && (
+        <div className="bg-gradient-to-r from-purple-950/80 via-slate-900 to-indigo-950/80 border border-purple-500/40 p-3 sm:p-4 rounded-2xl flex items-center justify-between shadow-lg shadow-purple-950/30">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-purple-500/20 text-purple-400 border border-purple-500/30 shrink-0">
+              <Sparkles className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 text-[10px] font-bold tracking-wide uppercase">
+                  AI Vocab Mentor Drill
+                </span>
+                <span className="text-xs font-semibold text-slate-400 hidden sm:inline">
+                  Question {customQueueIndex + 1} of {customTargetQueue.length}
+                </span>
+              </div>
+              <h3 className="text-sm sm:text-base font-bold text-slate-100 mt-0.5">
+                {customSessionTitle || 'Targeted Weak Areas Training'}
+              </h3>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-purple-300 sm:hidden">
+              {customQueueIndex + 1}/{customTargetQueue.length}
+            </span>
+            {onExitCustomQueue && (
+              <button
+                onClick={() => {
+                  soundManager.playTap();
+                  onExitCustomQueue();
+                }}
+                className="text-xs font-semibold px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-colors cursor-pointer"
+              >
+                Exit Drill
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Custom Coaching Drill Completion Summary */}
+      {customDrillCompleted ? (
+        <div className="bg-slate-900/90 border border-purple-500/40 rounded-3xl p-6 sm:p-8 text-center space-y-5 shadow-2xl backdrop-blur-xl">
+          <div className="w-16 h-16 rounded-2xl bg-purple-500/20 border border-purple-500/40 text-purple-400 mx-auto flex items-center justify-center">
+            <Sparkles className="w-8 h-8" />
+          </div>
+          <div className="space-y-1.5">
+            <h3 className="text-xl sm:text-2xl font-black text-slate-100">
+              Targeted Coaching Drill Complete!
+            </h3>
+            <p className="text-xs sm:text-sm text-slate-400 max-w-md mx-auto">
+              You've successfully drilled through your priority weak areas and mistake vault words. Your spaced repetition states have been refreshed.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-3 max-w-xs mx-auto">
+            <div className="bg-slate-950/80 border border-slate-800 p-3.5 rounded-2xl">
+              <div className="text-2xl font-black text-emerald-400">
+                {customQueueResults.filter(r => r.isCorrect).length} / {customTargetQueue?.length || 10}
+              </div>
+              <div className="text-[11px] text-slate-400 font-semibold mt-0.5">Correct Answers</div>
+            </div>
+            <div className="bg-slate-950/80 border border-slate-800 p-3.5 rounded-2xl">
+              <div className="text-2xl font-black text-purple-400">
+                {customTargetQueue?.length
+                  ? Math.round((customQueueResults.filter(r => r.isCorrect).length / customTargetQueue.length) * 100)
+                  : 0}
+                %
+              </div>
+              <div className="text-[11px] text-slate-400 font-semibold mt-0.5">Accuracy</div>
+            </div>
+          </div>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-3">
+            {onExitCustomQueue && (
+              <button
+                onClick={() => {
+                  soundManager.playTap();
+                  onExitCustomQueue();
+                }}
+                className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold shadow-lg shadow-purple-900/40 transition-all cursor-pointer"
+              >
+                Return to Vocab Mentor
+              </button>
+            )}
+            <button
+              onClick={() => {
+                soundManager.playTap();
+                setCustomDrillCompleted(false);
+                if (onExitCustomQueue) onExitCustomQueue();
+              }}
+              className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 transition-all cursor-pointer"
+            >
+              Continue PYQ Endless Drill
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* Header */}
+          <div className="flex items-center justify-between">
         <div>
           <h2 className="text-base font-extrabold text-slate-100 flex items-center gap-1.5">
             <Target className="w-5 h-5 text-sky-400" />
@@ -1006,6 +1157,8 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
             </div>
           )}
         </div>
+      )}
+      </>
       )}
 
       {/* AdSense / AdMob Banner Slot (Free users only) */}
