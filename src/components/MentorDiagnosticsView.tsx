@@ -4,7 +4,8 @@ import {
   MentorAnalytics, 
   MentorAiReport, 
   PlayerProfile,
-  QuestionCategory 
+  QuestionCategory,
+  SavedWord 
 } from '../types';
 import { 
   MIN_SAMPLE_THRESHOLD, 
@@ -39,6 +40,7 @@ export interface MentorDiagnosticsViewProps {
   onLaunchDrill: () => void;
   isPreparingDrill: boolean;
   player: PlayerProfile;
+  savedWords?: SavedWord[];
   onAnalyzeWord?: (word: string) => void;
 }
 
@@ -52,6 +54,7 @@ export const MentorDiagnosticsView: React.FC<MentorDiagnosticsViewProps> = ({
   onLaunchDrill,
   isPreparingDrill,
   player,
+  savedWords = [],
   onAnalyzeWord,
 }) => {
   const weakCatStat = analytics.weakestCategory ? analytics.categoryStats[analytics.weakestCategory] : null;
@@ -384,7 +387,8 @@ export const MentorDiagnosticsView: React.FC<MentorDiagnosticsViewProps> = ({
       {/* 6. Words You're Repeatedly Missing */}
       <RepeatedMistakesRow
         items={analytics.repeatedMistakes}
-        onAnalyzeWord={(word) => {
+        fallbackSavedWords={savedWords}
+        onAnalyzeWord={(word, cat) => {
           if (onAnalyzeWord) {
             onAnalyzeWord(word);
           }

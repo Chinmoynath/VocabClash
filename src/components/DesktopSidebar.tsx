@@ -89,7 +89,7 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
     {
       id: 'ai_coach' as TabType,
       label: 'AI Vocab Mentor',
-      sublabel: 'Mnemonics & Etymology',
+      sublabel: 'Performance Diagnostics',
       icon: Sparkles,
       color: 'text-purple-400',
       activeBg: 'bg-purple-500/10 border-purple-500/30 text-purple-300',

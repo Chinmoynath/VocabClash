@@ -1,22 +1,29 @@
 import React, { useState, useMemo } from 'react';
 import { RepeatedMistakeItem, QuestionCategory, SavedWord } from '../types';
 import { soundManager } from '../utils/audio';
+import { getStoredWordDetail, StoredWordDetail } from '../services/storedWordService';
 import { 
   ShieldAlert, 
   Search, 
   X, 
   Sparkles, 
   ChevronRight, 
-  ArrowRight, 
   Plus, 
   CheckCircle2,
-  BookOpen
+  BookOpen,
+  Volume2,
+  Lightbulb,
+  Compass,
+  AlertTriangle,
+  Copy,
+  Check,
+  Languages
 } from 'lucide-react';
 
 export interface RepeatedMistakesRowProps {
   items: RepeatedMistakeItem[];
   fallbackSavedWords?: SavedWord[];
-  onAnalyzeWord: (word: string, category?: QuestionCategory) => void;
+  onAnalyzeWord?: (word: string, category?: QuestionCategory) => void;
   title?: string;
   subtitle?: string;
 }
@@ -24,14 +31,18 @@ export interface RepeatedMistakesRowProps {
 export const RepeatedMistakesRow: React.FC<RepeatedMistakesRowProps> = ({
   items = [],
   fallbackSavedWords = [],
-  onAnalyzeWord,
   title = "Words You're Repeatedly Missing",
-  subtitle = "Click any word to unlock its Hinglish mnemonic and root etymology."
+  subtitle = "Tap any word to view its stored meaning, mnemonic, and exam tricks."
 }) => {
-  const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+  const [isListModalOpen, setIsListModalOpen] = useState<boolean>(false);
   const [searchFilter, setSearchFilter] = useState<string>('');
+  
+  // Stored word detail modal state
+  const [selectedWordDetail, setSelectedWordDetail] = useState<StoredWordDetail | null>(null);
+  const [copiedTrick, setCopiedTrick] = useState<boolean>(false);
+  const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
 
-  // Combine items with any mistake words from savedWords so the user always sees their actual mistakes
+  // Combine items with any mistake words from savedWords
   const allMissingWords: RepeatedMistakeItem[] = useMemo(() => {
     const map = new Map<string, RepeatedMistakeItem>();
     
@@ -61,8 +72,7 @@ export const RepeatedMistakesRow: React.FC<RepeatedMistakesRowProps> = ({
     return Array.from(map.values()).sort((a, b) => b.wrongCount - a.wrongCount);
   }, [items, fallbackSavedWords]);
 
-  // If there are more than 3 words, show first 3 cards + 1 "More" card in 1 line
-  // If there are 3 or fewer words, show all of them in 1 line
+  // Show first 3 cards + 1 "More" card if there are > 3 words
   const maxLineCards = 3;
   const hasMoreThanLimit = allMissingWords.length > maxLineCards;
   const visibleCards = useMemo(() => {
@@ -83,20 +93,49 @@ export const RepeatedMistakesRow: React.FC<RepeatedMistakesRowProps> = ({
     );
   }, [allMissingWords, searchFilter]);
 
-  const handleOpenModal = () => {
+  // Touch handler: Show stored data directly without calling Gemini
+  const handleInspectWord = (word: string, category?: QuestionCategory) => {
     soundManager.playTap();
-    setIsModalOpen(true);
+    const detail = getStoredWordDetail(word, category, fallbackSavedWords);
+    setSelectedWordDetail(detail);
   };
 
-  const handleCloseModal = () => {
+  const handleCloseDetailModal = () => {
     soundManager.playTap();
-    setIsModalOpen(false);
-    setSearchFilter('');
+    setSelectedWordDetail(null);
+    setCopiedTrick(false);
   };
 
-  const handleCardClick = (word: string, category?: QuestionCategory) => {
+  // Audio Speech Pronunciation
+  const handleSpeak = (wordToSpeak: string) => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
     soundManager.playTap();
-    onAnalyzeWord(word, category);
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(wordToSpeak);
+    utterance.rate = 0.9;
+    utterance.lang = 'en-US';
+    utterance.onstart = () => setIsSpeaking(true);
+    utterance.onend = () => setIsSpeaking(false);
+    utterance.onerror = () => setIsSpeaking(false);
+    window.speechSynthesis.speak(utterance);
+  };
+
+  // Copy Trick
+  const handleCopyTrick = () => {
+    if (!selectedWordDetail) return;
+    soundManager.playTap();
+    const text = `🎓 ${selectedWordDetail.wordOrPhrase}
+📖 Meaning: ${selectedWordDetail.meaning}
+🇮🇳 Hindi: ${selectedWordDetail.hindiMeaning}
+💡 Mnemonic Trick: ${selectedWordDetail.mnemonic}
+${selectedWordDetail.rootEtymology ? `🧬 Root: ${selectedWordDetail.rootEtymology}\n` : ''}${selectedWordDetail.sampleUsage ? `📝 Usage: ${selectedWordDetail.sampleUsage}` : ''}`;
+
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text).then(() => {
+        setCopiedTrick(true);
+        setTimeout(() => setCopiedTrick(false), 2000);
+      });
+    }
   };
 
   if (allMissingWords.length === 0) {
@@ -107,7 +146,7 @@ export const RepeatedMistakesRow: React.FC<RepeatedMistakesRowProps> = ({
           <span className="text-xs sm:text-sm font-black text-slate-100">{title}</span>
         </div>
         <p className="text-xs text-slate-400 max-w-md mx-auto">
-          Awesome! No repeated mistakes recorded yet. Words you miss during practice will automatically appear here with quick Hinglish mnemonics.
+          No repeated mistakes recorded yet! Words you miss during drills or practice will automatically appear here with their complete stored mnemonics, Hindi meanings, and exam tricks.
         </p>
       </div>
     );
@@ -140,7 +179,10 @@ export const RepeatedMistakesRow: React.FC<RepeatedMistakesRowProps> = ({
           {/* Header "More" Button */}
           {allMissingWords.length > 1 && (
             <button
-              onClick={handleOpenModal}
+              onClick={() => {
+                soundManager.playTap();
+                setIsListModalOpen(true);
+              }}
               className="flex items-center gap-1 text-xs font-bold text-rose-400 hover:text-rose-300 px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 transition-all cursor-pointer shrink-0"
               title="View all missing words"
             >
@@ -155,7 +197,7 @@ export const RepeatedMistakesRow: React.FC<RepeatedMistakesRowProps> = ({
           {visibleCards.map((item, idx) => (
             <div
               key={idx}
-              onClick={() => handleCardClick(item.wordOrPhrase, item.category)}
+              onClick={() => handleInspectWord(item.wordOrPhrase, item.category)}
               className="p-3 rounded-xl bg-slate-950 border border-rose-900/30 hover:border-purple-500/70 hover:bg-purple-950/20 transition-all flex flex-col justify-between gap-2 cursor-pointer group shadow-sm hover:shadow-md"
             >
               <div className="space-y-1">
@@ -186,7 +228,7 @@ export const RepeatedMistakesRow: React.FC<RepeatedMistakesRowProps> = ({
                   {item.category}
                 </span>
                 <span className="text-purple-400/90 font-medium group-hover:underline text-[10px] flex items-center gap-0.5">
-                  Trick →
+                  View Tricks →
                 </span>
               </div>
             </div>
@@ -195,7 +237,10 @@ export const RepeatedMistakesRow: React.FC<RepeatedMistakesRowProps> = ({
           {/* The 4th "More" Card when there are extra missing words */}
           {hasMoreThanLimit && (
             <button
-              onClick={handleOpenModal}
+              onClick={() => {
+                soundManager.playTap();
+                setIsListModalOpen(true);
+              }}
               className="p-3 rounded-xl bg-slate-950/70 border border-dashed border-rose-500/40 hover:border-purple-500 hover:bg-purple-950/20 transition-all flex flex-col items-center justify-center text-center gap-1.5 cursor-pointer group min-h-[90px]"
               title="Open full list of missing words"
             >
@@ -215,11 +260,15 @@ export const RepeatedMistakesRow: React.FC<RepeatedMistakesRowProps> = ({
         </div>
       </div>
 
-      {/* Full "More" Words Modal Overlay */}
-      {isModalOpen && (
+      {/* Full "More" Words List Modal Overlay */}
+      {isListModalOpen && (
         <div 
           className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-4"
-          onClick={handleCloseModal}
+          onClick={() => {
+            soundManager.playTap();
+            setIsListModalOpen(false);
+            setSearchFilter('');
+          }}
         >
           <div 
             className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden"
@@ -241,14 +290,18 @@ export const RepeatedMistakesRow: React.FC<RepeatedMistakesRowProps> = ({
                     </span>
                   </div>
                   <p className="text-xs text-slate-400 mt-0.5 truncate">
-                    Tap any word to unlock its Hinglish mnemonic hook and root etymology.
+                    Tap any word to view its stored mnemonics, meaning, and tricks.
                   </p>
                 </div>
               </div>
 
               {/* Close Button */}
               <button
-                onClick={handleCloseModal}
+                onClick={() => {
+                  soundManager.playTap();
+                  setIsListModalOpen(false);
+                  setSearchFilter('');
+                }}
                 className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-all cursor-pointer shrink-0"
                 title="Close"
               >
@@ -288,8 +341,7 @@ export const RepeatedMistakesRow: React.FC<RepeatedMistakesRowProps> = ({
                     <div
                       key={idx}
                       onClick={() => {
-                        handleCloseModal();
-                        handleCardClick(item.wordOrPhrase, item.category);
+                        handleInspectWord(item.wordOrPhrase, item.category);
                       }}
                       className="p-3.5 rounded-xl bg-slate-950 border border-rose-900/30 hover:border-purple-500 hover:bg-purple-950/20 transition-all flex flex-col justify-between gap-2.5 cursor-pointer group shadow-sm"
                     >
@@ -322,8 +374,8 @@ export const RepeatedMistakesRow: React.FC<RepeatedMistakesRowProps> = ({
                           {item.category}
                         </span>
                         <span className="text-purple-400 font-bold group-hover:underline flex items-center gap-1">
-                          <span>Unlock Mnemonic</span>
-                          <ArrowRight className="w-3 h-3" />
+                          <span>View Tricks</span>
+                          <ChevronRight className="w-3 h-3" />
                         </span>
                       </div>
                     </div>
@@ -343,11 +395,217 @@ export const RepeatedMistakesRow: React.FC<RepeatedMistakesRowProps> = ({
                 Showing {modalFilteredWords.length} of {allMissingWords.length} missing words
               </span>
               <button
-                onClick={handleCloseModal}
+                onClick={() => {
+                  soundManager.playTap();
+                  setIsListModalOpen(false);
+                }}
                 className="px-5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs sm:text-sm transition-all cursor-pointer flex items-center gap-1.5"
               >
                 <X className="w-4 h-4" />
                 <span>Close</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Rich Stored Word Details Modal (No Gemini, Direct Stored Data) */}
+      {selectedWordDetail && (
+        <div 
+          className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto"
+          onClick={handleCloseDetailModal}
+        >
+          <div 
+            className="bg-slate-900 border border-purple-500/30 rounded-2xl w-full max-w-xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden my-auto"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="p-4 sm:p-5 border-b border-slate-800 bg-slate-900 flex items-start justify-between gap-3 shrink-0">
+              <div className="space-y-1 min-w-0">
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <h2 className="text-lg sm:text-2xl font-black font-mono text-slate-100 tracking-wide">
+                    {selectedWordDetail.wordOrPhrase}
+                  </h2>
+                  <button
+                    onClick={() => handleSpeak(selectedWordDetail.wordOrPhrase)}
+                    className={`p-1.5 rounded-lg bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/30 text-purple-300 transition-colors cursor-pointer ${
+                      isSpeaking ? 'animate-pulse text-purple-200' : ''
+                    }`}
+                    title="Listen to pronunciation"
+                  >
+                    <Volume2 className="w-4 h-4" />
+                  </button>
+                  <span className="px-2.5 py-0.5 rounded-full bg-purple-500/15 border border-purple-500/30 text-purple-300 font-mono font-bold text-xs uppercase">
+                    {selectedWordDetail.category}
+                  </span>
+                  {selectedWordDetail.wrongCount && (
+                    <span className="px-2 py-0.5 rounded-full bg-rose-500/20 border border-rose-500/30 text-rose-300 font-mono font-bold text-xs">
+                      Missed {selectedWordDetail.wrongCount}x
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  Stored PYQ Question Bank & Master Vocabulary Data
+                </p>
+              </div>
+
+              <button
+                onClick={handleCloseDetailModal}
+                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer shrink-0"
+                title="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Scrollable Body */}
+            <div className="p-4 sm:p-5 overflow-y-auto space-y-3.5 flex-1 max-h-[70vh]">
+              {/* Meaning Card */}
+              <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3.5 space-y-2">
+                <div className="flex items-center gap-2 text-xs font-black text-slate-300">
+                  <BookOpen className="w-4 h-4 text-purple-400" />
+                  <span>English Definition</span>
+                </div>
+                <p className="text-xs sm:text-sm text-slate-200 leading-relaxed font-medium">
+                  {selectedWordDetail.meaning}
+                </p>
+
+                {selectedWordDetail.hindiMeaning && (
+                  <div className="pt-2 border-t border-slate-900 flex items-start gap-2">
+                    <Languages className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                        हिन्दी अर्थ:
+                      </span>
+                      <span className="text-sm font-bold text-amber-300">
+                        {selectedWordDetail.hindiMeaning}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Mnemonic Trick Card */}
+              <div className="bg-amber-950/20 border border-amber-500/30 rounded-xl p-3.5 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-xs font-black text-amber-300">
+                    <Lightbulb className="w-4 h-4 text-amber-400" />
+                    <span>Desi Hinglish Mnemonic & Memory Hook</span>
+                  </div>
+                  <button
+                    onClick={handleCopyTrick}
+                    className="flex items-center gap-1 text-[11px] font-semibold text-amber-400 hover:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 px-2 py-0.5 rounded-md border border-amber-500/20 transition-all cursor-pointer"
+                  >
+                    {copiedTrick ? (
+                      <>
+                        <Check className="w-3 h-3 text-emerald-400" />
+                        <span className="text-emerald-300">Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3 h-3" />
+                        <span>Copy Trick</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+                <p className="text-xs sm:text-sm text-amber-100 font-medium leading-relaxed">
+                  {selectedWordDetail.mnemonic}
+                </p>
+                <p className="text-[11px] text-amber-300/80 italic">
+                  💡 5-Second Rule: Visualize this memory hook once, and you won't forget it in the exam hall.
+                </p>
+              </div>
+
+              {/* Root Word & Etymology */}
+              {selectedWordDetail.rootEtymology && (
+                <div className="bg-slate-950/70 border border-sky-500/30 rounded-xl p-3.5 space-y-1.5">
+                  <div className="flex items-center gap-2 text-xs font-black text-sky-300">
+                    <Compass className="w-4 h-4 text-sky-400" />
+                    <span>Root Word & Etymology Tree</span>
+                  </div>
+                  <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+                    {selectedWordDetail.rootEtymology}
+                  </p>
+                </div>
+              )}
+
+              {/* Exam Trap Tip */}
+              {selectedWordDetail.examTrapTip && (
+                <div className="bg-slate-950/70 border border-rose-500/30 rounded-xl p-3.5 space-y-1.5">
+                  <div className="flex items-center gap-2 text-xs font-black text-rose-300">
+                    <AlertTriangle className="w-4 h-4 text-rose-400" />
+                    <span>Exam Trap & Misleading Options</span>
+                  </div>
+                  <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+                    {selectedWordDetail.examTrapTip}
+                  </p>
+                </div>
+              )}
+
+              {/* Sentence Usage */}
+              {selectedWordDetail.sampleUsage && (
+                <div className="bg-slate-950/70 border border-emerald-500/30 rounded-xl p-3.5 space-y-1.5">
+                  <div className="flex items-center gap-2 text-xs font-black text-emerald-300">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                    <span>Exam Sentence Example</span>
+                  </div>
+                  <p className="text-xs sm:text-sm text-slate-200 italic font-medium">
+                    "{selectedWordDetail.sampleUsage}"
+                  </p>
+                </div>
+              )}
+
+              {/* Synonyms & Antonyms Chips */}
+              {((selectedWordDetail.synonyms && selectedWordDetail.synonyms.length > 0) ||
+                (selectedWordDetail.antonyms && selectedWordDetail.antonyms.length > 0)) && (
+                <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3.5 space-y-2.5">
+                  {selectedWordDetail.synonyms && selectedWordDetail.synonyms.length > 0 && (
+                    <div className="space-y-1.5">
+                      <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider">
+                        Synonyms:
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {selectedWordDetail.synonyms.map((syn, sIdx) => (
+                          <span
+                            key={sIdx}
+                            className="px-2 py-0.5 rounded-md bg-emerald-950/40 border border-emerald-800/50 text-emerald-200 text-xs font-medium"
+                          >
+                            {syn}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedWordDetail.antonyms && selectedWordDetail.antonyms.length > 0 && (
+                    <div className="space-y-1.5 pt-1">
+                      <span className="text-[11px] font-bold text-rose-400 uppercase tracking-wider">
+                        Antonyms:
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {selectedWordDetail.antonyms.map((ant, aIdx) => (
+                          <span
+                            key={aIdx}
+                            className="px-2 py-0.5 rounded-md bg-rose-950/40 border border-rose-800/50 text-rose-200 text-xs font-medium"
+                          >
+                            {ant}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-3 sm:p-4 border-t border-slate-800 bg-slate-900 flex items-center justify-end shrink-0">
+              <button
+                onClick={handleCloseDetailModal}
+                className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs sm:text-sm transition-all cursor-pointer"
+              >
+                Got It
               </button>
             </div>
           </div>
