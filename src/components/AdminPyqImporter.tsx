@@ -26,7 +26,11 @@ import {
   Lightbulb,
   ChevronDown,
   ChevronUp,
-  Wand2
+  Wand2,
+  Search,
+  Filter,
+  Calendar,
+  Tag
 } from 'lucide-react';
 import { ExtractedQuestion, ImportBatch, ReviewStatus } from '../types/pyqImport';
 import { parseAndValidatePyqJSON, SkippedQuestionItem, extractJsonMetadata, formatExamTag, normalizeExamDate } from '../services/jsonPyqParser';
@@ -61,7 +65,7 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
   const isAdmin = isUserAdmin(userEmail) || (typeof window !== 'undefined' && window.location.hostname === 'localhost');
 
   // Navigation mode
-  const [adminView, setAdminView] = useState<'importer' | 'health' | 'simulation'>('importer');
+  const [adminView, setAdminView] = useState<'importer' | 'health' | 'explorer' | 'simulation'>('health');
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [jsonText, setJsonText] = useState<string>('');
@@ -136,12 +140,22 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
   const [previewCat, setPreviewCat] = useState<QuestionCategory>('synonyms');
   const [previewQuestion, setPreviewQuestion] = useState<Question | null>(() => questionBankEngine.getPreviewQuestion('synonyms'));
 
+  // Cloud Exam & Year Explorer State
+  const [explorerQuestions, setExplorerQuestions] = useState<Question[]>(() => questionBankEngine.getImportedQuestions());
+  const [explorerExam, setExplorerExam] = useState<string>('ALL');
+  const [explorerYear, setExplorerYear] = useState<string>('ALL');
+  const [explorerTier, setExplorerTier] = useState<string>('ALL');
+  const [explorerCategory, setExplorerCategory] = useState<string>('ALL');
+  const [explorerSearch, setExplorerSearch] = useState<string>('');
+  const [expandedQuestionId, setExpandedQuestionId] = useState<string | null>(null);
+
   // Simulation State
   const [simulationResult, setSimulationResult] = useState<ReturnType<typeof questionBankEngine.runRepetitionSimulation> | null>(null);
   const [isSimulating, setIsSimulating] = useState<boolean>(false);
 
   useEffect(() => {
     setHealthData(questionBankEngine.getCloudVsRuntimeCounts());
+    setExplorerQuestions(questionBankEngine.getImportedQuestions());
   }, [adminView, importSummary]);
 
   // Security guard for non-admin visitors
@@ -654,6 +668,7 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
     try {
       await questionBankEngine.refreshFromFirestore(true);
       setHealthData(questionBankEngine.getCloudVsRuntimeCounts());
+      setExplorerQuestions(questionBankEngine.getImportedQuestions());
     } finally {
       setIsSyncingCloud(false);
     }
@@ -677,6 +692,88 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
     if (filterStatus === 'rejected') return q.reviewStatus === 'rejected';
     return true;
   });
+
+  // Extract unique exams, years, and tiers present in explorerQuestions
+  const availableExams = Array.from(
+    new Set(
+      explorerQuestions.flatMap(q => [
+        q.exam,
+        ...(q.appearances || []).map(a => a.exam),
+      ]).filter(Boolean)
+    )
+  ).sort() as string[];
+
+  const availableYears = Array.from(
+    new Set(
+      explorerQuestions.flatMap(q => [
+        q.year,
+        ...(q.appearances || []).map(a => a.year),
+      ]).filter(y => typeof y === 'number' && y > 1990)
+    )
+  ).sort((a, b) => Number(b) - Number(a)) as number[];
+
+  const availableTiers = Array.from(
+    new Set(
+      explorerQuestions.flatMap(q => [
+        q.tier,
+        ...(q.appearances || []).map(a => a.tier),
+      ]).filter(Boolean)
+    )
+  ).sort() as string[];
+
+  // Filtered explorer questions matching user selection
+  const filteredExplorerQuestions = explorerQuestions.filter(q => {
+    // Category filter
+    if (explorerCategory !== 'ALL' && q.category !== explorerCategory) {
+      return false;
+    }
+
+    // Exam filter
+    if (explorerExam !== 'ALL') {
+      const matchPrimary = (q.exam || '').toLowerCase().includes(explorerExam.toLowerCase());
+      const matchAppearances = (q.appearances || []).some(a => (a.exam || '').toLowerCase().includes(explorerExam.toLowerCase()));
+      const matchHistory = (q.examHistory || []).some(tag => tag.toLowerCase().includes(explorerExam.toLowerCase()));
+      if (!matchPrimary && !matchAppearances && !matchHistory) return false;
+    }
+
+    // Year filter
+    if (explorerYear !== 'ALL') {
+      const numYear = Number(explorerYear);
+      const matchPrimary = q.year === numYear;
+      const matchAppearances = (q.appearances || []).some(a => a.year === numYear);
+      const matchHistory = (q.examHistory || []).some(tag => tag.includes(explorerYear));
+      if (!matchPrimary && !matchAppearances && !matchHistory) return false;
+    }
+
+    // Tier filter
+    if (explorerTier !== 'ALL') {
+      const normSelected = normalizeTier(explorerTier).toLowerCase();
+      const matchPrimary = normalizeTier(q.tier).toLowerCase().includes(normSelected);
+      const matchAppearances = (q.appearances || []).some(a => normalizeTier(a.tier).toLowerCase().includes(normSelected));
+      const matchHistory = (q.examHistory || []).some(tag => tag.toLowerCase().includes(normSelected));
+      if (!matchPrimary && !matchAppearances && !matchHistory) return false;
+    }
+
+    // Search query filter
+    if (explorerSearch.trim()) {
+      const s = explorerSearch.trim().toLowerCase();
+      const matchWord = q.wordOrPhrase.toLowerCase().includes(s);
+      const matchOptions = (q.options || []).some(opt => opt.toLowerCase().includes(s));
+      const matchMeaning = (q.meaning || '').toLowerCase().includes(s) || (q.hindiMeaning || '').toLowerCase().includes(s);
+      const matchExam = (q.examHistory || []).some(t => t.toLowerCase().includes(s));
+      if (!matchWord && !matchOptions && !matchMeaning && !matchExam) return false;
+    }
+
+    return true;
+  });
+
+  // Track whether any active filter or search query is set for Explorer
+  const hasActiveExplorerFilter =
+    explorerExam !== 'ALL' ||
+    explorerYear !== 'ALL' ||
+    explorerTier !== 'ALL' ||
+    explorerCategory !== 'ALL' ||
+    explorerSearch.trim().length > 0;
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-slate-950 text-slate-100 overflow-hidden">
@@ -723,6 +820,18 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
           >
             <Activity className="w-3.5 h-3.5" />
             Question Bank Health ({healthData.totalCloud} Cloud)
+          </button>
+
+          <button
+            onClick={() => setAdminView('explorer')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+              adminView === 'explorer'
+                ? 'bg-emerald-500 text-slate-950 shadow-md'
+                : 'bg-slate-800 text-slate-300 hover:text-white'
+            }`}
+          >
+            <BookOpen className="w-3.5 h-3.5" />
+            Exam & Year Explorer ({explorerQuestions.length})
           </button>
 
           <button
@@ -1723,6 +1832,414 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
               ) : (
                 <div className="p-8 text-center text-slate-500 text-xs">
                   No preview available for this category.
+                </div>
+              )}
+            </div>
+
+            {/* Quick Link from Health to Dedicated Explorer */}
+            <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-5 flex items-center justify-between flex-wrap gap-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  <BookOpen className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-white">Cloud Exam & Year Question Explorer</h4>
+                  <p className="text-xs text-slate-400">Search and audit all {explorerQuestions.length} verified questions by Exam, Year, Tier, or Category.</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setAdminView('explorer')}
+                className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold transition flex items-center gap-1.5 shadow-md"
+              >
+                <Search className="w-3.5 h-3.5" />
+                Open Question Explorer
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* VIEW: DEDICATED EXAM & YEAR CLOUD QUESTION EXPLORER */}
+        {adminView === 'explorer' && (
+          <div className="space-y-6">
+            {/* Exam, Year & Category Cloud Question Explorer */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-5">
+              <div className="flex items-center justify-between flex-wrap gap-4 border-b border-slate-800 pb-4">
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <BookOpen className="w-4 h-4 text-sky-400" />
+                    Cloud Exam & Year Question Explorer
+                    <span className="text-[10px] bg-sky-500/20 text-sky-300 font-mono font-bold px-2 py-0.5 rounded-full border border-sky-500/30">
+                      {hasActiveExplorerFilter ? `${filteredExplorerQuestions.length} Found` : `${explorerQuestions.length} in Cloud`}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Filter and audit verified questions published to Firestore by Exam, Year, Tier, or Category
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleForceSyncCloud}
+                    disabled={isSyncingCloud}
+                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition"
+                    title="Re-fetch all documents from Firestore"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 text-sky-400 ${isSyncingCloud ? 'animate-spin' : ''}`} />
+                    Sync Cloud Data
+                  </button>
+                </div>
+              </div>
+
+              {/* Filters Row */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                {/* Exam Filter */}
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                    Exam
+                  </label>
+                  <select
+                    value={explorerExam}
+                    onChange={(e) => setExplorerExam(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-sky-500 transition"
+                  >
+                    <option value="ALL">All Exams ({availableExams.length})</option>
+                    {availableExams.map(ex => (
+                      <option key={ex} value={ex}>{ex}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Year Filter */}
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                    Year
+                  </label>
+                  <select
+                    value={explorerYear}
+                    onChange={(e) => setExplorerYear(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-sky-500 transition"
+                  >
+                    <option value="ALL">All Years</option>
+                    {availableYears.map(yr => (
+                      <option key={yr} value={String(yr)}>{yr}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Tier / Stage Filter */}
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                    Tier / Stage
+                  </label>
+                  <select
+                    value={explorerTier}
+                    onChange={(e) => setExplorerTier(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-sky-500 transition"
+                  >
+                    <option value="ALL">All Tiers / Stages</option>
+                    {availableTiers.map(tr => (
+                      <option key={tr} value={tr}>{tr}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Category Filter */}
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                    Category
+                  </label>
+                  <select
+                    value={explorerCategory}
+                    onChange={(e) => setExplorerCategory(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-sky-500 transition capitalize"
+                  >
+                    <option value="ALL">All 4 Categories</option>
+                    <option value="synonyms">Synonyms</option>
+                    <option value="antonyms">Antonyms</option>
+                    <option value="ows">One-Word (OWS)</option>
+                    <option value="idioms">Idioms & Phrases</option>
+                  </select>
+                </div>
+
+                {/* Search Box */}
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                    Search Question / Word
+                  </label>
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      placeholder="e.g. Taciturn, CGL, Shift 2..."
+                      value={explorerSearch}
+                      onChange={(e) => setExplorerSearch(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-8 pr-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-sky-500 transition"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Active Filter Badges & Reset */}
+              {(explorerExam !== 'ALL' || explorerYear !== 'ALL' || explorerTier !== 'ALL' || explorerCategory !== 'ALL' || explorerSearch) && (
+                <div className="flex items-center gap-2 flex-wrap text-xs pt-1">
+                  <span className="text-slate-400 text-[11px]">Active Filters:</span>
+                  {explorerExam !== 'ALL' && (
+                    <span className="bg-sky-500/20 text-sky-300 border border-sky-500/40 px-2 py-0.5 rounded-full text-[11px] font-medium flex items-center gap-1">
+                      Exam: {explorerExam}
+                      <button onClick={() => setExplorerExam('ALL')} className="hover:text-white">×</button>
+                    </span>
+                  )}
+                  {explorerYear !== 'ALL' && (
+                    <span className="bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-full text-[11px] font-medium flex items-center gap-1">
+                      Year: {explorerYear}
+                      <button onClick={() => setExplorerYear('ALL')} className="hover:text-white">×</button>
+                    </span>
+                  )}
+                  {explorerTier !== 'ALL' && (
+                    <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full text-[11px] font-medium flex items-center gap-1">
+                      Tier: {explorerTier}
+                      <button onClick={() => setExplorerTier('ALL')} className="hover:text-white">×</button>
+                    </span>
+                  )}
+                  {explorerCategory !== 'ALL' && (
+                    <span className="bg-purple-500/20 text-purple-300 border border-purple-500/40 px-2 py-0.5 rounded-full text-[11px] font-medium flex items-center gap-1 capitalize">
+                      {explorerCategory}
+                      <button onClick={() => setExplorerCategory('ALL')} className="hover:text-white">×</button>
+                    </span>
+                  )}
+                  {explorerSearch && (
+                    <span className="bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full text-[11px] font-medium flex items-center gap-1">
+                      "{explorerSearch}"
+                      <button onClick={() => setExplorerSearch('')} className="hover:text-white">×</button>
+                    </span>
+                  )}
+                  <button
+                    onClick={() => {
+                      setExplorerExam('ALL');
+                      setExplorerYear('ALL');
+                      setExplorerTier('ALL');
+                      setExplorerCategory('ALL');
+                      setExplorerSearch('');
+                    }}
+                    className="text-[11px] text-rose-400 hover:underline ml-1"
+                  >
+                    Clear All
+                  </button>
+                </div>
+              )}
+
+              {/* Questions List or Initial Search Prompt */}
+              {!hasActiveExplorerFilter ? (
+                <div className="py-16 px-4 text-center rounded-2xl bg-slate-950/50 border border-dashed border-slate-800 space-y-4">
+                  <div className="w-12 h-12 rounded-full bg-sky-500/10 text-sky-400 flex items-center justify-center mx-auto border border-sky-500/20 shadow-inner">
+                    <Search className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h4 className="text-base font-bold text-white">
+                      Search or Filter to Explore Cloud Questions
+                    </h4>
+                    <p className="text-xs text-slate-400 max-w-md mx-auto mt-1 leading-relaxed">
+                      Select an <b>Exam</b>, <b>Year</b>, <b>Tier</b>, <b>Category</b>, or type keywords in the search bar above to audit questions.
+                    </p>
+                  </div>
+
+                  {/* Quick Suggestions */}
+                  <div className="pt-2 flex items-center justify-center gap-2 flex-wrap max-w-lg mx-auto">
+                    <span className="text-[11px] text-slate-500 font-medium">Quick suggestions:</span>
+                    {availableExams.slice(0, 3).map(examName => (
+                      <button
+                        key={examName}
+                        onClick={() => setExplorerExam(examName)}
+                        className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-300 border border-slate-700/60 transition flex items-center gap-1"
+                      >
+                        <Tag className="w-3 h-3 text-sky-400" />
+                        {examName}
+                      </button>
+                    ))}
+                    {availableYears.length > 0 && (
+                      <button
+                        onClick={() => setExplorerYear(String(availableYears[0]))}
+                        className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700/60 transition flex items-center gap-1"
+                      >
+                        <Calendar className="w-3 h-3 text-amber-400" />
+                        Year {availableYears[0]}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setExplorerCategory('synonyms')}
+                      className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-purple-300 border border-slate-700/60 transition"
+                    >
+                      Synonyms
+                    </button>
+                    <button
+                      onClick={() => setExplorerCategory('idioms')}
+                      className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700/60 transition"
+                    >
+                      Idioms
+                    </button>
+                  </div>
+                </div>
+              ) : filteredExplorerQuestions.length > 0 ? (
+                <div className="space-y-3 max-h-[600px] overflow-y-auto pr-1">
+                  {filteredExplorerQuestions.map((q, idx) => {
+                    const isExpanded = expandedQuestionId === (q.id || String(idx));
+                    return (
+                      <div
+                        key={q.id || idx}
+                        className="bg-slate-950 border border-slate-800/90 hover:border-slate-700 rounded-xl p-4 transition space-y-3"
+                      >
+                        {/* Header info */}
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-[10px] uppercase font-mono font-bold px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                              {q.category}
+                            </span>
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30">
+                              {q.exam || 'SSC'} {q.year || ''} {q.tier ? `• ${q.tier}` : ''} {q.shift ? `• ${q.shift}` : ''}
+                            </span>
+                            {q.repeatCount && q.repeatCount > 1 && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                Repeated {q.repeatCount}x
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <ExamAppearancesBadge
+                              appearances={q.appearances}
+                              examHistory={q.examHistory}
+                              repeatCount={q.repeatCount}
+                              examFamily={q.examFamily}
+                              year={q.year}
+                              tier={q.tier}
+                              shift={q.shift}
+                              size="sm"
+                            />
+                            <button
+                              onClick={() => setExpandedQuestionId(isExpanded ? null : (q.id || String(idx)))}
+                              className="text-xs text-slate-400 hover:text-white p-1 rounded hover:bg-slate-800 transition"
+                              title={isExpanded ? 'Collapse' : 'Expand full details'}
+                            >
+                              {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Word and Question Text */}
+                        <div>
+                          <div className="text-[11px] text-slate-400">{q.instruction}</div>
+                          <div className="text-base font-extrabold text-white mt-0.5">
+                            "{q.wordOrPhrase}"
+                          </div>
+                        </div>
+
+                        {/* 4 Options Grid */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {q.options.map((opt, optIdx) => {
+                            const isCorrect = optIdx === q.correctIndex;
+                            return (
+                              <div
+                                key={optIdx}
+                                className={`p-2.5 rounded-lg text-xs font-medium flex items-center justify-between ${
+                                  isCorrect
+                                    ? 'bg-emerald-950/80 border border-emerald-500 text-emerald-200 font-bold'
+                                    : 'bg-slate-900 border border-slate-800 text-slate-300'
+                                }`}
+                              >
+                                <span>{String.fromCharCode(65 + optIdx)}. {opt}</span>
+                                {isCorrect && (
+                                  <span className="text-[10px] bg-emerald-500/30 text-emerald-300 px-1.5 py-0.5 rounded font-bold">
+                                    Correct Answer
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* Collapsible Enrichment & Explanation Details */}
+                        {isExpanded && (
+                          <div className="pt-3 border-t border-slate-800/80 space-y-3 text-xs">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              {q.hindiMeaning && (
+                                <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800">
+                                  <span className="text-slate-400 font-semibold block text-[10px] uppercase">Hindi Meaning</span>
+                                  <span className="text-amber-200 font-medium text-sm">{q.hindiMeaning}</span>
+                                </div>
+                              )}
+                              {q.meaning && (
+                                <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800">
+                                  <span className="text-slate-400 font-semibold block text-[10px] uppercase">English Meaning</span>
+                                  <span className="text-slate-200">{q.meaning}</span>
+                                </div>
+                              )}
+                            </div>
+
+                            {q.mnemonic && (
+                              <div className="bg-amber-950/20 border border-amber-500/30 p-2.5 rounded-lg text-amber-200">
+                                <span className="text-amber-400 font-bold block text-[10px] uppercase">Memory Hook / Mnemonic</span>
+                                {q.mnemonic}
+                              </div>
+                            )}
+
+                            {/* Option Explanations */}
+                            {q.optionDetails && q.optionDetails.length === 4 && (
+                              <div className="space-y-1.5 pt-1">
+                                <span className="text-slate-400 font-bold block text-[10px] uppercase">All 4 Option Breakdowns:</span>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                  {q.optionDetails.map((od, odIdx) => (
+                                    <div key={odIdx} className="bg-slate-900/80 p-2 rounded-lg border border-slate-800 text-[11px]">
+                                      <div className="font-bold text-slate-200 flex items-center justify-between">
+                                        <span>{String.fromCharCode(65 + odIdx)}. {od.option}</span>
+                                        {od.hindiMeaning && <span className="text-amber-300 font-normal">{od.hindiMeaning}</span>}
+                                      </div>
+                                      <p className="text-slate-400 text-[10px] mt-0.5">
+                                        {od.englishMeaning || od.explanation || od.shortExplanation}
+                                      </p>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="py-12 px-4 text-center rounded-xl bg-slate-950/60 border border-dashed border-slate-800 space-y-3">
+                  <div className="w-10 h-10 rounded-full bg-slate-800/80 text-slate-400 flex items-center justify-center mx-auto">
+                    <AlertTriangle className="w-5 h-5 text-amber-400" />
+                  </div>
+                  <h4 className="text-sm font-bold text-white">
+                    No Questions Found for this Selection
+                  </h4>
+                  <p className="text-xs text-slate-400 max-w-md mx-auto">
+                    {explorerExam !== 'ALL' || explorerYear !== 'ALL' || explorerTier !== 'ALL' ? (
+                      <>
+                        No cloud questions found matching <b>{explorerExam !== 'ALL' ? explorerExam : 'Any Exam'}</b>{' '}
+                        {explorerYear !== 'ALL' ? `(${explorerYear})` : ''}{' '}
+                        {explorerTier !== 'ALL' ? `[${explorerTier}]` : ''}.
+                        <br />
+                        You can upload and ingest this exam paper from the <b>JSON Ingest & Publisher</b> tab.
+                      </>
+                    ) : (
+                      <>No questions match your current search or category filter.</>
+                    )}
+                  </p>
+                  <button
+                    onClick={() => {
+                      setExplorerExam('ALL');
+                      setExplorerYear('ALL');
+                      setExplorerTier('ALL');
+                      setExplorerCategory('ALL');
+                      setExplorerSearch('');
+                    }}
+                    className="px-4 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-sky-400 transition"
+                  >
+                    Reset Explorer Filters
+                  </button>
                 </div>
               )}
             </div>

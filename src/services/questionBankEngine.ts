@@ -1177,6 +1177,14 @@ export class QuestionBankEngine {
   }
 
   /**
+   * Return a snapshot of all imported and cloud-published questions
+   */
+  public getImportedQuestions(): Question[] {
+    this.init();
+    return [...this.importedPool];
+  }
+
+  /**
    * Preview a live verified or practice question for inspection
    */
   public getPreviewQuestion(category: QuestionCategory): Question | null {
