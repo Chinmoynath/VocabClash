@@ -104,7 +104,7 @@ export const PlayModeSelectorModal: React.FC<PlayModeSelectorModalProps> = ({
                     <Zap className="w-3 h-3 text-amber-400" /> +30 LP on Victory
                   </span>
                   <span>•</span>
-                  <span>Avg Queue: ~1.8s</span>
+                  <span>Avg Queue: ~5.0s</span>
                 </div>
               </div>
 

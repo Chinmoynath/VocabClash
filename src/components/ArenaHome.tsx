@@ -119,9 +119,8 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
             <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
           </span>
           <span className="font-semibold text-emerald-200">Instant 1v1 Matchmaking Active</span>
-          <span className="hidden sm:inline text-emerald-400/60">• 24,000+ PYQ Verified Pool</span>
         </div>
-        <span className="text-[11px] text-emerald-400/90 font-mono font-bold">Avg Queue: 1.8s</span>
+        <span className="text-[11px] text-emerald-400/90 font-mono font-bold">Avg Queue: 5.0s</span>
       </div>
 
       {/* Main Responsive Grid: 1-Column on Mobile, 2-Column Dashboard on Desktop/Laptop */}
