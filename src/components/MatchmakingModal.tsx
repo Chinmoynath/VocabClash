@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { PlayerProfile, ExamType, QuestionCategory, Question } from '../types';
 import { soundManager } from '../utils/audio';
 import { realtimeMatchmaker, MatchSuccessResult } from '../services/realtimeMatchmaking';
+import { getSpeedBlitzSessionQuestions, deduplicateAndEnsureCount, getFilteredQuestions } from '../services/matchmakingService';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { Swords, X, Radio, WifiOff, RefreshCw, BookOpen } from 'lucide-react';
 
@@ -80,7 +81,8 @@ export const MatchmakingModal: React.FC<MatchmakingModalProps> = ({
         isMatchedRef.current = true;
         setIsRealOpponent(true);
         setMatchedOpponent(result.opponent);
-        setMatchedQuestions(result.questions);
+        const uniqueQuestions = deduplicateAndEnsureCount(result.questions, category, exam, roundCount);
+        setMatchedQuestions(uniqueQuestions);
         setSharedRoomId(result.roomId);
         setSearchStep(2);
         soundManager.playMatchFound();
@@ -94,6 +96,10 @@ export const MatchmakingModal: React.FC<MatchmakingModalProps> = ({
         isMatchedRef.current = true;
         setIsRealOpponent(false);
         setMatchedOpponent(initialBotOpponent);
+        const botQuestions = mode === 'quick_duel'
+          ? getSpeedBlitzSessionQuestions(category, exam, roundCount)
+          : getFilteredQuestions(category, exam, roundCount);
+        setMatchedQuestions(botQuestions);
         setSearchStep(2);
         soundManager.playMatchFound();
         setTimeout(() => {

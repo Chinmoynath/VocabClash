@@ -13,6 +13,8 @@ import {
 import { 
   getFilteredQuestions, 
   getFirstMatchQuestions,
+  getSpeedBlitzSessionQuestions,
+  deduplicateAndEnsureCount,
   generateMatchedOpponent, 
   getTierFromLP, 
   getTierTitle 
@@ -20,7 +22,7 @@ import {
 import { questionReviewScheduler } from './services/questionReviewScheduler';
 import { LiveRoomFinalResult, forfeitLiveRoom } from './services/realtimeMatchmaking';
 import { soundManager } from './utils/audio';
-import { isAdDue, resetAdTimerForTest } from './utils/adManager';
+import { isAdDue, resetAdTimerForTest, recordAdShown } from './utils/adManager';
 import { extractCleanUserName, formatNameFromEmail } from './utils/nameHelper';
 import { 
   getInitialStreak, 
@@ -616,9 +618,12 @@ export default function App() {
     setIsSyncing(false);
   };
 
-  // Check 10-minute ad trigger safely
+  // Check 10-minute ad trigger safely (never after first duel to protect new user retention)
   const triggerAdIfDue = () => {
-    if (isAdDue(subscription.isPremium)) {
+    if (player.matchesPlayed <= 1) {
+      return;
+    }
+    if (isAdDue(subscription.isPremium, player.matchesPlayed)) {
       setShowAdModal(true);
     }
   };
@@ -653,16 +658,27 @@ export default function App() {
     const opp = finalOpponent || matchedOpponent;
     if (!opp) return;
 
-    const isFirstTimeMatch = player.matchesPlayed === 0 || matchMode === 'quick_duel';
-    const roundCount = isFirstTimeMatch ? 10 : (matchMode === 'quick_duel' ? 10 : 20);
+    const isFirstTimeMatch = player.matchesPlayed === 0 && matchMode !== 'quick_duel';
+    const roundCount = matchMode === 'quick_duel' ? 10 : (isFirstTimeMatch ? 10 : 20);
     
-    // For first-time players / quick start: Curate 10 questions (70-80% easy, 20-30% medium)
-    // Or use the synchronized question list generated and locked during the atomic match transaction
-    const questions = matchedQuestions && matchedQuestions.length > 0 
-      ? matchedQuestions 
-      : (isFirstTimeMatch && selectedCategory === 'mixed'
-          ? getFirstMatchQuestions(selectedExam)
-          : getFilteredQuestions(selectedCategory, selectedExam, roundCount));
+    let questions: Question[];
+    if (matchMode === 'quick_duel') {
+      // Speed Blitz: Exactly 10 unique questions by stable database ID, anti-repetition across sessions
+      if (matchedQuestions && matchedQuestions.length > 0) {
+        questions = deduplicateAndEnsureCount(matchedQuestions, selectedCategory, selectedExam, 10);
+      } else {
+        questions = getSpeedBlitzSessionQuestions(selectedCategory, selectedExam, 10);
+      }
+    } else {
+      // Standard / Ranked Duels:
+      if (matchedQuestions && matchedQuestions.length > 0) {
+        questions = deduplicateAndEnsureCount(matchedQuestions, selectedCategory, selectedExam, roundCount);
+      } else if (isFirstTimeMatch && selectedCategory === 'mixed') {
+        questions = getFirstMatchQuestions(selectedExam);
+      } else {
+        questions = getFilteredQuestions(selectedCategory, selectedExam, roundCount);
+      }
+    }
 
     const newMatch: MatchState = {
       matchId: sharedRoomId || `match-${Date.now()}`,
@@ -850,7 +866,12 @@ export default function App() {
     }
 
     // Trigger 10-min interval ad safely after match completion (only for free tier)
-    if (isAdDue(subscription.isPremium)) {
+    // NEVER show ad after the user's first duel (to maximize new player retention)
+    const isFirstDuel = player.matchesPlayed === 0 || nextMatchesPlayed <= 1;
+    if (isFirstDuel) {
+      // Cleanly start their ad timer cooldown so they get a full grace period going forward
+      recordAdShown();
+    } else if (isAdDue(subscription.isPremium, nextMatchesPlayed)) {
       setTimeout(() => {
         setShowAdModal(true);
       }, 700);

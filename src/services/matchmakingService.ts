@@ -14,6 +14,23 @@ export function getFirstMatchQuestions(exam: ExamType = 'SSC_CGL'): Question[] {
   return questionBankEngine.getFirstMatchQuestions(exam);
 }
 
+export function getSpeedBlitzSessionQuestions(
+  category: QuestionCategory | 'mixed' = 'mixed',
+  exam: ExamType = 'ALL',
+  count: number = 10
+): Question[] {
+  return questionBankEngine.getSpeedBlitzSessionQuestions(category, exam, count);
+}
+
+export function deduplicateAndEnsureCount(
+  questions: Question[] | undefined | null,
+  category: QuestionCategory | 'mixed' = 'mixed',
+  exam: ExamType = 'ALL',
+  targetCount: number = 10
+): Question[] {
+  return questionBankEngine.deduplicateAndEnsureCount(questions, category, exam, targetCount);
+}
+
 export function getNextDrillQuestion(
   category: QuestionCategory | 'mixed',
   exam: ExamType,

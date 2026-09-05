@@ -10,7 +10,9 @@
 
 const STORAGE_KEY_SEEN_HISTORY = 'vocabclash_seen_history_v2';
 const STORAGE_KEY_DAILY_SEEN = 'vocabclash_daily_seen_v2';
+const STORAGE_KEY_SPEED_BLITZ_RECENT = 'vocabclash_speed_blitz_recent_ids_v1';
 const MAX_HISTORY_SIZE = 1200;
+const MAX_SPEED_BLITZ_RECENT_SIZE = 250;
 
 interface DailySeenRecord {
   dateStr: string; // YYYY-MM-DD
@@ -119,4 +121,49 @@ export function resetQuestionHistory(): void {
   if (typeof window === 'undefined' || !window.localStorage) return;
   localStorage.removeItem(STORAGE_KEY_SEEN_HISTORY);
   localStorage.removeItem(STORAGE_KEY_DAILY_SEEN);
+  localStorage.removeItem(STORAGE_KEY_SPEED_BLITZ_RECENT);
 }
+
+/**
+ * Gets recently shown Speed Blitz question IDs in LRU order (oldest first).
+ */
+export function getRecentSpeedBlitzQuestionIds(): string[] {
+  if (typeof window === 'undefined' || !window.localStorage) return [];
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_SPEED_BLITZ_RECENT);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.map(String).filter(Boolean) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+/**
+ * Records an array of question IDs shown in a Speed Blitz session.
+ * Stores up to MAX_SPEED_BLITZ_RECENT_SIZE IDs in FIFO order so recent questions are deprioritized.
+ */
+export function recordSpeedBlitzQuestionsShown(questionIds: string[]): void {
+  if (typeof window === 'undefined' || !window.localStorage || !Array.isArray(questionIds) || questionIds.length === 0) return;
+  try {
+    const existing = getRecentSpeedBlitzQuestionIds();
+    const newIdsSet = new Set(questionIds.map(String).filter(Boolean));
+    // Filter out previous occurrences of the new IDs to maintain LRU order at the tail
+    const filtered = existing.filter(id => !newIdsSet.has(id));
+    filtered.push(...Array.from(newIdsSet));
+
+    const trimmed = filtered.slice(-MAX_SPEED_BLITZ_RECENT_SIZE);
+    localStorage.setItem(STORAGE_KEY_SPEED_BLITZ_RECENT, JSON.stringify(trimmed));
+  } catch (err) {
+    console.warn('Failed to record Speed Blitz recent question IDs:', err);
+  }
+}
+
+/**
+ * Clears only the Speed Blitz recent question history
+ */
+export function clearSpeedBlitzRecentHistory(): void {
+  if (typeof window === 'undefined' || !window.localStorage) return;
+  localStorage.removeItem(STORAGE_KEY_SPEED_BLITZ_RECENT);
+}
+

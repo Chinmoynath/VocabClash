@@ -907,7 +907,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
                       )}
                       {eduDetails.rootWordInfo && (
                         <div className="text-[11px] text-teal-300/90 pt-0.5 border-t border-slate-800/60">
-                          <span className="font-bold text-teal-400">Root & Etymology: </span>
+                          <span className="font-bold text-teal-400">Performance Diagnostic: </span>
                           <span>{eduDetails.rootWordInfo}</span>
                         </div>
                       )}
@@ -963,7 +963,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
                       )}
                       {eduDetails.rootWordInfo && (
                         <div className="text-[11px] text-teal-300/90 pt-0.5 border-t border-slate-800/60">
-                          <span className="font-bold text-teal-400">Root & Etymology: </span>
+                          <span className="font-bold text-teal-400">Performance Diagnostic: </span>
                           <span>{eduDetails.rootWordInfo}</span>
                         </div>
                       )}

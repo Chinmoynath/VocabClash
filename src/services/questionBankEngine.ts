@@ -14,6 +14,10 @@ import {
   mergeAppearances,
   sortAppearances,
 } from '../utils/questionFingerprint';
+import {
+  getRecentSpeedBlitzQuestionIds,
+  recordSpeedBlitzQuestionsShown,
+} from '../utils/questionHistoryManager';
 
 // Authentic Govt Exam Years and Shifts for realistic attribution
 const EXAM_YEARS = [
@@ -1102,6 +1106,230 @@ export class QuestionBankEngine {
     count: number = 20
   ): Question[] {
     return this.getUniqueQuestionsForMatch(category, exam, count);
+  }
+
+  /**
+   * SPEED BLITZ SESSION QUESTION GENERATOR:
+   * Guarantees:
+   * 1. Strictly unique questions within the session based on question ID.
+   * 2. High-entropy random selection from the eligible pool.
+   * 3. Cross-session anti-repetition: Prioritizes questions NOT shown in recent sessions.
+   * 4. Graceful fallback: If eligible pool has < 10 unique questions, returns all available without crashing or infinite loops.
+   * 5. The resulting 10-question set is generated once and shuffled once for sequential traversal.
+   */
+  public getSpeedBlitzSessionQuestions(
+    category: QuestionCategory | 'mixed' = 'mixed',
+    exam: ExamType = 'ALL',
+    count: number = 10
+  ): Question[] {
+    this.init();
+
+    // 1. Gather all eligible questions from the question bank
+    const rawPool = this.getPlayablePool(category);
+
+    // 2. Clean and deduplicate raw pool by stable Question ID
+    const eligibleMap = new Map<string, Question>();
+    for (const q of rawPool) {
+      if (!q) continue;
+      const canonicalId = String(
+        q.id || 
+        q.canonicalQuestionId || 
+        generateCanonicalQuestionId(q.category, q.wordOrPhrase, q.options, q.correctIndex)
+      );
+      if (!eligibleMap.has(canonicalId)) {
+        eligibleMap.set(canonicalId, {
+          ...q,
+          id: canonicalId,
+          canonicalQuestionId: q.canonicalQuestionId || canonicalId,
+        });
+      }
+    }
+
+    const allEligible = Array.from(eligibleMap.values());
+
+    // Edge Case: If pool is empty, fall back to first-match pool as safe baseline
+    if (allEligible.length === 0) {
+      const fallback = this.getFirstMatchQuestions(exam);
+      return this.shuffle(fallback).slice(0, Math.min(count, fallback.length));
+    }
+
+    // Edge Case: If total available unique questions is less than or equal to target count,
+    // return all of them without crashing or looping
+    if (allEligible.length <= count) {
+      const smallSession = this.shuffle(allEligible);
+      recordSpeedBlitzQuestionsShown(smallSession.map(q => q.id));
+      return smallSession;
+    }
+
+    // 3. Retrieve recently shown Speed Blitz question IDs
+    const recentIdsList = getRecentSpeedBlitzQuestionIds();
+    const recentIdsSet = new Set(recentIdsList);
+
+    // Map recent IDs to their position in recent history (0 = oldest / least recent)
+    const recentAgeMap = new Map<string, number>();
+    recentIdsList.forEach((id, index) => {
+      recentAgeMap.set(id, index);
+    });
+
+    // 4. Partition into unseen (fresh) and recent
+    const unseenPool = allEligible.filter(q => !recentIdsSet.has(q.id));
+    const recentPool = allEligible.filter(q => recentIdsSet.has(q.id));
+
+    const selectedQuestions: Question[] = [];
+    const usedIds = new Set<string>();
+    const usedWords = new Set<string>();
+
+    const tryAddQuestion = (q: Question, checkWord: boolean = true): boolean => {
+      if (usedIds.has(q.id)) return false;
+      const wordKey = (q.wordOrPhrase || '').trim().toLowerCase();
+      if (checkWord && wordKey && usedWords.has(wordKey)) return false;
+
+      usedIds.add(q.id);
+      if (wordKey) usedWords.add(wordKey);
+      selectedQuestions.push(q);
+      return true;
+    };
+
+    // 5. Select from unseen questions first
+    if (category === 'mixed') {
+      // In mixed mode, balance across the categories: synonyms, antonyms, ows, idioms
+      const categories: QuestionCategory[] = ['synonyms', 'antonyms', 'ows', 'idioms'];
+      const byCat = new Map<QuestionCategory, Question[]>();
+      for (const cat of categories) {
+        byCat.set(cat, this.shuffle(unseenPool.filter(q => q.category === cat)));
+      }
+
+      // Round-robin selection across categories
+      let addedInRound = true;
+      while (selectedQuestions.length < count && addedInRound) {
+        addedInRound = false;
+        for (const cat of categories) {
+          if (selectedQuestions.length >= count) break;
+          const catList = byCat.get(cat);
+          if (catList && catList.length > 0) {
+            const nextQ = catList.pop();
+            if (nextQ && tryAddQuestion(nextQ, true)) {
+              addedInRound = true;
+            }
+          }
+        }
+      }
+
+      // If still need questions from unseen
+      if (selectedQuestions.length < count) {
+        const remainingUnseen = this.shuffle(unseenPool.filter(q => !usedIds.has(q.id)));
+        for (const q of remainingUnseen) {
+          if (selectedQuestions.length >= count) break;
+          tryAddQuestion(q, true);
+        }
+      }
+    } else {
+      const shuffledUnseen = this.shuffle(unseenPool);
+      for (const q of shuffledUnseen) {
+        if (selectedQuestions.length >= count) break;
+        tryAddQuestion(q, true);
+      }
+    }
+
+    // 6. If we still need questions (not enough unseen questions to reach count):
+    // Prioritize least-recently shown questions from recentPool
+    if (selectedQuestions.length < count) {
+      // Sort recentPool by age: lowest index in recentIdsList = oldest / least recent
+      const sortedRecent = [...recentPool].sort((a, b) => {
+        const ageA = recentAgeMap.get(a.id) ?? 0;
+        const ageB = recentAgeMap.get(b.id) ?? 0;
+        return ageA - ageB;
+      });
+
+      // Try adding with word collision check first
+      for (const q of sortedRecent) {
+        if (selectedQuestions.length >= count) break;
+        tryAddQuestion(q, true);
+      }
+
+      // If STILL not enough, relax word collision check as long as question ID is strictly unique
+      if (selectedQuestions.length < count) {
+        for (const q of sortedRecent) {
+          if (selectedQuestions.length >= count) break;
+          tryAddQuestion(q, false);
+        }
+      }
+    }
+
+    // 7. Shuffle the resulting 10-question set once
+    const sessionQuestions = this.shuffle(selectedQuestions);
+
+    // 8. Record the selected question IDs into persistent recent history
+    recordSpeedBlitzQuestionsShown(sessionQuestions.map(q => q.id));
+
+    return sessionQuestions;
+  }
+
+  /**
+   * Deduplicates an incoming list of questions by stable question ID,
+   * and backfills from the eligible question pool if fewer than targetCount unique questions are present.
+   */
+  public deduplicateAndEnsureCount(
+    questions: Question[] | undefined | null,
+    category: QuestionCategory | 'mixed' = 'mixed',
+    exam: ExamType = 'ALL',
+    targetCount: number = 10
+  ): Question[] {
+    const validQuestions: Question[] = [];
+    const seenIds = new Set<string>();
+    const seenWords = new Set<string>();
+
+    if (Array.isArray(questions)) {
+      for (const raw of questions) {
+        if (!raw) continue;
+        const qId = String(
+          raw.id ||
+          raw.canonicalQuestionId ||
+          generateCanonicalQuestionId(raw.category, raw.wordOrPhrase, raw.options, raw.correctIndex)
+        );
+        const wordKey = (raw.wordOrPhrase || '').trim().toLowerCase();
+
+        if (!seenIds.has(qId) && (!wordKey || !seenWords.has(wordKey))) {
+          seenIds.add(qId);
+          if (wordKey) seenWords.add(wordKey);
+          validQuestions.push({
+            ...raw,
+            id: qId,
+            canonicalQuestionId: raw.canonicalQuestionId || qId,
+          });
+        }
+      }
+    }
+
+    if (validQuestions.length >= targetCount) {
+      return validQuestions.slice(0, targetCount);
+    }
+
+    // Backfill from getSpeedBlitzSessionQuestions without duplicating any existing IDs
+    const backfillCandidates = this.getSpeedBlitzSessionQuestions(category, exam, targetCount * 2);
+    for (const cand of backfillCandidates) {
+      if (validQuestions.length >= targetCount) break;
+      const candId = cand.id;
+      const wordKey = (cand.wordOrPhrase || '').trim().toLowerCase();
+      if (!seenIds.has(candId) && (!wordKey || !seenWords.has(wordKey))) {
+        seenIds.add(candId);
+        if (wordKey) seenWords.add(wordKey);
+        validQuestions.push(cand);
+      }
+    }
+
+    // If still under targetCount due to small pool, fill with any unique ID candidates
+    if (validQuestions.length < targetCount) {
+      for (const cand of backfillCandidates) {
+        if (validQuestions.length >= targetCount) break;
+        if (!seenIds.has(cand.id)) {
+          seenIds.add(cand.id);
+          validQuestions.push(cand);
+        }
+      }
+    }
+
+    return validQuestions;
   }
 
   // ==================== ADMIN HEALTH DIAGNOSTICS ====================

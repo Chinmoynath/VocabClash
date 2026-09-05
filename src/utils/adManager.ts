@@ -5,8 +5,8 @@ export function getLastAdTimestamp(): number {
   if (typeof window === 'undefined') return 0;
   const val = localStorage.getItem(STORAGE_KEY_LAST_AD);
   if (!val) {
-    // If first time user, initialize to now minus 10 minutes so they get an ad after their first completed activity
-    const init = Date.now() - AD_INTERVAL_MS;
+    // When someone first arrives, initialize to now so they get a full 10-minute grace period
+    const init = Date.now();
     localStorage.setItem(STORAGE_KEY_LAST_AD, init.toString());
     return init;
   }
@@ -24,8 +24,12 @@ export function resetAdTimerForTest(): void {
   localStorage.setItem(STORAGE_KEY_LAST_AD, tenMinsAgo.toString());
 }
 
-export function isAdDue(isPremium: boolean): boolean {
+export function isAdDue(isPremium: boolean, matchesPlayed?: number): boolean {
   if (isPremium) return false;
+  // Never show an ad after or during the first duel to maximize new user retention
+  if (typeof matchesPlayed === 'number' && matchesPlayed <= 1) {
+    return false;
+  }
   const lastAd = getLastAdTimestamp();
   const elapsed = Date.now() - lastAd;
   return elapsed >= AD_INTERVAL_MS;

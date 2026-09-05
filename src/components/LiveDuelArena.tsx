@@ -125,6 +125,8 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
   const processedEmoteTimestampsRef = useRef<Set<number>>(new Set());
   const hasCompletedRef = useRef<boolean>(false);
   const isRoundAdvancingRef = useRef<boolean>(false);
+  const hasAnsweredCurrentQRef = useRef<boolean>(false);
+  const isSubmittingOptionRef = useRef<boolean>(false);
   const playerAnswerRecordRef = useRef<PlayerAnswerRecord | null>(null);
   const opponentAnswerRecordRef = useRef<PlayerAnswerRecord | null>(null);
   const currentLiveScoresRef = useRef<{
@@ -476,6 +478,8 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
     playerAnswerRecordRef.current = null;
     opponentAnswerRecordRef.current = null;
     isRoundAdvancingRef.current = false;
+    hasAnsweredCurrentQRef.current = false;
+    isSubmittingOptionRef.current = false;
     questionStartTimeRef.current = Date.now();
 
     if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
@@ -579,12 +583,24 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
   }, [isWaitingForOpponent, isRealMatch, roomId, opponentLeft, liveRoom, myPlayerId, oppPlayerId, onCompleteMatch]);
 
   const handleTimeExpired = () => {
-    if (isAnswered || isRoundAdvancingRef.current) return;
+    if (hasAnsweredCurrentQRef.current || isSubmittingOptionRef.current || isAnswered || isRoundAdvancingRef.current) return;
     handleSelectOption(-1); // Timed out (unanswered)
   };
 
   const handleSelectOption = async (index: number) => {
-    if (isAnswered || isWaitingForOpponent || isRoundAdvancingRef.current || isDisconnected || isForfeitedDueToDisconnect) return;
+    if (
+      hasAnsweredCurrentQRef.current ||
+      isSubmittingOptionRef.current ||
+      isAnswered || 
+      isWaitingForOpponent || 
+      isRoundAdvancingRef.current || 
+      isDisconnected || 
+      isForfeitedDueToDisconnect
+    ) return;
+
+    // Synchronous immediate lock against rapid-clicks/double-firing
+    hasAnsweredCurrentQRef.current = true;
+    isSubmittingOptionRef.current = true;
     setIsAnswered(true);
     setSelectedOption(index);
 
@@ -744,6 +760,28 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
           <div className="w-10 h-10 border-4 border-amber-400 border-t-transparent rounded-full animate-spin mx-auto"></div>
           <div className="text-xs text-slate-400">Loading next PYQ clash round...</div>
         </div>
+      </div>
+    );
+  }
+
+  // Safety completion if currentQIndex is out of bounds or match is ended
+  useEffect(() => {
+    if (!currentQuestion && !hasCompletedRef.current) {
+      hasCompletedRef.current = true;
+      onCompleteMatch(undefined, {
+        playerScore: currentLiveScoresRef.current.playerScore,
+        opponentScore: currentLiveScoresRef.current.opponentScore,
+        combo: currentLiveScoresRef.current.combo,
+        opponentCombo: currentLiveScoresRef.current.opponentCombo,
+      });
+    }
+  }, [currentQuestion, onCompleteMatch]);
+
+  if (!currentQuestion) {
+    return (
+      <div className="flex-1 h-full flex flex-col items-center justify-center p-6 text-center text-slate-300">
+        <div className="w-10 h-10 border-4 border-amber-400 border-t-transparent rounded-full animate-spin mb-3" />
+        <p className="text-sm font-bold">Completing round...</p>
       </div>
     );
   }
@@ -1149,7 +1187,7 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
 
             return (
               <button
-                key={idx}
+                key={`${currentQuestion.id}-opt-${idx}`}
                 disabled={isAnswered || isEliminated || isWaitingForOpponent}
                 onClick={() => handleSelectOption(idx)}
                 className={`w-full p-3 sm:p-4 rounded-xl border text-left flex items-center gap-3 transition-all duration-150 relative min-h-[48px] sm:min-h-[54px] ${buttonStyle}`}

@@ -437,7 +437,7 @@ const MatchQuestionReviewCard: React.FC<MatchQuestionReviewCardProps> = ({
               )}
               {eduDetails.rootWordInfo && (
                 <div className="text-[11px] text-teal-300/90 pt-1 border-t border-slate-800/60">
-                  <span className="font-bold text-teal-400">Root & Etymology: </span>
+                  <span className="font-bold text-teal-400">Performance Diagnostic: </span>
                   <span>{eduDetails.rootWordInfo}</span>
                 </div>
               )}
@@ -680,7 +680,7 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
                     ? 'Splendid Performance! Promoted higher in Govt Exam Leaderboard.'
                     : isDraw
                     ? 'Well fought match! Both aspirants demonstrated strong vocabulary.'
-                    : 'Close fight! Review mistakes and mnemonics to master these PYQs.'}
+                    : 'Close fight! Review mistakes and performance diagnostic to master these PYQs.'}
                 </p>
               </div>
 
@@ -816,13 +816,13 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
                   </div>
                   <div>
                     <div className="text-sm sm:text-base font-black tracking-wide flex items-center gap-2">
-                      <span>SEE MATCH SOLUTIONS & MNEMONICS</span>
+                      <span>SEE MATCH SOLUTIONS & PERFORMANCE DIAGNOSTIC</span>
                       <span className="text-[10px] bg-amber-400 text-slate-950 font-bold px-2 py-0.5 rounded-full uppercase">
                         {mistakeCount} to revise
                       </span>
                     </div>
                     <div className="text-[11px] text-indigo-200 font-medium">
-                      Inspect all questions, Hindi meanings, root-words & memory hooks
+                      Inspect all questions, Hindi meanings, answer analysis & performance breakdown
                     </div>
                   </div>
                 </div>
@@ -905,8 +905,8 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
               </div>
             )}
 
-            {/* AdSense Unit */}
-            {!isPremium && (
+            {/* AdSense Unit (Omitted after first duel for clean onboarding & retention) */}
+            {!isPremium && player.matchesPlayed > 1 && (
               <div className="py-1 max-w-xl mx-auto">
                 <AdSenseUnit slotId={ADSENSE_BANNER_SLOT} format="horizontal" isPremium={isPremium} />
               </div>
@@ -935,7 +935,7 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
                   <div>
                     <h2 className="text-base sm:text-lg font-black text-slate-100 flex items-center gap-2">
                       <Brain className="w-5 h-5 text-amber-400" />
-                      <span>Match Solutions ({totalQuestions} PYQs)</span>
+                      <span>Match Solutions & Performance Diagnostic ({totalQuestions} PYQs)</span>
                     </h2>
                     <p className="text-xs text-slate-400">
                       Score: <span className="text-amber-400 font-bold">{matchState.playerScore}</span> vs{' '}
