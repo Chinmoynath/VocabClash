@@ -73,6 +73,7 @@ export const DailyTargetCard: React.FC<DailyTargetCardProps> = ({
   const target = state.targetQuestions;
   const isCompleted = solved >= target;
   const isClaimed = state.isRewardClaimed;
+  const displaySolved = isCompleted ? target : Math.min(solved, target);
   const percentage = Math.min(100, Math.round((solved / target) * 100));
   const remaining = Math.max(0, target - solved);
 
@@ -86,7 +87,7 @@ export const DailyTargetCard: React.FC<DailyTargetCardProps> = ({
       setState(result.state);
       onRewardLP(result.rewardLP, `Daily Target of ${target} Questions Completed`);
       setClaimToast({
-        message: `🎯 DAILY TARGET COMPLETED! +${result.rewardLP} LP Claimed!`,
+        message: `🎯 DAILY TARGET COMPLETED! +${result.rewardLP} LP Claimed! Come back tomorrow for your next target.`,
         lp: result.rewardLP,
       });
       setTimeout(() => setClaimToast(null), 3000);
@@ -138,14 +139,23 @@ export const DailyTargetCard: React.FC<DailyTargetCardProps> = ({
               <h3 className="text-xs font-black uppercase tracking-wider text-amber-400 truncate">
                 Daily Target
               </h3>
-              <span className="bg-amber-950/80 border border-amber-700/60 text-amber-300 text-[9px] font-extrabold px-1.5 py-0.5 rounded-md flex items-center gap-1 shrink-0 whitespace-nowrap shadow-sm">
-                <Flame className="w-2.5 h-2.5 fill-orange-400 text-orange-400" />
-                <span>+{potentialRewardLP} LP</span>
-              </span>
+              {isCompleted ? (
+                <span className="bg-emerald-950/80 border border-emerald-700/60 text-emerald-300 text-[9px] font-extrabold px-1.5 py-0.5 rounded-md flex items-center gap-1 shrink-0 whitespace-nowrap shadow-sm">
+                  <CheckCircle2 className="w-2.5 h-2.5 text-emerald-400" />
+                  <span>Target Complete</span>
+                </span>
+              ) : (
+                <span className="bg-amber-950/80 border border-amber-700/60 text-amber-300 text-[9px] font-extrabold px-1.5 py-0.5 rounded-md flex items-center gap-1 shrink-0 whitespace-nowrap shadow-sm">
+                  <Flame className="w-2.5 h-2.5 fill-orange-400 text-orange-400" />
+                  <span>+{potentialRewardLP} LP</span>
+                </span>
+              )}
             </div>
             <p className="text-[10px] text-slate-300 font-medium truncate mt-0.5">
               {isCompleted ? (
-                <span className="text-emerald-400 font-bold">🎉 Target achieved! Claim your bonus LP.</span>
+                <span className="text-emerald-300 font-semibold">
+                  Come back tomorrow for your next <b className="text-amber-300 font-black">+{potentialRewardLP} LP</b> target.
+                </span>
               ) : (
                 <span>Solve <b className="text-amber-300">{remaining} more Qs</b> today to complete.</span>
               )}
@@ -244,12 +254,20 @@ export const DailyTargetCard: React.FC<DailyTargetCardProps> = ({
       {/* Progress Bar & Solved Status */}
       <div className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-2.5">
         <div className="flex items-center justify-between text-[11px] mb-1.5">
-          <div className="flex items-center gap-1.5 font-bold">
-            <span className="text-slate-400">Progress:</span>
-            <span className="text-amber-400 font-mono font-black">{solved}</span>
-            <span className="text-slate-500 font-mono">/ {target} questions</span>
-            <span className="text-amber-400/90 font-bold ml-0.5">({percentage}%)</span>
-          </div>
+          {isCompleted ? (
+            <div className="flex items-center gap-1.5 font-bold">
+              <span className="text-emerald-400 font-mono font-black">{target}/{target}</span>
+              <span className="text-emerald-400 font-black">✓</span>
+              <span className="text-emerald-300 font-extrabold">Daily Target Complete</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 font-bold">
+              <span className="text-slate-400">Progress:</span>
+              <span className="text-amber-400 font-mono font-black">{displaySolved}</span>
+              <span className="text-slate-500 font-mono">/ {target} questions</span>
+              <span className="text-amber-400/90 font-bold ml-0.5">({percentage}%)</span>
+            </div>
+          )}
 
           <div className="flex items-center gap-1 text-[10px] text-slate-400 font-mono">
             <Clock className="w-3 h-3 text-sky-400" />
@@ -265,7 +283,7 @@ export const DailyTargetCard: React.FC<DailyTargetCardProps> = ({
                 ? 'bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-400 shadow-sm shadow-emerald-500/50' 
                 : 'bg-gradient-to-r from-amber-500 via-orange-500 to-amber-400 shadow-sm shadow-orange-500/50'
             }`}
-            style={{ width: `${Math.max(2, percentage)}%` }}
+            style={{ width: isCompleted ? '100%' : `${Math.max(2, percentage)}%` }}
           />
         </div>
       </div>
@@ -274,7 +292,11 @@ export const DailyTargetCard: React.FC<DailyTargetCardProps> = ({
       <div className="flex items-center justify-between gap-2 pt-0.5">
         <div className="text-[10px] text-slate-400 flex items-center gap-1 truncate">
           <Zap className="w-3 h-3 text-amber-400 shrink-0" />
-          <span className="truncate">Counts 1v1 Matches & Drill practice</span>
+          <span className="truncate">
+            {isCompleted
+              ? `Next +${potentialRewardLP} LP target unlocks tomorrow`
+              : 'Counts 1v1 Matches & Drill practice'}
+          </span>
         </div>
 
         <div>

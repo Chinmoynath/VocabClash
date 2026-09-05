@@ -13,7 +13,6 @@ import {
   Filter,
   Crown,
   ShieldCheck,
-  HelpCircle,
   Play,
   Cloud,
   LogIn
@@ -25,7 +24,6 @@ import { User as FirebaseUser } from 'firebase/auth';
 import { AdSenseUnit } from './AdSenseUnit';
 import { ADSENSE_BANNER_SLOT } from '../services/adSenseService';
 import { DailyTargetCard } from './DailyTargetCard';
-import { VocabClashLogo } from './VocabClashLogo';
 
 interface ArenaHomeProps {
   player: PlayerProfile;
@@ -309,41 +307,6 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
               </button>
             </div>
           </div>
-
-          {/* How VocabClash Works - Guide Banner */}
-          {onOpenTour && (
-            <div
-              id="arena-onboarding-banner-bottom"
-              onClick={() => {
-                soundManager.playTap();
-                onOpenTour();
-              }}
-              className="bg-gradient-to-r from-slate-900 via-sky-950/60 to-slate-900 border border-sky-600/40 hover:border-sky-400 rounded-2xl p-3 sm:p-3.5 flex items-center justify-between cursor-pointer transition-all shadow-md active:scale-99 group"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-sky-600 to-indigo-600 text-white flex items-center justify-center shrink-0 shadow-sm group-hover:scale-105 transition-transform">
-                  <HelpCircle className="w-5 h-5 text-sky-200" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs sm:text-sm font-black text-white">How VocabClash Works?</span>
-                    <span className="text-[9px] bg-sky-500/20 text-sky-300 border border-sky-500/30 px-1.5 py-0.2 rounded font-bold uppercase tracking-wide">
-                      Quick Guide
-                    </span>
-                  </div>
-                  <p className="text-[10px] sm:text-xs text-slate-300 mt-0.5">
-                    1v1 Battles • 24k PYQs • Mistake Vault • LP Ranks & Streaks
-                  </p>
-                </div>
-              </div>
-
-              <div className="bg-sky-600/90 group-hover:bg-sky-500 text-white text-[11px] sm:text-xs font-bold px-3 py-1.5 rounded-xl shrink-0 flex items-center gap-1 shadow-sm">
-                <span>Learn</span>
-                <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
-              </div>
-            </div>
-          )}
-
         </div>
 
         {/* RIGHT COLUMN: Cadre Rank Card, Daily Target Missions, VIP / Auth (5 Cols on Desktop) */}
@@ -443,39 +406,6 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
               </div>
             </div>
           ) : null}
-
-          {/* Premium VIP Banner (Free users) */}
-          {!subscription.isPremium && (
-            <div 
-              onClick={() => {
-                soundManager.playTap();
-                onOpenPremium();
-              }}
-              className="rounded-2xl p-3.5 border cursor-pointer transition-all flex items-center justify-between gap-3 shadow-lg bg-gradient-to-r from-[#24123b] via-[#1a1329] to-[#161026] border-purple-500/50 hover:border-purple-400 shadow-[0_0_15px_rgba(147,51,234,0.15)]"
-            >
-              <div className="flex items-center gap-3 min-w-0 flex-1">
-                <VocabClashLogo size="md" className="rounded-xl ring-2 ring-purple-400/50 shadow-md shrink-0" />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs sm:text-sm font-black text-white truncate">
-                      VocabClash Premium
-                    </span>
-                    <span className="text-[9px] bg-purple-900/90 text-purple-200 border border-purple-400/40 px-1.5 py-0.5 rounded-md font-bold uppercase tracking-wider whitespace-nowrap shadow-sm">
-                      ₹19/mo
-                    </span>
-                  </div>
-                  <p className="text-[10px] text-purple-300/90 truncate mt-0.5">
-                    Ad-Free • Unlimited 1v1 Battles • Offline Mode
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-1 bg-gradient-to-r from-purple-700 to-indigo-600 hover:from-purple-600 hover:to-indigo-500 text-white px-3 py-1.5 rounded-xl text-xs font-bold shrink-0 shadow-md shadow-purple-950/50 border border-purple-400/30 transition-all ml-2">
-                <span>Upgrade</span>
-                <ChevronRight className="w-3.5 h-3.5" />
-              </div>
-            </div>
-          )}
 
           {/* Free-Tier Ad Status Helper */}
           {!subscription.isPremium && (
