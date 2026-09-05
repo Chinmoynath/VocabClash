@@ -162,6 +162,27 @@ const MatchQuestionReviewCard: React.FC<MatchQuestionReviewCardProps> = ({
     };
   }, [q]);
 
+  const whyThisAnswerText = useMemo(() => {
+    if (q.explanation && q.explanation.trim()) {
+      return q.explanation.trim();
+    }
+    const correctOpt = q.options[q.correctIndex] || 'Option';
+    const targetWord = (q.wordOrPhrase || '').trim();
+    if (q.category === 'synonyms') {
+      return `To be '${targetWord}' corresponds to '${correctOpt}'; it captures the precise contextual synonym required in SSC examinations.`;
+    }
+    if (q.category === 'antonyms') {
+      return `'${correctOpt}' conveys the direct opposing or contrasting quality to '${targetWord}'.`;
+    }
+    if (q.category === 'idioms') {
+      return `The idiom '${targetWord}' specifically conveys '${correctOpt}' in standardized usage.`;
+    }
+    if (q.category === 'ows') {
+      return `'${correctOpt}' is the standard one-word substitution for '${targetWord}'.`;
+    }
+    return `'${correctOpt}' is the correct option adhering to official SSC answer keys.`;
+  }, [q]);
+
   const examTagText = (() => {
     if (q.exam || q.year || q.tier) {
       return formatExamTag(q.exam, q.year, q.tier);
@@ -341,22 +362,55 @@ const MatchQuestionReviewCard: React.FC<MatchQuestionReviewCardProps> = ({
         })}
       </div>
 
-      {/* Hindi Explanation & Memory Hook Mnemonics Box */}
-      <div className="bg-slate-950/90 rounded-xl p-3 sm:p-3.5 border border-slate-800 text-xs space-y-2">
-        <div className="flex items-start gap-2">
-          <span className="font-black text-amber-400 shrink-0">हिन्दी अर्थ:</span>
-          <span className="text-slate-200 font-medium">{q.hindiMeaning || eduDetails.hindiMeaning}</span>
+      {/* Educational Explanations: Word Meaning, Morphological Insight & Why this Answer */}
+      <div className="bg-slate-950/90 rounded-xl p-3 sm:p-3.5 border border-slate-800 text-xs space-y-2.5">
+        {/* Word Meaning */}
+        <div className="space-y-1">
+          <div className="flex items-start gap-2">
+            <span className="font-bold text-sky-400 shrink-0">Word Meaning:</span>
+            <span className="text-slate-100 font-medium leading-relaxed">
+              {eduDetails.meaning}
+            </span>
+          </div>
+          {eduDetails.exampleSentence && (
+            <div className="text-[11px] text-slate-400 italic pl-1">
+              <span className="font-semibold text-slate-500 not-italic">Example: </span>
+              "{eduDetails.exampleSentence}"
+            </div>
+          )}
         </div>
 
+        {/* Morphological Insight */}
+        {eduDetails.rootWordInfo && (
+          <div className="text-[11px] text-teal-300/95 bg-teal-950/30 border border-teal-800/40 p-2.5 rounded-lg flex items-start gap-2">
+            <span className="font-bold text-teal-400 shrink-0">Morphological Insight:</span>
+            <span className="leading-relaxed">{eduDetails.rootWordInfo}</span>
+          </div>
+        )}
+
+        {/* Why this answer (Exam Rationale) */}
+        {whyThisAnswerText && (
+          <div className="bg-sky-950/40 border border-sky-800/50 rounded-xl p-2.5 sm:p-3 text-xs space-y-1 text-slate-200">
+            <div className="text-[10px] font-bold text-sky-400 uppercase tracking-wider flex items-center gap-1.5">
+              <Info className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+              <span>Why this answer (Exam Rationale):</span>
+            </div>
+            <div className="leading-relaxed pl-5 text-[12px] text-sky-100">
+              {whyThisAnswerText}
+            </div>
+          </div>
+        )}
+
+        {/* Memory Hook */}
         {(q.mnemonic || eduDetails.mnemonic) && (
-          <div className="text-[11px] text-sky-200 bg-sky-950/40 border border-sky-800/40 p-2.5 rounded-lg flex items-start gap-2">
-            <span className="font-black text-sky-400 shrink-0">💡 Memory Hook:</span>
+          <div className="text-[11px] text-amber-200/90 bg-amber-950/20 border border-amber-800/30 p-2.5 rounded-lg flex items-start gap-2">
+            <span className="font-bold text-amber-400 shrink-0">💡 Memory Hook:</span>
             <span className="leading-relaxed">{q.mnemonic || eduDetails.mnemonic}</span>
           </div>
         )}
 
         {/* Exam Occurrences */}
-        <div className="flex items-center gap-1.5 flex-wrap pt-1 text-[10px] text-slate-400">
+        <div className="flex items-center gap-1.5 flex-wrap pt-0.5 text-[10px] text-slate-400">
           <span className="font-bold text-slate-400">Past SSC Papers:</span>
           {q.examHistory && q.examHistory.length > 0 ? (
             q.examHistory.map((ex, i) => (
@@ -374,7 +428,7 @@ const MatchQuestionReviewCard: React.FC<MatchQuestionReviewCardProps> = ({
           )}
         </div>
 
-        {/* Interactive "More" Toggle Button */}
+        {/* Interactive "More" Toggle Button for 4 Options Meaning */}
         <button
           onClick={() => {
             soundManager.playTap();
@@ -386,11 +440,11 @@ const MatchQuestionReviewCard: React.FC<MatchQuestionReviewCardProps> = ({
           aria-expanded={showMoreDetails}
         >
           <div className="flex items-center gap-1.5 font-bold text-[11px]">
-            <BookOpen className={`w-3.5 h-3.5 ${showMoreDetails ? 'text-sky-400' : 'text-amber-400'}`} />
+            <Layers className={`w-3.5 h-3.5 ${showMoreDetails ? 'text-sky-400' : 'text-amber-400'}`} />
             <span>
               {showMoreDetails 
-                ? 'Hide Word Meaning & 4 Options Details' 
-                : 'More: Word Meaning & All 4 Options Breakdown'}
+                ? 'Hide 4 Options Meaning' 
+                : 'Meaning of Four Options'}
             </span>
           </div>
           <div className="flex items-center gap-1 text-[10px] font-semibold">
@@ -404,71 +458,15 @@ const MatchQuestionReviewCard: React.FC<MatchQuestionReviewCardProps> = ({
         </button>
       </div>
 
-      {/* Expandable Rich Educational Breakdown (Same as PYQ Drill) */}
+      {/* Expandable: ONLY the Meaning of the 4 Options */}
       {showMoreDetails && (
-        <div className="space-y-3 pt-1 animate-fadeIn">
-          {/* Word Meaning & Etymology Details */}
-          <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-3 sm:p-3.5 space-y-2 text-xs">
-            <div className="flex items-center justify-between border-b border-slate-800/80 pb-1.5">
-              <div className="flex items-center gap-1.5 font-black text-amber-300 uppercase tracking-wider text-[11px]">
-                <BookOpen className="w-3.5 h-3.5 text-amber-400" />
-                <span>
-                  {q.category === 'idioms' 
-                    ? 'Idiom Meaning & Usage' 
-                    : q.category === 'ows' 
-                    ? 'One Word Substitution Concept' 
-                    : 'Word Meaning & Morphological Insight (शब्दार्थ)'}
-                </span>
-              </div>
-            </div>
-
-            <div className="space-y-1.5 bg-slate-900/70 p-2.5 rounded-lg border border-slate-800/60">
-              {eduDetails.meaning && (
-                <div className="text-xs text-slate-100 font-medium">
-                  <span className="font-bold text-sky-400">English: </span>
-                  <span>{eduDetails.meaning}</span>
-                </div>
-              )}
-              {eduDetails.hindiMeaning && (
-                <div className="text-xs text-amber-300/90 font-medium">
-                  <span className="font-bold text-amber-400">हिन्दी भावार्थ: </span>
-                  <span>{eduDetails.hindiMeaning}</span>
-                </div>
-              )}
-              {eduDetails.rootWordInfo && (
-                <div className="text-[11px] text-teal-300/90 pt-1 border-t border-slate-800/60">
-                  <span className="font-bold text-teal-400">Performance Diagnostic: </span>
-                  <span>{eduDetails.rootWordInfo}</span>
-                </div>
-              )}
-              {eduDetails.exampleSentence && (
-                <div className="text-[11px] text-slate-400 italic pt-1 border-t border-slate-800/60">
-                  <span className="font-semibold text-slate-500 not-italic">Example: </span>
-                  "{eduDetails.exampleSentence}"
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Exam Rationale / Explanation if available */}
-          {q.explanation && (
-            <div className="bg-sky-950/40 border border-sky-800/60 rounded-xl p-2.5 sm:p-3 text-xs space-y-1 text-slate-200">
-              <div className="text-[10px] font-bold text-sky-400 uppercase tracking-wider flex items-center gap-1">
-                <Info className="w-3.5 h-3.5" />
-                <span>Why this answer (Exam Rationale):</span>
-              </div>
-              <div className="leading-relaxed pl-4 text-[12px] text-sky-100">
-                {q.explanation}
-              </div>
-            </div>
-          )}
-
+        <div className="pt-1 animate-fadeIn">
           {/* All 4 Options Meaning & Explanation */}
           <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-3 sm:p-3.5 space-y-2.5 text-xs">
             <div className="flex items-center gap-1.5 border-b border-slate-800 pb-1.5">
               <Layers className="w-3.5 h-3.5 text-amber-400" />
               <span className="text-xs font-black uppercase tracking-wider text-slate-200">
-                All 4 Options Meaning & Explanation:
+                Meaning of 4 Options:
               </span>
             </div>
 
@@ -519,11 +517,6 @@ const MatchQuestionReviewCard: React.FC<MatchQuestionReviewCardProps> = ({
                     </div>
 
                     <div className="pl-7 space-y-0.5">
-                      {detail.hindiMeaning && (
-                        <div className="text-amber-300 font-semibold text-[11px]">
-                          {detail.hindiMeaning}
-                        </div>
-                      )}
                       {detail.englishMeaning && (
                         <div className="text-slate-300 text-[11px] leading-relaxed">
                           {detail.englishMeaning}
