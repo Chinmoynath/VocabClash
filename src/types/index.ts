@@ -2,13 +2,26 @@ export type QuestionCategory = 'synonyms' | 'antonyms' | 'ows' | 'idioms';
 
 export type ExamType = 
   | 'ALL'
+  | 'SSC'
+  | 'BANKING'
+  | 'DEFENCE'
   | 'SSC_CGL'
   | 'SSC_CHSL'
   | 'SSC_CPO'
   | 'SSC_MTS'
+  | 'SSC_STENO'
   | 'RRB_NTPC'
   | 'RRB_GROUP_D'
   | 'BANK_PO'
+  | 'BANK_SBI_PO'
+  | 'BANK_IBPS_PO'
+  | 'BANK_SBI_CLERK'
+  | 'BANK_IBPS_CLERK'
+  | 'BANK_RRB_RBI'
+  | 'DEF_CDS'
+  | 'DEF_AFCAT'
+  | 'DEF_NDA'
+  | 'DEF_CAPF'
   | 'CDS_NDA';
 
 export type Difficulty = 'easy' | 'medium' | 'hard';

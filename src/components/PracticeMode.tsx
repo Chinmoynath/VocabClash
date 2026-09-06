@@ -11,7 +11,8 @@ import {
   Target, 
   Check, 
   X, 
-  ChevronRight, 
+  ChevronRight,
+  ChevronLeft,
   Sparkles, 
   Bookmark, 
   BookmarkCheck,
@@ -32,7 +33,9 @@ import {
   Timer,
   Pause,
   Play,
-  BarChart3
+  BarChart3,
+  Trophy,
+  XCircle
 } from 'lucide-react';
 import { AdSenseUnit } from './AdSenseUnit';
 import { ADSENSE_BANNER_SLOT } from '../services/adSenseService';
@@ -40,6 +43,15 @@ import { ReportQuestionModal } from './ReportQuestionModal';
 import { SupportModal } from './SupportModal';
 import { formatExamTag } from '../services/jsonPyqParser';
 import { ExamAppearancesBadge } from './ExamAppearancesBadge';
+import { EXAM_FAMILY_PILLS, EXAM_FAMILY_SUB_TAGS, normalizeFilterToFamily } from '../utils/examFamilyUtils';
+import { 
+  trackPracticeStart, 
+  trackQuestionAnswered, 
+  trackPracticeComplete, 
+  normalizeAnalyticsCategory, 
+  normalizeAnalyticsExamFamily, 
+  PracticeType 
+} from '../services/analyticsService';
 
 interface PracticeModeProps {
   pyqScore: number;
@@ -56,10 +68,13 @@ interface PracticeModeProps {
   customTargetQueue?: Question[] | null;
   customSessionTitle?: string | null;
   customInitialIndex?: number;
+  customInitialCorrectCount?: number;
   customBadge?: string | null;
   attemptSource?: AttemptSource;
   onCustomQueueQuestionAnswered?: (q: Question, isCorrect: boolean, indexInQueue: number) => void;
   onCustomDrillCompleted?: (results: { isCorrect: boolean }[]) => void;
+  onRestartCustomDrill?: () => void;
+  onReviewMistakes?: () => void;
   onExitCustomQueue?: () => void;
 }
 
@@ -116,10 +131,13 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
   customTargetQueue = null,
   customSessionTitle = null,
   customInitialIndex = 0,
+  customInitialCorrectCount = 0,
   customBadge = null,
   attemptSource = 'practice',
   onCustomQueueQuestionAnswered,
   onCustomDrillCompleted,
+  onRestartCustomDrill,
+  onReviewMistakes,
   onExitCustomQueue,
 }) => {
   const [category, setCategory] = useState<QuestionCategory | 'mixed'>('mixed');
@@ -135,7 +153,35 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
 
   const [customQueueIndex, setCustomQueueIndex] = useState<number>(validInitialIndex);
   const [customQueueResults, setCustomQueueResults] = useState<{ isCorrect: boolean }[]>([]);
+  const customResultsRef = useRef<{ isCorrect: boolean }[]>([]);
   const [customDrillCompleted, setCustomDrillCompleted] = useState<boolean>(false);
+
+  // Derived drill metrics (strictly bounded by queue length, e.g. max 100 for SSC Top 100)
+  const isSscTop100 = Boolean(
+    attemptSource === 'ssc_top100' ||
+    (customBadge && (customBadge.includes('SSC') || customBadge.includes('Top 100')))
+  );
+
+  const totalCustomQuestions = customTargetQueue ? customTargetQueue.length : 0;
+  const currentDrillQuestionNum = customTargetQueue && customTargetQueue.length > 0
+    ? Math.min(totalCustomQuestions, customQueueIndex + 1)
+    : 0;
+  const currentDrillSolvedCount = customTargetQueue && customTargetQueue.length > 0
+    ? Math.min(totalCustomQuestions, (customInitialIndex || 0) + customQueueResults.length)
+    : 0;
+  const liveCorrectCount = customTargetQueue && customTargetQueue.length > 0
+    ? Math.min(currentDrillSolvedCount, (customInitialCorrectCount || 0) + customQueueResults.filter(r => r.isCorrect).length)
+    : 0;
+  const liveMistakeCount = Math.max(0, currentDrillSolvedCount - liveCorrectCount);
+  const liveRightPercent = currentDrillSolvedCount > 0
+    ? Math.round((liveCorrectCount / currentDrillSolvedCount) * 100)
+    : 0;
+  const liveWrongPercent = currentDrillSolvedCount > 0
+    ? Math.round((liveMistakeCount / currentDrillSolvedCount) * 100)
+    : 0;
+  const drillProgressPercent = totalCustomQuestions > 0
+    ? Math.min(100, Math.round((currentDrillSolvedCount / totalCustomQuestions) * 100))
+    : 0;
   
   // Continuous drill session state - persists across tab switches for today and resets on a new day
   const [questionNumber, setQuestionNumber] = useState<number>(() => getStoredDailyProgress().questionNumber);
@@ -157,6 +203,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
       const startIdx = Math.min(Math.max(0, customInitialIndex || 0), customTargetQueue.length - 1);
       setCustomQueueIndex(startIdx);
       setCustomQueueResults([]);
+      customResultsRef.current = [];
       setCustomDrillCompleted(false);
       setCurrentQ(customTargetQueue[startIdx]);
       setSelectedOption(null);
@@ -177,6 +224,8 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
   const [showReportModal, setShowReportModal] = useState<boolean>(false);
   const [showSupportModal, setShowSupportModal] = useState<boolean>(false);
   const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const hasFiredPracticeStartRef = useRef<boolean>(false);
+  const batchCorrectCountRef = useRef<number>(0);
 
   // Auto-advance countdown timer settings (0 = off, 3, 5, 8 seconds)
   const [autoAdvanceSec, setAutoAdvanceSec] = useState<number>(() => {
@@ -286,6 +335,8 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     soundManager.playTap();
     setCategory(newCat);
     setExam(newExam);
+    hasFiredPracticeStartRef.current = false;
+    batchCorrectCountRef.current = 0;
     const nextQ = getNextDrillQuestion(newCat, newExam, recentWordsHistory);
     setCurrentQ(nextQ);
     setSelectedOption(null);
@@ -304,9 +355,44 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     const elapsedMs = Date.now() - questionStartTimeRef.current;
     const isCorrect = idx === currentQ.correctIndex;
 
+    // GA4 Core Event Parameters
+    const isTop100 = Boolean(
+      attemptSource === 'ssc_top100' ||
+      (customSessionTitle && customSessionTitle.includes('SSC TOP 100')) ||
+      (customBadge && customBadge.includes('SSC'))
+    );
+    const isDailySprint = attemptSource === 'daily_sprint' || Boolean(customSessionTitle && customSessionTitle.includes('Daily Sprint'));
+    const currentPracticeType: PracticeType = isTop100 ? 'ssc_top100' : isDailySprint ? 'daily_sprint' : 'pyq_drill';
+    const currentAnalyticsCat = normalizeAnalyticsCategory(currentQ.category || category);
+    const currentAnalyticsExam = normalizeAnalyticsExamFamily(currentQ.examTag || exam);
+
+    // 1. GA4: practice_start (fired once when user genuinely starts answering the practice session)
+    if (!hasFiredPracticeStartRef.current) {
+      hasFiredPracticeStartRef.current = true;
+      trackPracticeStart({
+        practice_type: currentPracticeType,
+        category: currentAnalyticsCat,
+        exam_family: currentAnalyticsExam,
+      });
+    }
+
+    // 2. GA4: question_answered (fired for every submitted answer with non-PII metadata)
+    trackQuestionAnswered({
+      practice_type: currentPracticeType,
+      category: currentAnalyticsCat,
+      exam_family: currentAnalyticsExam,
+      correct: isCorrect,
+    });
+
+    if (isCorrect) {
+      batchCorrectCountRef.current += 1;
+    }
+
     // Track results for custom coaching session
     if (customTargetQueue && customTargetQueue.length > 0) {
-      setCustomQueueResults(prev => [...prev, { isCorrect }]);
+      const nextResults = [...customResultsRef.current, { isCorrect }];
+      customResultsRef.current = nextResults;
+      setCustomQueueResults(nextResults);
       if (onCustomQueueQuestionAnswered) {
         onCustomQueueQuestionAnswered(currentQ, isCorrect, customQueueIndex);
       }
@@ -321,6 +407,18 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     setRecentWordsHistory(prev => [...prev.slice(-50), currentQ.wordOrPhrase]);
     const nextSolvedCount = sessionSolvedCount + 1;
     setSessionSolvedCount(nextSolvedCount);
+
+    // 3. GA4: 10-Question Milestone PYQ session completion (if not in a custom bounded queue)
+    if (!customTargetQueue && nextSolvedCount % 10 === 0) {
+      const correctInBatch = batchCorrectCountRef.current;
+      trackPracticeComplete({
+        practice_type: 'pyq_drill',
+        questions_answered: 10,
+        correct_count: correctInBatch,
+        accuracy: Math.round((correctInBatch / 10) * 100),
+      });
+      batchCorrectCountRef.current = 0;
+    }
 
     // Record in global daily stats & accuracy manager
     recordQuestionAttempt({
@@ -371,8 +469,28 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
       const nextIdx = customQueueIndex + 1;
       if (nextIdx >= customTargetQueue.length) {
         setCustomDrillCompleted(true);
+        const isTop100 = Boolean(
+          attemptSource === 'ssc_top100' ||
+          (customSessionTitle && customSessionTitle.includes('SSC TOP 100')) ||
+          (customBadge && customBadge.includes('SSC'))
+        );
+        const isDailySprint = attemptSource === 'daily_sprint' || Boolean(customSessionTitle && customSessionTitle.includes('Daily Sprint'));
+        const total = customResultsRef.current.length;
+        const correctCount = customResultsRef.current.filter(r => r.isCorrect).length;
+        const accuracy = Math.round((correctCount / Math.max(1, total)) * 100);
+
+        // GA4: practice_complete for custom sessions (Daily sprint or AI mentor drill)
+        if (!isTop100) {
+          trackPracticeComplete({
+            practice_type: isDailySprint ? 'daily_sprint' : 'pyq_drill',
+            questions_answered: total,
+            correct_count: correctCount,
+            accuracy,
+          });
+        }
+
         if (onCustomDrillCompleted) {
-          onCustomDrillCompleted(customQueueResults);
+          onCustomDrillCompleted(customResultsRef.current);
         }
         setTimeout(() => {
           isAdvancingRef.current = false;
@@ -525,216 +643,398 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
         </div>
       )}
 
-      {/* Custom Targeted Coaching / SSC Top 100 Drill Banner */}
-      {customTargetQueue && customTargetQueue.length > 0 && !customDrillCompleted && (
-        <div className={`p-3 sm:p-4 rounded-2xl flex items-center justify-between shadow-lg ${
-          customBadge?.includes('SSC') || customBadge?.includes('Top 100')
-            ? 'bg-gradient-to-r from-amber-950/80 via-slate-900 to-orange-950/80 border border-amber-500/40 shadow-amber-950/30'
-            : 'bg-gradient-to-r from-purple-950/80 via-slate-900 to-indigo-950/80 border border-purple-500/40 shadow-purple-950/30'
-        }`}>
-          <div className="flex items-center gap-3">
-            <div className={`p-2.5 rounded-xl border shrink-0 ${
-              customBadge?.includes('SSC') || customBadge?.includes('Top 100')
-                ? 'bg-amber-500/20 text-amber-400 border-amber-500/40'
-                : 'bg-purple-500/20 text-purple-400 border-purple-500/30'
-            }`}>
-              {customBadge?.includes('SSC') || customBadge?.includes('Top 100') ? (
-                <Flame className="w-5 h-5 text-amber-400 fill-amber-400 animate-pulse" />
-              ) : (
-                <Sparkles className="w-5 h-5" />
-              )}
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wide uppercase border ${
-                  customBadge?.includes('SSC') || customBadge?.includes('Top 100')
-                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                    : 'bg-purple-500/20 text-purple-300 border-purple-500/30'
-                }`}>
-                  {customBadge || 'AI Vocab Mentor Drill'}
-                </span>
-                <span className="text-xs font-semibold text-slate-400 hidden sm:inline">
-                  Question {customQueueIndex + 1} of {customTargetQueue.length}
-                </span>
-              </div>
-              <h3 className="text-sm sm:text-base font-bold text-slate-100 mt-0.5">
-                {customSessionTitle || 'Targeted Weak Areas Training'}
-              </h3>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className={`text-xs font-bold sm:hidden ${
-              customBadge?.includes('SSC') || customBadge?.includes('Top 100') ? 'text-amber-300' : 'text-purple-300'
-            }`}>
-              {customQueueIndex + 1}/{customTargetQueue.length}
-            </span>
-            {onExitCustomQueue && (
-              <button
-                onClick={() => {
-                  soundManager.playTap();
-                  onExitCustomQueue();
-                }}
-                className="text-xs font-semibold px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-colors cursor-pointer"
-              >
-                Exit Drill
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-
       {/* Custom Coaching Drill Completion Summary */}
       {customDrillCompleted ? (
-        <div className="bg-slate-900/90 border border-purple-500/40 rounded-3xl p-6 sm:p-8 text-center space-y-5 shadow-2xl backdrop-blur-xl">
-          <div className="w-16 h-16 rounded-2xl bg-purple-500/20 border border-purple-500/40 text-purple-400 mx-auto flex items-center justify-center">
-            <Sparkles className="w-8 h-8" />
-          </div>
-          <div className="space-y-1.5">
-            <h3 className="text-xl sm:text-2xl font-black text-slate-100">
-              Targeted Coaching Drill Complete!
-            </h3>
-            <p className="text-xs sm:text-sm text-slate-400 max-w-md mx-auto">
-              You've successfully drilled through your priority weak areas and mistake vault words. Your spaced repetition states have been refreshed.
-            </p>
-          </div>
-          <div className="grid grid-cols-2 gap-3 max-w-xs mx-auto">
-            <div className="bg-slate-950/80 border border-slate-800 p-3.5 rounded-2xl">
-              <div className="text-2xl font-black text-emerald-400">
-                {customQueueResults.filter(r => r.isCorrect).length} / {customTargetQueue?.length || 10}
-              </div>
-              <div className="text-[11px] text-slate-400 font-semibold mt-0.5">Correct Answers</div>
+        isSscTop100 ? (
+          <div className="bg-slate-900/95 border border-amber-500/40 rounded-3xl p-6 sm:p-8 text-center space-y-5 shadow-2xl backdrop-blur-xl">
+            <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 text-slate-950 mx-auto flex items-center justify-center shadow-lg shadow-amber-500/30">
+              <Trophy className="w-10 h-10 stroke-[2.2]" />
             </div>
-            <div className="bg-slate-950/80 border border-slate-800 p-3.5 rounded-2xl">
-              <div className="text-2xl font-black text-purple-400">
-                {customTargetQueue?.length
-                  ? Math.round((customQueueResults.filter(r => r.isCorrect).length / customTargetQueue.length) * 100)
-                  : 0}
-                %
+            <div className="space-y-1.5">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black tracking-wider uppercase bg-amber-500/15 border border-amber-500/30 text-amber-300">
+                <Flame className="w-3.5 h-3.5 fill-amber-400" />
+                SSC TOP 100 DRILL COMPLETED
               </div>
-              <div className="text-[11px] text-slate-400 font-semibold mt-0.5">Accuracy</div>
+              <h3 className="text-2xl sm:text-3xl font-black text-slate-100">
+                {customSessionTitle || 'Top 100 Drill Completed'}
+              </h3>
+              <p className="text-xs sm:text-sm text-slate-300 max-w-md mx-auto">
+                You've solved all 100 high-frequency questions from TCS & Eduquity exam shifts.
+              </p>
             </div>
-          </div>
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-3">
-            {onExitCustomQueue && (
+
+            {/* Performance Grid with Right %, Wrong %, Solved */}
+            <div className="grid grid-cols-3 gap-2.5 sm:gap-3 max-w-md mx-auto">
+              <div className="bg-slate-950/80 border border-emerald-500/40 p-3 rounded-2xl">
+                <div className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider flex items-center justify-center gap-1">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Right %
+                </div>
+                <div className="text-xl sm:text-2xl font-black text-emerald-400 mt-1">
+                  {liveRightPercent}%
+                </div>
+                <div className="text-[11px] font-semibold text-slate-300 mt-0.5">
+                  {liveCorrectCount} Correct
+                </div>
+              </div>
+
+              <div className="bg-slate-950/80 border border-rose-500/40 p-3 rounded-2xl">
+                <div className="text-[11px] font-bold text-rose-400 uppercase tracking-wider flex items-center justify-center gap-1">
+                  <XCircle className="w-3.5 h-3.5" />
+                  Wrong %
+                </div>
+                <div className="text-xl sm:text-2xl font-black text-rose-400 mt-1">
+                  {liveWrongPercent}%
+                </div>
+                <div className="text-[11px] font-semibold text-slate-300 mt-0.5">
+                  {liveMistakeCount} Wrong
+                </div>
+              </div>
+
+              <div className="bg-slate-950/80 border border-amber-500/40 p-3 rounded-2xl">
+                <div className="text-[11px] font-bold text-amber-400 uppercase tracking-wider flex items-center justify-center gap-1">
+                  <Award className="w-3.5 h-3.5" />
+                  Solved
+                </div>
+                <div className="text-xl sm:text-2xl font-black text-amber-300 mt-1">
+                  100/100
+                </div>
+                <div className="text-[11px] font-semibold text-slate-300 mt-0.5">
+                  +{liveCorrectCount * 10 - liveMistakeCount * 2} pts
+                </div>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2 max-w-md mx-auto">
               <button
                 onClick={() => {
                   soundManager.playTap();
-                  onExitCustomQueue();
+                  if (onRestartCustomDrill) {
+                    onRestartCustomDrill();
+                  } else {
+                    setCustomDrillCompleted(false);
+                    setCustomQueueIndex(0);
+                    setCustomQueueResults([]);
+                    customResultsRef.current = [];
+                    if (customTargetQueue && customTargetQueue.length > 0) {
+                      setCurrentQ(customTargetQueue[0]);
+                      setSelectedOption(null);
+                      setIsAnswered(false);
+                    }
+                  }
                 }}
-                className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold shadow-lg shadow-purple-900/40 transition-all cursor-pointer"
+                className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold text-xs border border-slate-700 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
               >
-                Return to Vocab Mentor
+                <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+                Start Again
               </button>
-            )}
-            <button
-              onClick={() => {
-                soundManager.playTap();
-                setCustomDrillCompleted(false);
-                if (onExitCustomQueue) onExitCustomQueue();
-              }}
-              className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 transition-all cursor-pointer"
-            >
-              Continue PYQ Endless Drill
-            </button>
+
+              {liveMistakeCount > 0 && onReviewMistakes && (
+                <button
+                  onClick={() => {
+                    soundManager.playTap();
+                    onReviewMistakes();
+                  }}
+                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-rose-950/80 hover:bg-rose-900 border border-rose-600/60 text-rose-200 font-bold text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <BookOpen className="w-3.5 h-3.5" />
+                  Review Mistakes
+                </button>
+              )}
+
+              {onExitCustomQueue && (
+                <button
+                  onClick={() => {
+                    soundManager.playTap();
+                    onExitCustomQueue();
+                  }}
+                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-slate-950 font-black text-xs shadow-lg transition-all flex items-center justify-center gap-1 cursor-pointer"
+                >
+                  Arena Home
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="bg-slate-900/90 border border-purple-500/40 rounded-3xl p-6 sm:p-8 text-center space-y-5 shadow-2xl backdrop-blur-xl">
+            <div className="w-16 h-16 rounded-2xl bg-purple-500/20 border border-purple-500/40 text-purple-400 mx-auto flex items-center justify-center">
+              <Sparkles className="w-8 h-8" />
+            </div>
+            <div className="space-y-1.5">
+              <h3 className="text-xl sm:text-2xl font-black text-slate-100">
+                Targeted Coaching Drill Complete!
+              </h3>
+              <p className="text-xs sm:text-sm text-slate-400 max-w-md mx-auto">
+                You've successfully drilled through your priority weak areas and mistake vault words. Your spaced repetition states have been refreshed.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-3 max-w-xs mx-auto">
+              <div className="bg-slate-950/80 border border-slate-800 p-3.5 rounded-2xl">
+                <div className="text-2xl font-black text-emerald-400">
+                  {customQueueResults.filter(r => r.isCorrect).length} / {customTargetQueue?.length || 10}
+                </div>
+                <div className="text-[11px] text-slate-400 font-semibold mt-0.5">Correct Answers</div>
+              </div>
+              <div className="bg-slate-950/80 border border-slate-800 p-3.5 rounded-2xl">
+                <div className="text-2xl font-black text-purple-400">
+                  {customTargetQueue?.length
+                    ? Math.round((customQueueResults.filter(r => r.isCorrect).length / customTargetQueue.length) * 100)
+                    : 0}
+                  %
+                </div>
+                <div className="text-[11px] text-slate-400 font-semibold mt-0.5">Accuracy</div>
+              </div>
+            </div>
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-3">
+              {onExitCustomQueue && (
+                <button
+                  onClick={() => {
+                    soundManager.playTap();
+                    onExitCustomQueue();
+                  }}
+                  className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold shadow-lg shadow-purple-900/40 transition-all cursor-pointer"
+                >
+                  Return to Vocab Mentor
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  soundManager.playTap();
+                  setCustomDrillCompleted(false);
+                  if (onExitCustomQueue) onExitCustomQueue();
+                }}
+                className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 transition-all cursor-pointer"
+              >
+                Continue PYQ Endless Drill
+              </button>
+            </div>
+          </div>
+        )
+      ) : customTargetQueue && customTargetQueue.length > 0 ? (
+        /* Dedicated Targeted Coaching / SSC Top 100 Drill Header */
+        <div className="bg-slate-900/95 border border-amber-500/40 rounded-2xl p-3 sm:p-4 shadow-xl space-y-3">
+          {/* Top Row: Category title, TCS & Eduquity PYQ Bank badge, and Exit Drill button */}
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="p-2 rounded-xl border shrink-0 bg-amber-500/15 text-amber-400 border-amber-500/30">
+                <Flame className="w-5 h-5 text-amber-400 fill-amber-400 animate-pulse" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    {customBadge || 'SSC TOP 100'}
+                  </span>
+                  <span className="text-[11px] font-semibold text-slate-400 hidden sm:inline">
+                    TCS & Eduquity PYQ Bank
+                  </span>
+                </div>
+                <h3 className="text-sm sm:text-base font-black text-slate-100 truncate mt-0.5">
+                  {customSessionTitle || 'Top 100 Vocab Drill'}
+                </h3>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              {streak > 1 && (
+                <div className="hidden xs:flex items-center gap-1 bg-orange-950/80 border border-orange-700/60 text-orange-400 px-2 py-1 rounded-xl text-xs font-bold">
+                  <Flame className="w-3.5 h-3.5 fill-orange-400" />
+                  <span>{streak}x</span>
+                </div>
+              )}
+              <div className="flex items-center gap-1 bg-slate-800/90 border border-amber-500/30 px-2.5 py-1 rounded-xl text-xs">
+                <span className="text-[10px] font-bold text-slate-400 uppercase">PYQ</span>
+                <span className="font-mono font-black text-amber-400">
+                  {pyqScore} pts
+                </span>
+              </div>
+              {onExitCustomQueue && (
+                <button
+                  onClick={() => {
+                    soundManager.playTap();
+                    onExitCustomQueue();
+                  }}
+                  className="text-xs font-bold px-3 py-1 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white border border-slate-700 transition-colors cursor-pointer"
+                >
+                  Exit Drill
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Drill Progress & Live Right/Wrong Stats Bar */}
+          <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-2.5 space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2">
+                <span className="font-black text-amber-400 flex items-center gap-1">
+                  <BookOpen className="w-3.5 h-3.5" />
+                  Question {currentDrillQuestionNum} of {totalCustomQuestions}
+                </span>
+                <span className="text-slate-600">•</span>
+                <span className="text-slate-300 font-semibold text-[11px]">
+                  Drill Progress: <b className="text-white">{currentDrillSolvedCount}/{totalCustomQuestions}</b>
+                </span>
+              </div>
+              <div className="flex items-center gap-3 text-[11px] font-bold">
+                <span className="text-emerald-400 flex items-center gap-1">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  {liveCorrectCount} Right ({liveRightPercent}%)
+                </span>
+                <span className="text-rose-400 flex items-center gap-1">
+                  <XCircle className="w-3.5 h-3.5" />
+                  {liveMistakeCount} Wrong ({liveWrongPercent}%)
+                </span>
+              </div>
+            </div>
+
+            {/* Progress Bar */}
+            <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+              <div
+                className="bg-gradient-to-r from-amber-500 via-orange-500 to-emerald-500 h-full rounded-full transition-all duration-300"
+                style={{ width: `${drillProgressPercent}%` }}
+              />
+            </div>
           </div>
         </div>
       ) : (
         <>
           {/* Header */}
           <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-base font-extrabold text-slate-100 flex items-center gap-1.5">
-            <Target className="w-5 h-5 text-sky-400" />
-            PYQ Endless Drill
-          </h2>
-          <p className="text-xs text-slate-400">
-            24,000+ Govt Exam PYQ Pool with Adaptive Spaced Repetition & Option Analysis
-          </p>
-        </div>
+            <div>
+              <h2 className="text-base font-extrabold text-slate-100 flex items-center gap-1.5">
+                <Target className="w-5 h-5 text-sky-400" />
+                PYQ Endless Drill
+              </h2>
+              <p className="text-xs text-slate-400">
+                24,000+ Govt Exam PYQ Pool with Adaptive Spaced Repetition & Option Analysis
+              </p>
+            </div>
 
-        <div className="flex items-center gap-2">
-          {streak > 1 && (
-            <div className="flex items-center gap-1 bg-orange-950/80 border border-orange-700/60 text-orange-400 px-2 py-0.5 rounded-full text-xs font-bold">
-              <Flame className="w-3 h-3 fill-orange-400" />
-              <span>{streak}x</span>
+            <div className="flex items-center gap-2">
+              {streak > 1 && (
+                <div className="flex items-center gap-1 bg-orange-950/80 border border-orange-700/60 text-orange-400 px-2 py-0.5 rounded-full text-xs font-bold">
+                  <Flame className="w-3 h-3 fill-orange-400" />
+                  <span>{streak}x</span>
+                </div>
+              )}
+              {/* PYQ Score & Stats Symbol */}
+              <button
+                onClick={() => {
+                  if (onOpenStats) {
+                    soundManager.playTap();
+                    onOpenStats();
+                  }
+                }}
+                id="practice-stats-button"
+                className="flex items-center gap-1.5 bg-slate-850 hover:bg-slate-800 border border-amber-500/35 hover:border-amber-400 px-2.5 py-1 rounded-xl shadow-sm transition-all group active:scale-95 cursor-pointer"
+                title="View Solved Questions, Right/Wrong Counts & Daily Accuracy Graph"
+                aria-label="View Performance Statistics"
+              >
+                <div className="w-4 h-4 rounded bg-amber-500/15 text-amber-400 flex items-center justify-center group-hover:scale-110 transition-transform">
+                  <BarChart3 className="w-3 h-3" />
+                </div>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider hidden xs:inline">PYQ</span>
+                  <span className="text-xs font-mono font-black text-amber-400">
+                    {pyqScore} pts
+                  </span>
+                </div>
+              </button>
             </div>
-          )}
-          {/* PYQ Score & Stats Symbol */}
-          <button
-            onClick={() => {
-              if (onOpenStats) {
-                soundManager.playTap();
-                onOpenStats();
-              }
-            }}
-            id="practice-stats-button"
-            className="flex items-center gap-1.5 bg-slate-850 hover:bg-slate-800 border border-amber-500/35 hover:border-amber-400 px-2.5 py-1 rounded-xl shadow-sm transition-all group active:scale-95 cursor-pointer"
-            title="View Solved Questions, Right/Wrong Counts & Daily Accuracy Graph"
-            aria-label="View Performance Statistics"
-          >
-            <div className="w-4 h-4 rounded bg-amber-500/15 text-amber-400 flex items-center justify-center group-hover:scale-110 transition-transform">
-              <BarChart3 className="w-3 h-3" />
-            </div>
-            <div className="flex items-baseline gap-1">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider hidden xs:inline">PYQ</span>
-              <span className="text-xs font-mono font-black text-amber-400">
-                {pyqScore} pts
+          </div>
+
+          {/* Mastery & Session Bar */}
+          <div className="bg-slate-850 border border-slate-800 rounded-xl px-3 py-2 flex items-center justify-between text-xs text-slate-300">
+            <div className="flex items-center gap-2">
+              <span className="text-sky-400 font-bold flex items-center gap-1">
+                <BookOpen className="w-3.5 h-3.5" />
+                Question #{questionNumber}
+              </span>
+              <span className="text-slate-600">•</span>
+              <span className="text-slate-400 text-[11px]">
+                Session: <b className="text-slate-200">{sessionSolvedCount} solved</b>
               </span>
             </div>
-          </button>
-        </div>
-      </div>
-
-      {/* Mastery & Session Bar */}
-      <div className="bg-slate-850 border border-slate-800 rounded-xl px-3 py-2 flex items-center justify-between text-xs text-slate-300">
-        <div className="flex items-center gap-2">
-          <span className="text-sky-400 font-bold flex items-center gap-1">
-            <BookOpen className="w-3.5 h-3.5" />
-            Question #{questionNumber}
-          </span>
-          <span className="text-slate-600">•</span>
-          <span className="text-slate-400 text-[11px]">
-            Session: <b className="text-slate-200">{sessionSolvedCount} solved</b>
-          </span>
-        </div>
-        <div className="flex items-center gap-3 text-[11px]">
-          <div className="flex items-center gap-1">
-            <span className="text-slate-400">Due:</span>
-            <span className="font-bold text-sky-400">{schedulerStats.dueCount}</span>
+            <div className="flex items-center gap-3 text-[11px]">
+              <div className="flex items-center gap-1">
+                <span className="text-slate-400">Due:</span>
+                <span className="font-bold text-sky-400">{schedulerStats.dueCount}</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <Award className="w-3.5 h-3.5 text-amber-400" />
+                <span className="text-slate-400">Mastered:</span>
+                <span className="font-bold text-amber-400">{schedulerStats.masteredCount}</span>
+              </div>
+            </div>
           </div>
-          <div className="flex items-center gap-1">
-            <Award className="w-3.5 h-3.5 text-amber-400" />
-            <span className="text-slate-400">Mastered:</span>
-            <span className="font-bold text-amber-400">{schedulerStats.masteredCount}</span>
-          </div>
-        </div>
-      </div>
 
-      {/* Category Pills */}
-      <div className="flex gap-1.5 overflow-x-auto pb-1 text-xs no-scrollbar">
-        {[
-          { id: 'mixed', label: 'All Mixed (24k+)' },
-          { id: 'antonyms', label: 'Antonyms (6k+)' },
-          { id: 'synonyms', label: 'Synonyms (6k+)' },
-          { id: 'ows', label: 'One Word (6k+)' },
-          { id: 'idioms', label: 'Idioms (6k+)' },
-        ].map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => handleApplyFilter(tab.id as QuestionCategory | 'mixed', exam)}
-            className={`px-3 py-1.5 rounded-xl border font-bold text-xs whitespace-nowrap transition-all flex items-center gap-1 ${
-              category === tab.id
-                ? 'bg-sky-600 border-sky-400 text-white shadow-md'
-                : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <span>{tab.label}</span>
-          </button>
-        ))}
-      </div>
+          {/* Target Govt Exam Family Selector (All Exams / SSC / Banking / Defence) */}
+          <div className="space-y-1">
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 text-xs no-scrollbar">
+              <span className="text-[11px] font-bold text-slate-400 shrink-0 px-1">Exam:</span>
+              {EXAM_FAMILY_PILLS.map(pill => {
+                const activeFam = normalizeFilterToFamily(exam);
+                const isSelected = (pill.id === 'ALL' && activeFam === 'all') || (pill.family && activeFam === pill.family);
+                return (
+                  <button
+                    key={pill.id}
+                    onClick={() => handleApplyFilter(category, pill.id)}
+                    className={`px-3 py-1 rounded-xl border text-xs font-bold whitespace-nowrap transition-all cursor-pointer shrink-0 ${
+                      isSelected
+                        ? 'bg-cyan-500 border-cyan-300 text-slate-950 font-black shadow-sm'
+                        : 'bg-slate-850 border-slate-700 text-slate-300 hover:bg-slate-800'
+                    }`}
+                  >
+                    {pill.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Subtle non-touchable preview tags (Compact, no vertical bloat) */}
+            {normalizeFilterToFamily(exam) !== 'all' && EXAM_FAMILY_SUB_TAGS[normalizeFilterToFamily(exam)]?.length > 0 && (
+              <div className="flex items-center gap-1 overflow-x-auto no-scrollbar text-slate-400 select-none pointer-events-none pl-1">
+                <span className="text-slate-500 font-medium shrink-0 text-[10px] uppercase tracking-wider">Includes:</span>
+                {EXAM_FAMILY_SUB_TAGS[normalizeFilterToFamily(exam)].map((tag, idx) => (
+                  <span
+                    key={idx}
+                    className="px-1.5 py-0.5 rounded bg-slate-900/90 border border-slate-800 text-slate-300 font-medium text-[10px] whitespace-nowrap shrink-0"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Category Pills */}
+          <div className="flex gap-1.5 overflow-x-auto pb-1 text-xs no-scrollbar">
+            {[
+              { id: 'mixed', label: 'All Mixed (24k+)' },
+              { id: 'antonyms', label: 'Antonyms (6k+)' },
+              { id: 'synonyms', label: 'Synonyms (6k+)' },
+              { id: 'ows', label: 'One Word (6k+)' },
+              { id: 'idioms', label: 'Idioms (6k+)' },
+            ].map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => handleApplyFilter(tab.id as QuestionCategory | 'mixed', exam)}
+                className={`px-3 py-1.5 rounded-xl border font-bold text-xs whitespace-nowrap transition-all flex items-center gap-1 ${
+                  category === tab.id
+                    ? 'bg-sky-600 border-sky-400 text-white shadow-md'
+                    : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <span>{tab.label}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
 
       {/* Question Card */}
-      {currentQ && (
+      {currentQ && !customDrillCompleted && (
         <div className="space-y-3 pt-1">
           {/* Top Info & Actions Header (Clean 1-line layout) */}
           <div className="flex items-center justify-between text-xs text-slate-400 gap-2">
@@ -818,15 +1118,21 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
                 <Bookmark className={`w-3.5 h-3.5 transition-transform ${isBookmarked ? 'fill-amber-400 text-amber-400 scale-105' : 'text-slate-400'}`} />
               </button>
 
-              {/* Next Question Symbol & Quick Action in Sky-Blue Theme */}
+              {/* Next Question Symbol & Quick Action */}
               <button
                 onClick={handleNextQuestion}
                 id="pyq-top-next-button"
-                className="px-2.5 py-1.5 sm:px-3 sm:py-1.5 rounded-xl border border-sky-500/60 bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 hover:text-white active:scale-90 transition-all shadow-sm flex items-center gap-1 group font-bold text-xs"
-                title="Next Question / Skip (Press Space / Enter / N)"
-                aria-label="Next Question"
+                className={`px-2.5 py-1.5 sm:px-3 sm:py-1.5 rounded-xl border transition-all shadow-sm flex items-center gap-1 group font-bold text-xs ${
+                  customTargetQueue && customQueueIndex === customTargetQueue.length - 1
+                    ? 'border-amber-500/60 bg-amber-500/20 text-amber-300 hover:bg-amber-500/30'
+                    : 'border-sky-500/60 bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 hover:text-white'
+                }`}
+                title={customTargetQueue && customQueueIndex === customTargetQueue.length - 1 ? `Finish Drill (${totalCustomQuestions}/${totalCustomQuestions})` : "Next Question / Skip (Press Space / Enter / N)"}
+                aria-label={customTargetQueue && customQueueIndex === customTargetQueue.length - 1 ? "Finish Drill" : "Next Question"}
               >
-                <span className="text-[11px] font-bold hidden sm:inline">Next</span>
+                <span className="text-[11px] font-bold hidden sm:inline">
+                  {customTargetQueue && customQueueIndex === customTargetQueue.length - 1 ? `Finish (${totalCustomQuestions}/${totalCustomQuestions}) 🏆` : 'Next'}
+                </span>
                 <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
               </button>
             </div>
@@ -1137,12 +1443,16 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
                 )}
               </div>
 
-              {/* Next Question CTA & Auto-Advance Control in Sky-Blue Theme */}
+              {/* Next Question CTA & Auto-Advance Control */}
               <div className="space-y-2 pt-1">
                 <button
                   onClick={handleNextQuestion}
                   id="pyq-bottom-next-button"
-                  className="w-full bg-[#00a6f4] hover:bg-[#0096dc] active:bg-[#0086c7] text-white font-black py-3 sm:py-3.5 px-4 rounded-xl sm:rounded-2xl text-xs sm:text-sm uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-sky-500/25 active:scale-[0.99] transition-all relative overflow-hidden group"
+                  className={`w-full font-black py-3 sm:py-3.5 px-4 rounded-xl sm:rounded-2xl text-xs sm:text-sm uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg active:scale-[0.99] transition-all relative overflow-hidden group cursor-pointer ${
+                    customTargetQueue && customQueueIndex === customTargetQueue.length - 1
+                      ? 'bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-600 hover:to-orange-600 text-slate-950 shadow-amber-500/30'
+                      : 'bg-[#00a6f4] hover:bg-[#0096dc] active:bg-[#0086c7] text-white shadow-sky-500/25'
+                  }`}
                 >
                   {/* Subtle timer progress bar when auto-advance active */}
                   {autoAdvanceSec > 0 && countdown > 0 && !isCountdownPaused && (
@@ -1153,7 +1463,11 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
                   )}
 
                   <span className="relative z-10 flex items-center gap-1.5 sm:gap-2">
-                    <span>NEXT QUESTION</span>
+                    <span>
+                      {customTargetQueue && customQueueIndex === customTargetQueue.length - 1
+                        ? `FINISH DRILL & VIEW RESULTS (${totalCustomQuestions}/${totalCustomQuestions}) 🏆`
+                        : 'NEXT QUESTION'}
+                    </span>
                     {autoAdvanceSec > 0 && countdown > 0 && (
                       <span className="bg-sky-950/40 border border-white/20 text-sky-100 text-[10px] sm:text-[11px] px-2 py-0.5 rounded-full font-mono font-bold">
                         {isCountdownPaused ? 'Paused' : `${countdown}s`}
@@ -1209,8 +1523,6 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
             </div>
           )}
         </div>
-      )}
-      </>
       )}
 
       {/* AdSense / AdMob Banner Slot (Free users only) */}

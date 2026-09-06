@@ -61,13 +61,21 @@ export const DailyTargetCard: React.FC<DailyTargetCardProps> = ({
     return () => window.removeEventListener('daily-target-updated', handleUpdate);
   }, []);
 
-  // Countdown timer to midnight
+  // Countdown timer to midnight & active midnight reset detector
   useEffect(() => {
     const interval = setInterval(() => {
-      setTimeLeft(getTimeUntilMidnight().formatted);
+      const remaining = getTimeUntilMidnight();
+      setTimeLeft(remaining.formatted);
+
+      // Check if midnight passed and date has transitioned
+      const fresh = getDailyTargetState();
+      if (fresh.date !== state.date) {
+        setState(fresh);
+        setCustomTargetInput(fresh.targetQuestions);
+      }
     }, 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [state.date]);
 
   const solved = state.questionsSolvedToday;
   const target = state.targetQuestions;
@@ -199,7 +207,7 @@ export const DailyTargetCard: React.FC<DailyTargetCardProps> = ({
 
           {/* Quick Preset Buttons */}
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
-            {[20, 30, 50, 100, 200, 500].map(val => (
+            {[20, 30, 50, 100, 200, 400, 500].map(val => (
               <button
                 key={val}
                 onClick={() => {

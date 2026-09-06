@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Swords, 
   Zap, 
   Flame, 
   Award, 
   Sparkles, 
-  ChevronRight, 
+  ChevronRight,
   Users, 
   TrendingUp, 
   Clock, 
@@ -26,6 +26,12 @@ import { ADSENSE_BANNER_SLOT } from '../services/adSenseService';
 import { DailyTargetCard } from './DailyTargetCard';
 import { SscTop100Section } from './SscTop100Section';
 import { SscTop100Category } from '../data/sscTop100';
+import { 
+  EXAM_FAMILY_PILLS, 
+  EXAM_FAMILY_SUB_TAGS, 
+  normalizeFilterToFamily, 
+  getExamFilterDisplayName 
+} from '../utils/examFamilyUtils';
 
 interface ArenaHomeProps {
   player: PlayerProfile;
@@ -90,15 +96,30 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
     { id: 'idioms', label: 'Idioms & Phrases', hindi: 'मुहावरे एवं लोकोक्तियां', icon: '📜', countBadge: '6,000+ PYQs' },
   ];
 
-  const exams: { id: ExamType; label: string; tag: string }[] = [
-    { id: 'ALL', label: 'All Govt Exams', tag: 'High Yield' },
-    { id: 'SSC_CGL', label: 'SSC CGL Tier 1/2', tag: '4600 GP' },
-    { id: 'SSC_CHSL', label: 'SSC CHSL 10+2', tag: 'DEO/LDC' },
-    { id: 'SSC_CPO', label: 'SSC CPO SI', tag: 'Delhi Police' },
-    { id: 'SSC_MTS', label: 'SSC MTS / Havaldar', tag: 'Govt PYQs' },
-    { id: 'RRB_NTPC', label: 'RRB NTPC CBT 1/2', tag: 'Railway' },
-    { id: 'CDS_NDA', label: 'CDS / NDA Defense', tag: 'Officer' },
-  ];
+  // Track last selected category for instant 2nd-tap play online trigger (works across rapid double-taps and normal 2nd tap)
+  const lastSelectedCatRef = useRef<QuestionCategory | 'mixed'>(selectedCategory);
+  useEffect(() => {
+    lastSelectedCatRef.current = selectedCategory;
+  }, [selectedCategory]);
+
+  const handleCategoryCardClick = (catId: QuestionCategory | 'mixed') => {
+    const isAlreadySelected = selectedCategory === catId || lastSelectedCatRef.current === catId;
+
+    if (isAlreadySelected) {
+      // 2nd tap: Directly trigger and start 1v1 play online from here!
+      soundManager.playTap();
+      const mode = player.matchesPlayed === 0 ? 'quick_duel' : '1v1_ranked';
+      onStartMatchmaking(mode);
+    } else {
+      // 1st tap: Select this category
+      soundManager.playTap();
+      lastSelectedCatRef.current = catId;
+      onSelectCategory(catId);
+    }
+  };
+
+  // Current selected exam family
+  const activeFamily = normalizeFilterToFamily(selectedExam);
 
   // LP Tier progress computation
   const currentLP = player.rankPoints;
@@ -133,43 +154,64 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
         {/* LEFT COLUMN: Duel Actions, Exam Selector, Categories, Quick Modes (7 Cols on Desktop) */}
         <div className="order-1 lg:col-span-7 xl:col-span-7 space-y-4">
           
-          {/* Target Exam Filter Pills */}
-          <div className="space-y-1.5 bg-slate-900/60 border border-slate-800/80 rounded-2xl p-3 sm:p-3.5">
+          {/* Target Govt Exam Filter Pills */}
+          <div className="space-y-1.5 bg-slate-900/70 border border-slate-800/90 rounded-2xl p-3 sm:p-3.5 shadow-sm">
             <div className="flex items-center justify-between text-xs text-slate-300 font-semibold px-1">
               <span className="flex items-center gap-1.5">
-                <Filter className="w-3.5 h-3.5 text-sky-400" />
+                <Filter className="w-3.5 h-3.5 text-cyan-400" />
                 Target Govt Exam:
               </span>
-              <span className="text-[11px] text-slate-400 font-mono">Customized PYQ Pool</span>
+              <span className="text-[11px] text-slate-400 font-mono">
+                {activeFamily === 'all'
+                  ? 'All Board PYQs'
+                  : activeFamily === 'ssc'
+                  ? 'All SSC Exams'
+                  : activeFamily === 'banking'
+                  ? 'All Banking Exams'
+                  : 'All Defence Exams'}
+              </span>
             </div>
-            <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar text-xs pt-1">
-              {exams.map(exam => {
-                const isSelected = selectedExam === exam.id;
+
+            {/* Main Single-Row Slidable Pills (Phone Slidable, No 2 Rows) */}
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar text-xs pt-0.5">
+              {EXAM_FAMILY_PILLS.map(pill => {
+                const isFamilyActive = (pill.id === 'ALL' && activeFamily === 'all') || (pill.family && activeFamily === pill.family);
                 return (
                   <button
-                    key={exam.id}
+                    key={pill.id}
+                    id={`exam-family-pill-${pill.id.toLowerCase()}`}
                     onClick={() => {
                       soundManager.playTap();
-                      onSelectExam(exam.id);
+                      onSelectExam(pill.id);
                     }}
-                    className={`px-3 py-1.5 rounded-xl whitespace-nowrap transition-all flex items-center gap-1.5 border shrink-0 ${
-                      isSelected
-                        ? 'bg-sky-600 text-white font-bold border-sky-400 shadow-md shadow-sky-950'
-                        : 'bg-slate-800/80 text-slate-300 hover:bg-slate-750 border-slate-700/60 font-medium'
+                    className={`px-3.5 py-1.5 rounded-xl whitespace-nowrap transition-all border text-xs font-bold cursor-pointer shrink-0 ${
+                      isFamilyActive
+                        ? 'bg-cyan-500 text-slate-950 border-cyan-300 shadow-md shadow-cyan-950/60 font-black ring-1 ring-cyan-400/40'
+                        : 'bg-slate-900/90 text-slate-300 hover:bg-slate-800 hover:text-white border-slate-750 font-semibold'
                     }`}
                   >
-                    <span>{exam.label}</span>
-                    <span
-                      className={`text-[9px] px-1 py-0.2 rounded font-mono ${
-                        isSelected ? 'bg-sky-800 text-sky-100' : 'bg-slate-900 text-slate-400'
-                      }`}
-                    >
-                      {exam.tag}
-                    </span>
+                    <span>{pill.label}</span>
                   </button>
                 );
               })}
             </div>
+
+            {/* Subtle non-touchable preview tags (Compact, no extra vertical bloat) */}
+            {activeFamily !== 'all' && EXAM_FAMILY_SUB_TAGS[activeFamily]?.length > 0 && (
+              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pt-0.5 text-slate-400 select-none pointer-events-none">
+                <span className="text-slate-500 font-semibold shrink-0 text-[10px] uppercase tracking-wider">Includes:</span>
+                <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+                  {EXAM_FAMILY_SUB_TAGS[activeFamily].map((tag, idx) => (
+                    <span
+                      key={idx}
+                      className="px-2 py-0.5 rounded-md bg-slate-950/70 border border-slate-800 text-slate-300 font-medium text-[10px] whitespace-nowrap shrink-0"
+                    >
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Category Selection Grid */}
@@ -184,11 +226,9 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
                 return (
                   <button
                     key={cat.id}
-                    onClick={() => {
-                      soundManager.playTap();
-                      onSelectCategory(cat.id);
-                    }}
-                    className={`p-2.5 sm:p-3 rounded-xl border text-left transition-all relative group cursor-pointer ${
+                    id={`arena-category-card-${cat.id}`}
+                    onClick={() => handleCategoryCardClick(cat.id)}
+                    className={`p-2.5 sm:p-3 rounded-xl border text-left transition-all relative group cursor-pointer active:scale-[0.98] ${
                       isSelected
                         ? 'bg-amber-950/50 border-amber-500/80 shadow-md text-slate-100 ring-1 ring-amber-400'
                         : 'bg-slate-800/60 border-slate-700/60 hover:bg-slate-800 text-slate-300'

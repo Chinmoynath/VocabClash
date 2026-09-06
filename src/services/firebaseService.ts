@@ -1,6 +1,10 @@
 import { initializeApp, getApps } from 'firebase/app';
 import { 
   getAuth, 
+  initializeAuth,
+  indexedDBLocalPersistence,
+  browserLocalPersistence,
+  inMemoryPersistence,
   GoogleAuthProvider, 
   signInWithPopup, 
   signInWithRedirect,
@@ -14,8 +18,10 @@ import {
   deleteUser,
   EmailAuthProvider,
   reauthenticateWithCredential,
+  getAdditionalUserInfo,
   User as FirebaseUser
 } from 'firebase/auth';
+import { trackSignup } from './analyticsService';
 import { 
   getFirestore, 
   initializeFirestore,
@@ -39,8 +45,16 @@ try {
 // Initialize Firebase App
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
 
-// Standard Firebase Auth instance
-export const auth = getAuth(app);
+// Standard Firebase Auth instance with multi-layer persistence fallback (IndexedDB -> localStorage -> memory)
+let authInstance: ReturnType<typeof getAuth>;
+try {
+  authInstance = initializeAuth(app, {
+    persistence: [indexedDBLocalPersistence, browserLocalPersistence, inMemoryPersistence],
+  });
+} catch {
+  authInstance = getAuth(app);
+}
+export const auth = authInstance;
 
 // Helper to create configured Google Auth Provider
 export function createGoogleProvider(): GoogleAuthProvider {
@@ -236,6 +250,13 @@ export function getFriendlyAuthErrorMessage(error: any): string {
   if (code.includes('network-request-failed') || message.includes('offline') || message.includes('network')) {
     return 'Network connection error. Please check your internet connection and try again.';
   }
+  if (
+    message.includes('database is closing') ||
+    message.includes('closing/hidden') ||
+    message.includes('idbdatabase')
+  ) {
+    return 'Browser storage connection was refreshed. Please tap Sign In again or continue with Email.';
+  }
 
   // Clean raw "Firebase: Error (auth/...)" strings into readable text
   if (rawMsg.includes('Firebase: Error (auth/') || rawMsg.includes('auth/')) {
@@ -297,8 +318,36 @@ export async function signInWithGoogle(forceRedirect = false): Promise<FirebaseU
       return null;
     }
     const result = await signInWithPopup(auth, provider);
+    try {
+      const addInfo = getAdditionalUserInfo(result);
+      if (addInfo?.isNewUser) {
+        trackSignup('google');
+      }
+    } catch {
+      // ignore
+    }
     return result.user;
   } catch (error: any) {
+    const msg = String(error?.message || error || '').toLowerCase();
+    if (msg.includes('database is closing') || msg.includes('closing/hidden')) {
+      console.warn('Transient IndexedDB closing during popup; retrying Google Sign-in after brief pause...');
+      await new Promise(r => setTimeout(r, 400));
+      try {
+        const retryResult = await signInWithPopup(auth, createGoogleProvider());
+        try {
+          const addInfo = getAdditionalUserInfo(retryResult);
+          if (addInfo?.isNewUser) {
+            trackSignup('google');
+          }
+        } catch {
+          // ignore
+        }
+        return retryResult.user;
+      } catch (retryErr) {
+        console.warn('Retry after database closing error failed:', retryErr);
+        throw retryErr;
+      }
+    }
     console.warn('Google Sign-In failed or was cancelled:', error);
     throw error;
   }
@@ -314,6 +363,16 @@ export async function signInWithGoogleRedirect(): Promise<void> {
 export async function checkRedirectAuthResult(): Promise<FirebaseUser | null> {
   try {
     const res = await getRedirectResult(auth);
+    if (res?.user) {
+      try {
+        const addInfo = getAdditionalUserInfo(res);
+        if (addInfo?.isNewUser) {
+          trackSignup('google');
+        }
+      } catch {
+        // ignore
+      }
+    }
     return res?.user || null;
   } catch (err: any) {
     console.warn('getRedirectResult check:', err);
@@ -334,6 +393,7 @@ export async function registerWithEmailPassword(
         displayName: displayName.trim(),
       });
     }
+    trackSignup('email');
     return userCredential.user;
   } catch (error: any) {
     console.error('Email Registration Error:', error);

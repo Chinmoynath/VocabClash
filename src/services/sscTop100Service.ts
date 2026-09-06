@@ -5,6 +5,7 @@ import {
   SscTop100Category,
   SSC_TOP_100_CATEGORIES,
   getAuthoritativeSscTop100Questions,
+  balanceAndRandomizeQuestions,
 } from '../data/sscTop100';
 import { questionBankEngine } from './questionBankEngine';
 
@@ -29,6 +30,36 @@ export interface SscVocabRankingDiagnostic {
     repeatCount: number;
     exams: string[];
   }[];
+}
+
+/**
+ * Returns today's date in YYYY-MM-DD format (local user time)
+ */
+export function getTodayDateString(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Checks if a progress timestamp or date string is from today.
+ * If not from today (i.e. midnight has passed), it returns false triggering daily reset.
+ */
+export function isFromToday(lastAttemptAt?: number, lastUpdatedDate?: string): boolean {
+  const today = getTodayDateString();
+  if (lastUpdatedDate) {
+    return lastUpdatedDate === today;
+  }
+  if (lastAttemptAt && typeof lastAttemptAt === 'number' && lastAttemptAt > 0) {
+    const d = new Date(lastAttemptAt);
+    const yr = d.getFullYear();
+    const mo = String(d.getMonth() + 1).padStart(2, '0');
+    const da = String(d.getDate()).padStart(2, '0');
+    return `${yr}-${mo}-${da}` === today;
+  }
+  return false;
 }
 
 class SscTop100Service {
@@ -59,8 +90,9 @@ class SscTop100Service {
         if (snapshot.exists()) {
           const data = snapshot.data();
           if (Array.isArray(data.questions) && data.questions.length > 0) {
-            this.questionsMemoryCache.set(category, data.questions);
-            return data.questions;
+            const balanced = balanceAndRandomizeQuestions(data.questions);
+            this.questionsMemoryCache.set(category, balanced);
+            return balanced;
           }
         }
       }
@@ -75,12 +107,13 @@ class SscTop100Service {
   }
 
   /**
-   * Fetch user progress for a category
+   * Fetch user progress for a category with automatic daily reset at midnight
    */
   public async fetchUserProgress(
     uid: string | undefined,
     category: SscTop100Category
   ): Promise<SscTop100Progress> {
+    const today = getTodayDateString();
     const defaultProgress: SscTop100Progress = {
       category,
       completedQuestionIds: [],
@@ -89,11 +122,18 @@ class SscTop100Service {
       currentQuestionIndex: 0,
       status: 'not_started',
       lastAttemptAt: Date.now(),
+      lastUpdatedDate: today,
     };
 
     const cacheKey = `${uid || 'guest'}_${category}`;
     if (this.progressMemoryCache.has(cacheKey)) {
-      return this.progressMemoryCache.get(cacheKey)!;
+      const cached = this.progressMemoryCache.get(cacheKey)!;
+      if (isFromToday(cached.lastAttemptAt, cached.lastUpdatedDate)) {
+        return cached;
+      } else {
+        // Cached progress is from a previous day - clear from cache
+        this.progressMemoryCache.delete(cacheKey);
+      }
     }
 
     // Try Firestore if user is logged in
@@ -103,8 +143,15 @@ class SscTop100Service {
         const snapshot = await getDoc(progressRef);
         if (snapshot.exists()) {
           const data = snapshot.data() as SscTop100Progress;
-          this.progressMemoryCache.set(cacheKey, data);
-          return data;
+          if (isFromToday(data.lastAttemptAt, data.lastUpdatedDate)) {
+            this.progressMemoryCache.set(cacheKey, data);
+            return data;
+          } else {
+            // Day has passed! Reset in Firestore and cache
+            this.progressMemoryCache.set(cacheKey, defaultProgress);
+            setDoc(progressRef, defaultProgress, { merge: true }).catch(() => {});
+            return defaultProgress;
+          }
         }
       } catch {
         // Safe fallback
@@ -112,23 +159,28 @@ class SscTop100Service {
     }
 
     // Check lightweight localStorage for guest/offline fallback
-    // NOTE: Only small ID array is stored (no full question objects), completely immune to quota exceeded errors
     try {
       const localStr = localStorage.getItem(`vclash_ssc100_${category}`);
       if (localStr) {
         const parsed = JSON.parse(localStr);
         if (parsed && Array.isArray(parsed.completedQuestionIds)) {
-          const progress: SscTop100Progress = {
-            category,
-            completedQuestionIds: parsed.completedQuestionIds,
-            solvedCount: parsed.completedQuestionIds.length,
-            correctCount: parsed.correctCount || 0,
-            currentQuestionIndex: parsed.currentQuestionIndex || parsed.completedQuestionIds.length,
-            status: parsed.completedQuestionIds.length >= 100 ? 'completed' : (parsed.completedQuestionIds.length > 0 ? 'in_progress' : 'not_started'),
-            lastAttemptAt: parsed.lastAttemptAt || Date.now(),
-          };
-          this.progressMemoryCache.set(cacheKey, progress);
-          return progress;
+          if (isFromToday(parsed.lastAttemptAt, parsed.lastUpdatedDate)) {
+            const progress: SscTop100Progress = {
+              category,
+              completedQuestionIds: parsed.completedQuestionIds,
+              solvedCount: parsed.completedQuestionIds.length,
+              correctCount: parsed.correctCount || 0,
+              currentQuestionIndex: parsed.currentQuestionIndex || parsed.completedQuestionIds.length,
+              status: parsed.completedQuestionIds.length >= 100 ? 'completed' : (parsed.completedQuestionIds.length > 0 ? 'in_progress' : 'not_started'),
+              lastAttemptAt: parsed.lastAttemptAt || Date.now(),
+              lastUpdatedDate: parsed.lastUpdatedDate || today,
+            };
+            this.progressMemoryCache.set(cacheKey, progress);
+            return progress;
+          } else {
+            // Expired from previous day, clear storage
+            localStorage.removeItem(`vclash_ssc100_${category}`);
+          }
         }
       }
     } catch {
@@ -146,17 +198,20 @@ class SscTop100Service {
     category: SscTop100Category,
     progress: SscTop100Progress
   ): Promise<void> {
+    const today = getTodayDateString();
+    const progressWithDate: SscTop100Progress = {
+      ...progress,
+      lastAttemptAt: Date.now(),
+      lastUpdatedDate: today,
+    };
     const cacheKey = `${uid || 'guest'}_${category}`;
-    this.progressMemoryCache.set(cacheKey, progress);
+    this.progressMemoryCache.set(cacheKey, progressWithDate);
 
     // Save to Firestore if authenticated
     if (uid && db) {
       try {
         const progressRef = doc(db, 'users', uid, 'ssc_top100_progress', category);
-        await setDoc(progressRef, {
-          ...progress,
-          lastAttemptAt: Date.now(),
-        }, { merge: true });
+        await setDoc(progressRef, progressWithDate, { merge: true });
       } catch (err) {
         console.warn('Could not sync SSC Top 100 progress to Firestore:', err);
       }
@@ -165,10 +220,11 @@ class SscTop100Service {
     // Also persist lightweight ID-only payload locally for offline continuity
     try {
       localStorage.setItem(`vclash_ssc100_${category}`, JSON.stringify({
-        completedQuestionIds: progress.completedQuestionIds,
-        correctCount: progress.correctCount,
-        currentQuestionIndex: progress.currentQuestionIndex,
-        lastAttemptAt: Date.now(),
+        completedQuestionIds: progressWithDate.completedQuestionIds,
+        correctCount: progressWithDate.correctCount,
+        currentQuestionIndex: progressWithDate.currentQuestionIndex,
+        lastAttemptAt: progressWithDate.lastAttemptAt,
+        lastUpdatedDate: today,
       }));
     } catch {
       // Safe ignore
@@ -182,6 +238,7 @@ class SscTop100Service {
     uid: string | undefined,
     category: SscTop100Category
   ): Promise<void> {
+    const today = getTodayDateString();
     const resetProgress: SscTop100Progress = {
       category,
       completedQuestionIds: [],
@@ -190,6 +247,7 @@ class SscTop100Service {
       currentQuestionIndex: 0,
       status: 'not_started',
       lastAttemptAt: Date.now(),
+      lastUpdatedDate: today,
     };
 
     const cacheKey = `${uid || 'guest'}_${category}`;
@@ -297,19 +355,19 @@ export async function recordSscTop100Answer(
     const isFirstTime = !completedSet.has(questionId);
     completedSet.add(questionId);
 
-    const newSolved = completedSet.size;
+    const newSolved = Math.min(100, completedSet.size);
     const newCorrect = isFirstTime
       ? currentProgress.correctCount + (isCorrect ? 1 : 0)
       : currentProgress.correctCount;
 
-    const nextIndex = Math.max(currentProgress.currentQuestionIndex, currentQuestionIndex + 1);
+    const nextIndex = Math.min(100, Math.max(currentProgress.currentQuestionIndex, currentQuestionIndex + 1));
     const nextStatus = newSolved >= 100 ? 'completed' : 'in_progress';
 
     await sscTop100Service.saveUserProgress(uid, category, {
       category,
-      completedQuestionIds: Array.from(completedSet),
+      completedQuestionIds: Array.from(completedSet).slice(0, 100),
       solvedCount: newSolved,
-      correctCount: newCorrect,
+      correctCount: Math.min(100, newCorrect),
       currentQuestionIndex: nextIndex,
       status: nextStatus,
       lastAttemptAt: Date.now(),

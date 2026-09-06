@@ -65,7 +65,7 @@ import { AiTutorTab } from './components/AiTutorTab';
 import { ProfileModal } from './components/ProfileModal';
 import { SscTop100CompletionModal } from './components/SscTop100CompletionModal';
 import { SscTop100Category, getTop100Questions, SSC_TOP_100_META } from './data/sscTop100';
-import { recordSscTop100Answer, markSscTop100CategoryCompleted } from './services/sscTop100Service';
+import { recordSscTop100Answer, markSscTop100CategoryCompleted, sscTop100Service } from './services/sscTop100Service';
 import { PremiumModal } from './components/PremiumModal';
 import { InterstitialAdModal } from './components/InterstitialAdModal';
 import { StreakModal } from './components/StreakModal';
@@ -81,6 +81,16 @@ import { SEO_PAGES } from './data/seoContentData';
 import { updatePageSeo } from './utils/seoMetaManager';
 import { networkManager } from './utils/networkManager';
 import { recordQuestionAttempt } from './utils/userStatsManager';
+import { 
+  trackPageView, 
+  trackPracticeStart, 
+  trackQuestionAnswered, 
+  trackPracticeComplete, 
+  trackTop100Start, 
+  trackTop100Complete,
+  normalizeAnalyticsCategory,
+  normalizeAnalyticsExamFamily
+} from './services/analyticsService';
 
 const STORAGE_KEY_PLAYER = 'vocabclash_player_v5';
 const STORAGE_KEY_VAULT = 'vocabclash_vault_v2';
@@ -199,6 +209,59 @@ const INITIAL_SUBSCRIPTION: UserSubscription = {
   autoRenew: false,
 };
 
+// Helper for virtual SPA route tracking in GA4
+function getVirtualRouteDetails(params: {
+  activeSeoSlug: string | null;
+  matchState: MatchState | null;
+  isMatchmaking: boolean;
+  currentTab: TabType;
+}): { page_path: string; page_title: string } {
+  if (params.activeSeoSlug) {
+    const slugKey = params.activeSeoSlug.replace(/^\//, '');
+    const seoPage = SEO_PAGES[slugKey];
+    return {
+      page_path: params.activeSeoSlug,
+      page_title: seoPage ? seoPage.title : 'SSC Vocabulary Guide',
+    };
+  }
+
+  if (params.matchState || params.isMatchmaking) {
+    return {
+      page_path: '/1v1',
+      page_title: '1v1 Arena',
+    };
+  }
+
+  switch (params.currentTab) {
+    case 'practice':
+      return {
+        page_path: '/pyq-drill',
+        page_title: 'PYQ Drill',
+      };
+    case 'mistakes':
+      return {
+        page_path: '/mistake-vault',
+        page_title: 'Mistake Vault',
+      };
+    case 'leaderboard':
+      return {
+        page_path: '/ranks',
+        page_title: 'Ranks Leaderboard',
+      };
+    case 'ai_coach':
+      return {
+        page_path: '/ai-mentor',
+        page_title: 'AI Vocab Mentor',
+      };
+    case 'arena':
+    default:
+      return {
+        page_path: '/',
+        page_title: 'home',
+      };
+  }
+}
+
 export default function App() {
   // Firebase Auth state
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
@@ -252,7 +315,16 @@ export default function App() {
   const [streak, setStreak] = useState<DailyStreakState>(() => getInitialStreak());
 
   // Navigation & View state
-  const [currentTab, setCurrentTab] = useState<TabType>('arena');
+  const [currentTab, setCurrentTab] = useState<TabType>(() => {
+    if (typeof window !== 'undefined') {
+      const rawPath = window.location.pathname.toLowerCase();
+      if (rawPath.includes('/pyq-drill') || rawPath.includes('/practice')) return 'practice';
+      if (rawPath.includes('/mistake-vault') || rawPath.includes('/vault') || rawPath.includes('/mistakes')) return 'mistakes';
+      if (rawPath.includes('/ranks') || rawPath.includes('/leaderboard')) return 'leaderboard';
+      if (rawPath.includes('/ai-coach') || rawPath.includes('/ai-mentor')) return 'ai_coach';
+    }
+    return 'arena';
+  });
   const [selectedCategory, setSelectedCategory] = useState<QuestionCategory | 'mixed'>('mixed');
   const [selectedExam, setSelectedExam] = useState<ExamType>('SSC_CGL');
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
@@ -264,6 +336,7 @@ export default function App() {
   // SSC Top 100 Drill State
   const [activeSscTop100Category, setActiveSscTop100Category] = useState<SscTop100Category | null>(null);
   const [sscTop100InitialIndex, setSscTop100InitialIndex] = useState<number>(0);
+  const [sscTop100InitialCorrect, setSscTop100InitialCorrect] = useState<number>(0);
   const [showSscTop100CompletionModal, setShowSscTop100CompletionModal] = useState<boolean>(false);
   const [sscTop100SummaryData, setSscTop100SummaryData] = useState<{
     category: SscTop100Category;
@@ -335,6 +408,17 @@ export default function App() {
       } else {
         setActiveSeoSlug(null);
         updatePageSeo(null);
+        if (rawPath.includes('/pyq-drill') || rawPath.includes('/practice')) {
+          setCurrentTab('practice');
+        } else if (rawPath.includes('/mistake-vault') || rawPath.includes('/vault') || rawPath.includes('/mistakes')) {
+          setCurrentTab('mistakes');
+        } else if (rawPath.includes('/ranks') || rawPath.includes('/leaderboard')) {
+          setCurrentTab('leaderboard');
+        } else if (rawPath.includes('/ai-coach') || rawPath.includes('/ai-mentor')) {
+          setCurrentTab('ai_coach');
+        } else if (rawPath === '/' || rawPath === '/1v1') {
+          setCurrentTab('arena');
+        }
       }
     };
 
@@ -345,6 +429,34 @@ export default function App() {
       window.removeEventListener('hashchange', handleHashOrPopState);
     };
   }, []);
+
+  // GA4 Virtual SPA Page Tracking (page_path, page_title, page_location)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const route = getVirtualRouteDetails({
+      activeSeoSlug,
+      matchState,
+      isMatchmaking,
+      currentTab,
+    });
+
+    // Synchronize browser history URL if switching views inside the SPA
+    if (!activeSeoSlug && window.location.pathname !== route.page_path) {
+      try {
+        window.history.replaceState(null, '', route.page_path);
+      } catch {
+        // ignore
+      }
+    }
+
+    // Safely fire virtual page_view (analyticsService deduplicates identical successive paths)
+    trackPageView(
+      route.page_path,
+      route.page_title,
+      window.location.origin + route.page_path
+    );
+  }, [currentTab, activeSeoSlug, Boolean(matchState), isMatchmaking]);
 
   // Update default SEO meta tags when not on a specific SEO guide page
   useEffect(() => {
@@ -729,6 +841,13 @@ export default function App() {
     setMatchState(newMatch);
     setIsMatchmaking(false);
     setIsMatchCompleted(false);
+
+    // GA4: practice_start for 1v1 Arena match
+    trackPracticeStart({
+      practice_type: '1v1',
+      category: normalizeAnalyticsCategory(selectedCategory),
+      exam_family: normalizeAnalyticsExamFamily(selectedExam),
+    });
   };
 
   // Automatic streak tracking: solving at least 1 question daily advances or starts the streak
@@ -782,6 +901,14 @@ export default function App() {
         responseTimeMs: playerAns.timeTakenMs,
         category: currentQ.category,
         pyqPoints: playerAns.isCorrect ? 10 : 0,
+      });
+
+      // GA4: question_answered for 1v1 Arena duel round
+      trackQuestionAnswered({
+        practice_type: '1v1',
+        category: normalizeAnalyticsCategory(currentQ.category || selectedCategory),
+        exam_family: normalizeAnalyticsExamFamily(currentQ.examTag || selectedExam),
+        correct: playerAns.isCorrect,
       });
     }
 
@@ -871,6 +998,19 @@ export default function App() {
 
     setIsMatchCompleted(true);
 
+    // GA4: practice_complete for 1v1 Arena duel
+    if (matchState) {
+      const totalAns = matchState.playerAnswers.length;
+      const correctAns = matchState.playerAnswers.filter(a => a.isCorrect).length;
+      const accuracy = Math.round((correctAns / Math.max(1, totalAns)) * 100);
+      trackPracticeComplete({
+        practice_type: '1v1',
+        questions_answered: totalAns,
+        correct_count: correctAns,
+        accuracy,
+      });
+    }
+
     // Immediately persist match results to Firestore if user is signed in
     if (currentUser) {
       saveUserDataToFirestore(
@@ -925,11 +1065,19 @@ export default function App() {
     setShowAiModal(true);
   };
 
-  const handleStartSscTop100Drill = (cat: SscTop100Category, resumeIndex = 0) => {
+  const handleStartSscTop100Drill = (cat: SscTop100Category, resumeIndex = 0, initialCorrect = 0) => {
     soundManager.playTap();
+    // GA4: top100_start and practice_start
+    trackTop100Start(cat, resumeIndex);
+    trackPracticeStart({
+      practice_type: 'ssc_top100',
+      category: normalizeAnalyticsCategory(cat),
+      exam_family: 'ssc',
+    });
     const questions = getTop100Questions(cat);
     setActiveSscTop100Category(cat);
     setSscTop100InitialIndex(resumeIndex);
+    setSscTop100InitialCorrect(initialCorrect);
     setPracticeCustomQueue(questions);
     setPracticeModeBannerTitle(`SSC TOP 100 • ${SSC_TOP_100_META[cat].title}`);
     setCurrentTab('practice');
@@ -1299,6 +1447,7 @@ export default function App() {
                 customTargetQueue={practiceCustomQueue}
                 customSessionTitle={practiceModeBannerTitle}
                 customInitialIndex={sscTop100InitialIndex}
+                customInitialCorrectCount={sscTop100InitialCorrect}
                 customBadge={activeSscTop100Category ? `SSC TOP 100 • ${SSC_TOP_100_META[activeSscTop100Category].title}` : null}
                 attemptSource={activeSscTop100Category ? 'ssc_top100' : 'practice'}
                 onCustomQueueQuestionAnswered={(q, isCorrect, index) => {
@@ -1315,11 +1464,19 @@ export default function App() {
                 onCustomDrillCompleted={(results) => {
                   if (activeSscTop100Category) {
                     const cat = activeSscTop100Category;
-                    const total = results.length;
-                    const correctCount = results.filter(r => r.isCorrect).length;
-                    const accuracy = total > 0 ? Math.round((correctCount / total) * 100) : 0;
-                    const score = (correctCount * 10) - ((total - correctCount) * 2);
-                    const mistakeCount = total - correctCount;
+                    const effectiveCorrect = Math.min(100, (sscTop100InitialCorrect || 0) + results.filter(r => r.isCorrect).length);
+                    const mistakeCount = Math.max(0, 100 - effectiveCorrect);
+                    const accuracy = Math.round((effectiveCorrect / 100) * 100);
+                    const score = (effectiveCorrect * 10) - (mistakeCount * 2);
+
+                    // GA4: top100_complete and practice_complete for SSC Top 100
+                    trackTop100Complete(cat, effectiveCorrect, accuracy);
+                    trackPracticeComplete({
+                      practice_type: 'ssc_top100',
+                      questions_answered: 100,
+                      correct_count: effectiveCorrect,
+                      accuracy,
+                    });
 
                     markSscTop100CategoryCompleted(currentUser?.uid || player.id, cat);
 
@@ -1328,10 +1485,26 @@ export default function App() {
                       score,
                       accuracy,
                       mistakeCount,
-                      totalSolved: total,
+                      totalSolved: 100,
                     });
                     setShowSscTop100CompletionModal(true);
                   }
+                }}
+                onRestartCustomDrill={async () => {
+                  if (activeSscTop100Category) {
+                    const cat = activeSscTop100Category;
+                    const uid = currentUser?.uid || player.id;
+                    await sscTop100Service.resetUserProgress(uid, cat);
+                    handleStartSscTop100Drill(cat, 0, 0);
+                  }
+                }}
+                onReviewMistakes={() => {
+                  setPracticeCustomQueue(null);
+                  setPracticeModeBannerTitle(null);
+                  setActiveSscTop100Category(null);
+                  setSscTop100InitialIndex(0);
+                  setSscTop100InitialCorrect(0);
+                  setCurrentTab('mistakes');
                 }}
                 onExitCustomQueue={() => {
                   setPracticeCustomQueue(null);
@@ -1339,6 +1512,7 @@ export default function App() {
                   const wasTop100 = activeSscTop100Category !== null;
                   setActiveSscTop100Category(null);
                   setSscTop100InitialIndex(0);
+                  setSscTop100InitialCorrect(0);
                   setCurrentTab(wasTop100 ? 'arena' : 'ai_coach');
                 }}
               />
@@ -1527,9 +1701,12 @@ export default function App() {
             setSscTop100InitialIndex(0);
             setCurrentTab('arena');
           }}
-          onRestartCategory={() => {
+          onRestartCategory={async () => {
             setShowSscTop100CompletionModal(false);
-            handleStartSscTop100Drill(sscTop100SummaryData.category, 0);
+            const cat = sscTop100SummaryData.category;
+            const uid = currentUser?.uid || player.id;
+            await sscTop100Service.resetUserProgress(uid, cat);
+            handleStartSscTop100Drill(cat, 0, 0);
           }}
         />
       )}

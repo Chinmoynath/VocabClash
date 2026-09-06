@@ -1,3 +1,5 @@
+import { checkAndTrackDailyGoalComplete, checkAndTrackQuestion10 } from '../services/analyticsService';
+
 export interface DailyTargetConfig {
   targetQuestions: number; // default 30, min 20, max 500
 }
@@ -96,9 +98,19 @@ export function saveDailyTargetState(state: DailyTargetState): void {
 
 export function recordQuestionSolvedForDailyTarget(count: number = 1): DailyTargetState {
   const state = getDailyTargetState();
+  const prevSolved = state.questionsSolvedToday;
   state.questionsSolvedToday += count;
   state.lastUpdated = Date.now();
   saveDailyTargetState(state);
+
+  // GA4 Tracking: 10 legitimate questions answered milestone (once per day)
+  checkAndTrackQuestion10(state.questionsSolvedToday);
+
+  // GA4 Tracking: Daily goal crossed target (e.g. 29 -> 30, once per day)
+  if (prevSolved < state.targetQuestions && state.questionsSolvedToday >= state.targetQuestions) {
+    checkAndTrackDailyGoalComplete(state.targetQuestions);
+  }
+
   return state;
 }
 

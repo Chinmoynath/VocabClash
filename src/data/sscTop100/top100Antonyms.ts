@@ -1,4 +1,5 @@
 import { Question } from '../../types';
+import { balanceAndRandomizeQuestions } from './randomizer';
 
 export const TOP_100_SSC_ANTONYMS: Question[] = [
   {
@@ -381,5 +382,5 @@ export function getRankedSscTop100Antonyms(): Question[] {
     counter++;
   }
 
-  return base.slice(0, 100);
+  return balanceAndRandomizeQuestions(base.slice(0, 100));
 }

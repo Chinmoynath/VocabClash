@@ -47,7 +47,8 @@ export const SscTop100CompletionModal: React.FC<SscTop100CompletionModalProps> =
   const catInfo = SSC_TOP_100_CATEGORIES.find(c => c.id === category);
   const total = totalSolved || totalQuestions;
   const effectiveMistakes = passedMistakeCount !== undefined ? passedMistakeCount : Math.max(0, total - correctCount);
-  const effectiveAccuracy = passedAccuracy !== undefined ? passedAccuracy : Math.round(((total - effectiveMistakes) / total) * 100);
+  const effectiveAccuracy = passedAccuracy !== undefined ? passedAccuracy : (total > 0 ? Math.round(((total - effectiveMistakes) / total) * 100) : 0);
+  const effectiveWrongAccuracy = 100 - effectiveAccuracy;
   const effectiveCorrect = total - effectiveMistakes;
 
   const handleRetake = () => {
@@ -105,32 +106,44 @@ export const SscTop100CompletionModal: React.FC<SscTop100CompletionModalProps> =
           You conquered all 100 high-frequency PYQs asked across SSC CGL, CHSL, CPO & MTS!
         </p>
 
-        {/* Stats Grid */}
-        <div className="grid grid-cols-3 gap-3 my-6">
-          <div className="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-3">
-            <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-              Score
+        {/* Stats Grid with Clear Right/Wrong Percentages */}
+        <div className="grid grid-cols-3 gap-2.5 sm:gap-3 my-6">
+          <div className="bg-slate-800/90 border border-emerald-500/40 rounded-2xl p-3 text-center">
+            <div className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider flex items-center justify-center gap-1">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+              Right %
             </div>
-            <div className="text-xl font-black text-amber-300 mt-0.5">
-              {effectiveCorrect}/{total}
-            </div>
-          </div>
-
-          <div className="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-3">
-            <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-              Accuracy
-            </div>
-            <div className="text-xl font-black text-emerald-400 mt-0.5">
+            <div className="text-xl sm:text-2xl font-black text-emerald-400 mt-1">
               {effectiveAccuracy}%
             </div>
+            <div className="text-[11px] font-semibold text-slate-300 mt-0.5">
+              {effectiveCorrect} Correct
+            </div>
           </div>
 
-          <div className="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-3">
-            <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-              Mistakes
+          <div className="bg-slate-800/90 border border-rose-500/40 rounded-2xl p-3 text-center">
+            <div className="text-[11px] font-bold text-rose-400 uppercase tracking-wider flex items-center justify-center gap-1">
+              <RotateCcw className="w-3.5 h-3.5 text-rose-400" />
+              Wrong %
             </div>
-            <div className="text-xl font-black text-rose-400 mt-0.5">
-              {effectiveMistakes}
+            <div className="text-xl sm:text-2xl font-black text-rose-400 mt-1">
+              {effectiveWrongAccuracy}%
+            </div>
+            <div className="text-[11px] font-semibold text-slate-300 mt-0.5">
+              {effectiveMistakes} Wrong
+            </div>
+          </div>
+
+          <div className="bg-slate-800/90 border border-amber-500/40 rounded-2xl p-3 text-center">
+            <div className="text-[11px] font-bold text-amber-400 uppercase tracking-wider flex items-center justify-center gap-1">
+              <Award className="w-3.5 h-3.5 text-amber-400" />
+              Solved
+            </div>
+            <div className="text-xl sm:text-2xl font-black text-amber-300 mt-1">
+              {total}/{totalQuestions}
+            </div>
+            <div className="text-[11px] font-semibold text-slate-300 mt-0.5">
+              100% Complete
             </div>
           </div>
         </div>
@@ -149,7 +162,7 @@ export const SscTop100CompletionModal: React.FC<SscTop100CompletionModalProps> =
           {effectiveMistakes > 0 && (onReviewMistakes || onNavigateToMistakes) && (
             <button
               onClick={handleMistakes}
-              className="w-full py-3 px-4 bg-gradient-to-r from-rose-950 to-red-900 hover:from-rose-900 hover:to-red-850 border border-rose-600/60 text-rose-200 font-bold rounded-xl text-sm flex items-center justify-center gap-2 shadow-md transition-all"
+              className="w-full py-3 px-4 bg-gradient-to-r from-rose-950 to-red-900 hover:from-rose-900 hover:to-red-850 border border-rose-600/60 text-rose-200 font-bold rounded-xl text-sm flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer"
             >
               <BookOpen className="w-4 h-4" />
               Review {effectiveMistakes} Mistakes in Mistake Vault
@@ -159,15 +172,15 @@ export const SscTop100CompletionModal: React.FC<SscTop100CompletionModalProps> =
           <div className="grid grid-cols-2 gap-2.5">
             <button
               onClick={handleRetake}
-              className="py-3 px-4 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold rounded-xl text-sm flex items-center justify-center gap-2 transition-all"
+              className="py-3 px-4 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-100 font-bold rounded-xl text-sm flex items-center justify-center gap-2 transition-all cursor-pointer"
             >
-              <RotateCcw className="w-4 h-4" />
-              Retake Drill
+              <RotateCcw className="w-4 h-4 text-amber-400" />
+              Start Again
             </button>
 
             <button
               onClick={handleHome}
-              className="py-3 px-4 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-slate-950 font-black rounded-xl text-sm flex items-center justify-center gap-1.5 shadow-lg transition-all"
+              className="py-3 px-4 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-slate-950 font-black rounded-xl text-sm flex items-center justify-center gap-1.5 shadow-lg transition-all cursor-pointer"
             >
               Arena Home
               <ArrowRight className="w-4 h-4" />

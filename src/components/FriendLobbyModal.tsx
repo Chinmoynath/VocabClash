@@ -52,6 +52,12 @@ import {
   sendPasswordReset,
   getFriendlyAuthErrorMessage 
 } from '../services/firebaseService';
+import { 
+  EXAM_FAMILY_PILLS, 
+  EXAM_FAMILY_SUB_TAGS, 
+  normalizeFilterToFamily, 
+  getExamFilterDisplayName 
+} from '../utils/examFamilyUtils';
 
 interface FriendLobbyModalProps {
   player: PlayerProfile;
@@ -134,16 +140,8 @@ export const FriendLobbyModal: React.FC<FriendLobbyModalProps> = ({
     { id: 'idioms', label: 'Idioms & Phrases', icon: '📜' },
   ];
 
-  // Exams config
-  const examsList: { id: ExamType; label: string }[] = [
-    { id: 'ALL', label: 'All Govt Exams' },
-    { id: 'SSC_CGL', label: 'SSC CGL Tier 1/2' },
-    { id: 'SSC_CHSL', label: 'SSC CHSL 10+2' },
-    { id: 'SSC_CPO', label: 'SSC CPO SI' },
-    { id: 'SSC_MTS', label: 'SSC MTS' },
-    { id: 'RRB_NTPC', label: 'RRB NTPC' },
-    { id: 'CDS_NDA', label: 'CDS / NDA' },
-  ];
+  // Exams config - 4 primary families
+  const examsList = EXAM_FAMILY_PILLS;
 
   // Clean up listener on unmount
   useEffect(() => {
@@ -983,28 +981,61 @@ export const FriendLobbyModal: React.FC<FriendLobbyModalProps> = ({
               <div className="space-y-3.5">
                 
                 {/* Exam Selection */}
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-                    <Filter className="w-3.5 h-3.5 text-sky-400" /> Target Exam:
-                  </label>
-                  <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar text-xs">
-                    {examsList.map(item => (
-                      <button
-                        key={item.id}
-                        onClick={() => {
-                          soundManager.playTap();
-                          setExam(item.id);
-                        }}
-                        className={`px-3 py-1.5 rounded-xl whitespace-nowrap text-xs font-medium border transition-all cursor-pointer ${
-                          exam === item.id
-                            ? 'bg-sky-600 text-white font-bold border-sky-400 shadow-sm'
-                            : 'bg-slate-800/80 text-slate-300 border-slate-700 hover:bg-slate-750'
-                        }`}
-                      >
-                        {item.label}
-                      </button>
-                    ))}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                      <Filter className="w-3.5 h-3.5 text-cyan-400" /> Target Govt Exam:
+                    </label>
+                    <span className="text-[11px] text-slate-400 font-mono">
+                      {normalizeFilterToFamily(exam) === 'all'
+                        ? 'All Board PYQs'
+                        : normalizeFilterToFamily(exam) === 'ssc'
+                        ? 'All SSC Exams'
+                        : normalizeFilterToFamily(exam) === 'banking'
+                        ? 'All Banking Exams'
+                        : 'All Defence Exams'}
+                    </span>
                   </div>
+                  
+                  {/* Slidable Family Row (No 2 rows) */}
+                  <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar text-xs">
+                    {examsList.map(item => {
+                      const isSelected = (item.id === 'ALL' && normalizeFilterToFamily(exam) === 'all') || (item.family && normalizeFilterToFamily(exam) === item.family);
+                      return (
+                        <button
+                          key={item.id}
+                          onClick={() => {
+                            soundManager.playTap();
+                            setExam(item.id);
+                          }}
+                          className={`px-3 py-1.5 rounded-xl text-center text-xs font-bold border transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                            isSelected
+                              ? 'bg-cyan-500 text-slate-950 font-black border-cyan-300 shadow-md shadow-cyan-950/60'
+                              : 'bg-slate-900/90 text-slate-300 border-slate-750 hover:bg-slate-800 hover:text-white'
+                          }`}
+                        >
+                          {item.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Subtle non-touchable preview tags (Compact, no vertical bloat) */}
+                  {normalizeFilterToFamily(exam) !== 'all' && EXAM_FAMILY_SUB_TAGS[normalizeFilterToFamily(exam)]?.length > 0 && (
+                    <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pt-0.5 text-slate-400 select-none pointer-events-none">
+                      <span className="text-slate-500 font-semibold shrink-0 text-[10px] uppercase tracking-wider">Includes:</span>
+                      <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+                        {EXAM_FAMILY_SUB_TAGS[normalizeFilterToFamily(exam)].map((tag, idx) => (
+                          <span
+                            key={idx}
+                            className="px-2 py-0.5 rounded-md bg-slate-950/70 border border-slate-800 text-slate-300 font-medium text-[10px] whitespace-nowrap shrink-0"
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Category Selection */}

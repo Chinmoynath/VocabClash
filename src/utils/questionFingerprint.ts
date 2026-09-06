@@ -213,41 +213,23 @@ export function formatAppearanceTag(app: ExamAppearance): string {
   return formatExamTag(app.exam, app.year, app.tier);
 }
 
-/**
- * Helper to match an exam name string against an ExamType filter
- */
-function matchSingleExamName(examName: string, filter: ExamType | string): boolean {
-  if (filter === 'ALL' || !filter) return true;
+import { 
+  matchesExamFamilyFilter, 
+  normalizeExamFamily, 
+  normalizeFilterToFamily, 
+  CanonicalExamFamily 
+} from './examFamilyUtils';
 
-  const target = examName.toLowerCase();
-  
-  switch (filter) {
-    case 'SSC_CGL':
-      return target.includes('cgl') || target.includes('combined graduate level');
-    case 'SSC_CHSL':
-      return target.includes('chsl') || target.includes('combined higher secondary') || target.includes('10+2');
-    case 'SSC_CPO':
-      return target.includes('cpo') || target.includes('central police') || target.includes('sub-inspector') || target.includes('si');
-    case 'SSC_MTS':
-      return target.includes('mts') || target.includes('multi tasking') || target.includes('multitasking') || target.includes('havaldar');
-    case 'RRB_NTPC':
-      return target.includes('ntpc') || target.includes('rrb ntpc');
-    case 'RRB_GROUP_D':
-      return target.includes('group d') || target.includes('group-d') || target.includes('rrc');
-    case 'BANK_PO':
-      return target.includes('ibps') || target.includes('sbi') || target.includes('bank') || target.includes('po') || target.includes('clerk') || target.includes('rbi');
-    case 'CDS_NDA':
-      return target.includes('cds') || target.includes('nda') || target.includes('afcat') || target.includes('capf') || target.includes('defence');
-    default: {
-      const filterLower = String(filter).toLowerCase();
-      return target.includes(filterLower) || filterLower.includes(target);
-    }
-  }
-}
+export { 
+  matchesExamFamilyFilter, 
+  normalizeExamFamily, 
+  normalizeFilterToFamily, 
+};
+export type { CanonicalExamFamily };
 
 /**
  * Checks if a question matches a selected exam filter.
- * Inspects all appearances, the top-level exam field, and exam history tags.
+ * Uses centralized exam family normalization.
  */
 export function matchesExamFilter(
   question: {
@@ -258,26 +240,6 @@ export function matchesExamFilter(
   },
   filter: ExamType | string
 ): boolean {
-  if (filter === 'ALL' || !filter) return true;
-
-  // 1. Check appearances array (canonical source)
-  if (Array.isArray(question.appearances) && question.appearances.length > 0) {
-    if (question.appearances.some(app => app.exam && matchSingleExamName(app.exam, filter))) {
-      return true;
-    }
-  }
-
-  // 2. Check top-level exam field
-  if (question.exam && matchSingleExamName(question.exam, filter)) {
-    return true;
-  }
-
-  // 3. Check legacy examHistory tags
-  if (Array.isArray(question.examHistory) && question.examHistory.length > 0) {
-    if (question.examHistory.some(tag => matchSingleExamName(tag, filter))) {
-      return true;
-    }
-  }
-
-  return false;
+  return matchesExamFamilyFilter(question, filter);
 }
+

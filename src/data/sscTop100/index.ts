@@ -3,6 +3,9 @@ import { getRankedSscTop100Synonyms } from './top100Synonyms';
 import { getRankedSscTop100Antonyms } from './top100Antonyms';
 import { getRankedSscTop100OWS } from './top100Ows';
 import { getRankedSscTop100Idioms } from './top100Idioms';
+import { balanceAndRandomizeQuestions } from './randomizer';
+
+export { balanceAndRandomizeQuestions } from './randomizer';
 
 export type SscTop100Category = 'synonyms' | 'antonyms' | 'ows' | 'idioms';
 
@@ -66,18 +69,24 @@ export const SSC_TOP_100_CATEGORIES: SscTop100CategoryInfo[] = [
 ];
 
 export function getAuthoritativeSscTop100Questions(cat: SscTop100Category): Question[] {
+  let list: Question[] = [];
   switch (cat) {
     case 'synonyms':
-      return getRankedSscTop100Synonyms();
+      list = getRankedSscTop100Synonyms();
+      break;
     case 'antonyms':
-      return getRankedSscTop100Antonyms();
+      list = getRankedSscTop100Antonyms();
+      break;
     case 'ows':
-      return getRankedSscTop100OWS();
+      list = getRankedSscTop100OWS();
+      break;
     case 'idioms':
-      return getRankedSscTop100Idioms();
+      list = getRankedSscTop100Idioms();
+      break;
     default:
       return [];
   }
+  return balanceAndRandomizeQuestions(list);
 }
 
 export const getTop100Questions = getAuthoritativeSscTop100Questions;

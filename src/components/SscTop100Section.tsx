@@ -26,7 +26,7 @@ import { soundManager } from '../utils/audio';
 
 interface SscTop100SectionProps {
   userId?: string;
-  onStartDrill: (category: SscTop100Category, resumeIndex?: number) => void;
+  onStartDrill: (category: SscTop100Category, resumeIndex?: number, initialCorrect?: number) => void;
   isAdmin?: boolean;
 }
 
@@ -48,7 +48,7 @@ export const SscTop100Section: React.FC<SscTop100SectionProps> = ({
   const [isRebuilding, setIsRebuilding] = useState(false);
   const [rebuildMessage, setRebuildMessage] = useState<string | null>(null);
 
-  // Load user progress for all 4 categories
+  // Load user progress for all 4 categories with midnight rollover auto-refresh
   useEffect(() => {
     let isMounted = true;
 
@@ -62,7 +62,12 @@ export const SscTop100Section: React.FC<SscTop100SectionProps> = ({
 
         const newMap = { ...progressMap };
         results.forEach(prog => {
-          newMap[prog.category] = prog;
+          newMap[prog.category] = {
+            ...prog,
+            solvedCount: Math.min(100, prog.solvedCount),
+            correctCount: Math.min(100, prog.correctCount),
+            currentQuestionIndex: Math.min(100, prog.currentQuestionIndex),
+          };
         });
         setProgressMap(newMap);
       } catch (err) {
@@ -74,16 +79,29 @@ export const SscTop100Section: React.FC<SscTop100SectionProps> = ({
 
     loadProgress();
 
+    // Check periodically and on window focus so midnight rollover immediately reflects
+    const interval = setInterval(() => {
+      loadProgress();
+    }, 60000);
+
+    const handleFocus = () => {
+      loadProgress();
+    };
+    window.addEventListener('focus', handleFocus);
+
     return () => {
       isMounted = false;
+      clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
     };
   }, [userId]);
 
   const handleStartCategory = (category: SscTop100Category) => {
     soundManager.playTap();
     const currentProgress = progressMap[category];
-    const resumeIndex = currentProgress.status === 'completed' ? 0 : currentProgress.currentQuestionIndex;
-    onStartDrill(category, resumeIndex);
+    const resumeIndex = currentProgress.status === 'completed' ? 0 : Math.min(99, currentProgress.currentQuestionIndex);
+    const initialCorrect = currentProgress.status === 'completed' ? 0 : Math.min(100, currentProgress.correctCount);
+    onStartDrill(category, resumeIndex, initialCorrect);
   };
 
   const handleResetCategory = async (e: React.MouseEvent, category: SscTop100Category) => {
@@ -186,8 +204,12 @@ export const SscTop100Section: React.FC<SscTop100SectionProps> = ({
                 <div className="text-[9px] sm:text-[10px] uppercase font-bold text-slate-400 tracking-wider">
                   Vault Mastered
                 </div>
-                <div className="text-sm sm:text-base font-black text-amber-300 font-mono">
+                <div className="text-sm sm:text-base font-black text-amber-300 font-mono leading-tight">
                   {totalSolvedAll} <span className="text-[10px] sm:text-xs font-semibold text-slate-400">/ 400</span>
+                </div>
+                <div className="text-[9px] text-amber-400/90 font-medium flex items-center justify-end gap-1">
+                  <RotateCcw className="w-2.5 h-2.5 text-amber-400 shrink-0" />
+                  <span>Resets daily at midnight</span>
                 </div>
               </div>
               <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-amber-500/15 border border-amber-400/30 flex items-center justify-center text-amber-400">
