@@ -6,6 +6,7 @@ import { getPersistentSeenWords } from '../utils/questionHistoryManager';
 import { getOptionBreakdown, OptionDetail } from '../utils/optionExplanations';
 import { soundManager } from '../utils/audio';
 import { recordQuestionAttempt } from '../utils/userStatsManager';
+import { AttemptSource } from '../services/attemptTrackingService';
 import { 
   Target, 
   Check, 
@@ -48,11 +49,17 @@ interface PracticeModeProps {
   onOpenStats?: () => void;
   onBatchComplete?: () => void;
   onSolveQuestion?: () => void;
+  onRecordMistake?: (question: Question) => void;
   bookmarkedIds: string[];
   isPremium?: boolean;
-  // Targeted coaching drill session support
+  // Targeted coaching drill session support & SSC Top 100
   customTargetQueue?: Question[] | null;
   customSessionTitle?: string | null;
+  customInitialIndex?: number;
+  customBadge?: string | null;
+  attemptSource?: AttemptSource;
+  onCustomQueueQuestionAnswered?: (q: Question, isCorrect: boolean, indexInQueue: number) => void;
+  onCustomDrillCompleted?: (results: { isCorrect: boolean }[]) => void;
   onExitCustomQueue?: () => void;
 }
 
@@ -103,17 +110,30 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
   onOpenStats,
   onBatchComplete,
   onSolveQuestion,
+  onRecordMistake,
   bookmarkedIds,
   isPremium = false,
   customTargetQueue = null,
   customSessionTitle = null,
+  customInitialIndex = 0,
+  customBadge = null,
+  attemptSource = 'practice',
+  onCustomQueueQuestionAnswered,
+  onCustomDrillCompleted,
   onExitCustomQueue,
 }) => {
   const [category, setCategory] = useState<QuestionCategory | 'mixed'>('mixed');
   const [exam, setExam] = useState<ExamType>('ALL');
 
   // Custom targeted coaching drill state
-  const [customQueueIndex, setCustomQueueIndex] = useState<number>(0);
+  const validInitialIndex = useMemo(() => {
+    if (customTargetQueue && customTargetQueue.length > 0 && typeof customInitialIndex === 'number') {
+      return Math.min(Math.max(0, customInitialIndex), customTargetQueue.length - 1);
+    }
+    return 0;
+  }, [customTargetQueue, customInitialIndex]);
+
+  const [customQueueIndex, setCustomQueueIndex] = useState<number>(validInitialIndex);
   const [customQueueResults, setCustomQueueResults] = useState<{ isCorrect: boolean }[]>([]);
   const [customDrillCompleted, setCustomDrillCompleted] = useState<boolean>(false);
   
@@ -125,7 +145,8 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
   const [recentWordsHistory, setRecentWordsHistory] = useState<string[]>(() => getPersistentSeenWords().slice(-100));
   const [currentQ, setCurrentQ] = useState<Question>(() => {
     if (customTargetQueue && customTargetQueue.length > 0) {
-      return customTargetQueue[0];
+      const idx = Math.min(Math.max(0, customInitialIndex || 0), customTargetQueue.length - 1);
+      return customTargetQueue[idx];
     }
     const initHistory = getPersistentSeenWords().slice(-100);
     return getNextDrillQuestion('mixed', 'ALL', initHistory);
@@ -133,14 +154,15 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
 
   useEffect(() => {
     if (customTargetQueue && customTargetQueue.length > 0) {
-      setCustomQueueIndex(0);
+      const startIdx = Math.min(Math.max(0, customInitialIndex || 0), customTargetQueue.length - 1);
+      setCustomQueueIndex(startIdx);
       setCustomQueueResults([]);
       setCustomDrillCompleted(false);
-      setCurrentQ(customTargetQueue[0]);
+      setCurrentQ(customTargetQueue[startIdx]);
       setSelectedOption(null);
       setIsAnswered(false);
     }
-  }, [customTargetQueue]);
+  }, [customTargetQueue, customInitialIndex]);
 
   const questionStartTimeRef = useRef<number>(Date.now());
   const isAdvancingRef = useRef<boolean>(false);
@@ -285,6 +307,9 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     // Track results for custom coaching session
     if (customTargetQueue && customTargetQueue.length > 0) {
       setCustomQueueResults(prev => [...prev, { isCorrect }]);
+      if (onCustomQueueQuestionAnswered) {
+        onCustomQueueQuestionAnswered(currentQ, isCorrect, customQueueIndex);
+      }
     }
 
     // Record spaced repetition attempt in adaptive scheduler
@@ -305,7 +330,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
       pyqPoints: isCorrect ? 10 : -2,
       questionId: currentQ.id,
       conceptKey: currentQ.wordOrPhrase || currentQ.memoryKey,
-      source: 'practice',
+      source: (attemptSource || 'practice') as AttemptSource,
     });
 
     const nextStreak = isCorrect ? streak + 1 : 0;
@@ -317,6 +342,9 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
       soundManager.playWrong();
       setStreak(0);
       onUpdatePyqScore(-2);
+      if (onRecordMistake) {
+        onRecordMistake(currentQ);
+      }
     }
 
     saveDailyProgress({
@@ -343,6 +371,9 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
       const nextIdx = customQueueIndex + 1;
       if (nextIdx >= customTargetQueue.length) {
         setCustomDrillCompleted(true);
+        if (onCustomDrillCompleted) {
+          onCustomDrillCompleted(customQueueResults);
+        }
         setTimeout(() => {
           isAdvancingRef.current = false;
         }, 300);
@@ -494,17 +525,33 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
         </div>
       )}
 
-      {/* Custom Targeted Coaching Drill Banner */}
+      {/* Custom Targeted Coaching / SSC Top 100 Drill Banner */}
       {customTargetQueue && customTargetQueue.length > 0 && !customDrillCompleted && (
-        <div className="bg-gradient-to-r from-purple-950/80 via-slate-900 to-indigo-950/80 border border-purple-500/40 p-3 sm:p-4 rounded-2xl flex items-center justify-between shadow-lg shadow-purple-950/30">
+        <div className={`p-3 sm:p-4 rounded-2xl flex items-center justify-between shadow-lg ${
+          customBadge?.includes('SSC') || customBadge?.includes('Top 100')
+            ? 'bg-gradient-to-r from-amber-950/80 via-slate-900 to-orange-950/80 border border-amber-500/40 shadow-amber-950/30'
+            : 'bg-gradient-to-r from-purple-950/80 via-slate-900 to-indigo-950/80 border border-purple-500/40 shadow-purple-950/30'
+        }`}>
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-purple-500/20 text-purple-400 border border-purple-500/30 shrink-0">
-              <Sparkles className="w-5 h-5" />
+            <div className={`p-2.5 rounded-xl border shrink-0 ${
+              customBadge?.includes('SSC') || customBadge?.includes('Top 100')
+                ? 'bg-amber-500/20 text-amber-400 border-amber-500/40'
+                : 'bg-purple-500/20 text-purple-400 border-purple-500/30'
+            }`}>
+              {customBadge?.includes('SSC') || customBadge?.includes('Top 100') ? (
+                <Flame className="w-5 h-5 text-amber-400 fill-amber-400 animate-pulse" />
+              ) : (
+                <Sparkles className="w-5 h-5" />
+              )}
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 text-[10px] font-bold tracking-wide uppercase">
-                  AI Vocab Mentor Drill
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wide uppercase border ${
+                  customBadge?.includes('SSC') || customBadge?.includes('Top 100')
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                    : 'bg-purple-500/20 text-purple-300 border-purple-500/30'
+                }`}>
+                  {customBadge || 'AI Vocab Mentor Drill'}
                 </span>
                 <span className="text-xs font-semibold text-slate-400 hidden sm:inline">
                   Question {customQueueIndex + 1} of {customTargetQueue.length}
@@ -516,7 +563,9 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-purple-300 sm:hidden">
+            <span className={`text-xs font-bold sm:hidden ${
+              customBadge?.includes('SSC') || customBadge?.includes('Top 100') ? 'text-amber-300' : 'text-purple-300'
+            }`}>
               {customQueueIndex + 1}/{customTargetQueue.length}
             </span>
             {onExitCustomQueue && (

@@ -8,7 +8,8 @@ export type AttemptSource =
   | 'battle' 
   | 'daily_challenge' 
   | 'mistake_review' 
-  | 'historical_summary';
+  | 'historical_summary'
+  | 'ssc_top100';
 
 export interface NormalizedAttempt {
   attemptId: string;

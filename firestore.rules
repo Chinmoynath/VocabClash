@@ -73,5 +73,17 @@ service cloud.firestore {
     match /pyq_import_conflicts/{conflictId} {
       allow read, write: if isPyqAdmin();
     }
+
+    // SSC Top 100 Pools: Public read for aspirants, Admin-only write
+    match /ssc_top100/{category} {
+      allow read: if true;
+      allow write: if isPyqAdmin();
+    }
+
+    // SSC Vocab Frequency Aggregates: Public read, Admin-only write
+    match /ssc_vocab_frequency/{conceptKey} {
+      allow read: if true;
+      allow write: if isPyqAdmin();
+    }
   }
 }

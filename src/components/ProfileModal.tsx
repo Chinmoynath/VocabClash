@@ -103,7 +103,6 @@ interface ProfileModalProps {
   onOpenStreak: () => void;
   onOpenStats?: () => void;
   onOpenTour?: () => void;
-  onNavigateToMistakes?: () => void;
   onUserChange?: (user: FirebaseUser | null) => void;
   onManualSync?: () => void;
   onSignOut?: () => Promise<void>;
@@ -122,7 +121,6 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   onOpenStreak,
   onOpenStats,
   onOpenTour,
-  onNavigateToMistakes,
   onUserChange,
   onManualSync,
   onSignOut,

@@ -63,6 +63,9 @@ import { LeaderboardView } from './components/LeaderboardView';
 import { AiTutorModal } from './components/AiTutorModal';
 import { AiTutorTab } from './components/AiTutorTab';
 import { ProfileModal } from './components/ProfileModal';
+import { SscTop100CompletionModal } from './components/SscTop100CompletionModal';
+import { SscTop100Category, getTop100Questions, SSC_TOP_100_META } from './data/sscTop100';
+import { recordSscTop100Answer, markSscTop100CategoryCompleted } from './services/sscTop100Service';
 import { PremiumModal } from './components/PremiumModal';
 import { InterstitialAdModal } from './components/InterstitialAdModal';
 import { StreakModal } from './components/StreakModal';
@@ -254,9 +257,21 @@ export default function App() {
   const [selectedExam, setSelectedExam] = useState<ExamType>('SSC_CGL');
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
 
-  // Targeted Coaching Drill Queue (from AI Vocab Mentor)
+  // Targeted Coaching Drill Queue (from AI Vocab Mentor & SSC Top 100)
   const [practiceCustomQueue, setPracticeCustomQueue] = useState<Question[] | null>(null);
   const [practiceModeBannerTitle, setPracticeModeBannerTitle] = useState<string | null>(null);
+
+  // SSC Top 100 Drill State
+  const [activeSscTop100Category, setActiveSscTop100Category] = useState<SscTop100Category | null>(null);
+  const [sscTop100InitialIndex, setSscTop100InitialIndex] = useState<number>(0);
+  const [showSscTop100CompletionModal, setShowSscTop100CompletionModal] = useState<boolean>(false);
+  const [sscTop100SummaryData, setSscTop100SummaryData] = useState<{
+    category: SscTop100Category;
+    score: number;
+    accuracy: number;
+    mistakeCount: number;
+    totalSolved: number;
+  } | null>(null);
 
   // Matchmaking & Game state
   const [isMatchmaking, setIsMatchmaking] = useState<boolean>(false);
@@ -910,6 +925,16 @@ export default function App() {
     setShowAiModal(true);
   };
 
+  const handleStartSscTop100Drill = (cat: SscTop100Category, resumeIndex = 0) => {
+    soundManager.playTap();
+    const questions = getTop100Questions(cat);
+    setActiveSscTop100Category(cat);
+    setSscTop100InitialIndex(resumeIndex);
+    setPracticeCustomQueue(questions);
+    setPracticeModeBannerTitle(`SSC TOP 100 • ${SSC_TOP_100_META[cat].title}`);
+    setCurrentTab('practice');
+  };
+
   const handleSendEmote = (emoji: string) => {
     if (!matchState) return;
     setMatchState(prev => {
@@ -1233,6 +1258,10 @@ export default function App() {
                 selectedCategory={selectedCategory}
                 selectedExam={selectedExam}
                 currentUser={currentUser}
+                isAdmin={Boolean(
+                  currentUser?.email === 'Nathchinmoy777@gmail.com' ||
+                  (currentUser?.email && currentUser.email.toLowerCase().includes('admin'))
+                )}
                 onSelectCategory={setSelectedCategory}
                 onSelectExam={setSelectedExam}
                 onStartMatchmaking={handleStartMatchmaking}
@@ -1248,6 +1277,7 @@ export default function App() {
                 onNavigateTab={setCurrentTab}
                 onRewardLP={handleRewardLP}
                 onTriggerTestAd={handleTriggerTestAd}
+                onStartSscTop100Drill={handleStartSscTop100Drill}
               />
             )}
 
@@ -1263,14 +1293,53 @@ export default function App() {
                 }}
                 onBatchComplete={triggerAdIfDue}
                 onSolveQuestion={handleRecordQuestionSolved}
+                onRecordMistake={handleRecordMistake}
                 bookmarkedIds={bookmarkedIds}
                 isPremium={subscription.isPremium}
                 customTargetQueue={practiceCustomQueue}
                 customSessionTitle={practiceModeBannerTitle}
+                customInitialIndex={sscTop100InitialIndex}
+                customBadge={activeSscTop100Category ? `SSC TOP 100 • ${SSC_TOP_100_META[activeSscTop100Category].title}` : null}
+                attemptSource={activeSscTop100Category ? 'ssc_top100' : 'practice'}
+                onCustomQueueQuestionAnswered={(q, isCorrect, index) => {
+                  if (activeSscTop100Category) {
+                    recordSscTop100Answer(
+                      currentUser?.uid || player.id,
+                      activeSscTop100Category,
+                      q.id,
+                      isCorrect,
+                      index
+                    );
+                  }
+                }}
+                onCustomDrillCompleted={(results) => {
+                  if (activeSscTop100Category) {
+                    const cat = activeSscTop100Category;
+                    const total = results.length;
+                    const correctCount = results.filter(r => r.isCorrect).length;
+                    const accuracy = total > 0 ? Math.round((correctCount / total) * 100) : 0;
+                    const score = (correctCount * 10) - ((total - correctCount) * 2);
+                    const mistakeCount = total - correctCount;
+
+                    markSscTop100CategoryCompleted(currentUser?.uid || player.id, cat);
+
+                    setSscTop100SummaryData({
+                      category: cat,
+                      score,
+                      accuracy,
+                      mistakeCount,
+                      totalSolved: total,
+                    });
+                    setShowSscTop100CompletionModal(true);
+                  }
+                }}
                 onExitCustomQueue={() => {
                   setPracticeCustomQueue(null);
                   setPracticeModeBannerTitle(null);
-                  setCurrentTab('ai_coach');
+                  const wasTop100 = activeSscTop100Category !== null;
+                  setActiveSscTop100Category(null);
+                  setSscTop100InitialIndex(0);
+                  setCurrentTab(wasTop100 ? 'arena' : 'ai_coach');
                 }}
               />
             )}
@@ -1427,13 +1496,41 @@ export default function App() {
             setShowProfileModal(false);
             setShowTourModal(true);
           }}
-          onNavigateToMistakes={() => {
-            setShowProfileModal(false);
-            setCurrentTab('mistakes');
-          }}
           onUserChange={user => setCurrentUser(user)}
           onManualSync={handleManualSync}
           onSignOut={handleSignOutUser}
+        />
+      )}
+
+      {/* 🔥 SSC TOP 100 100-Question Completion Modal */}
+      {showSscTop100CompletionModal && sscTop100SummaryData && (
+        <SscTop100CompletionModal
+          category={sscTop100SummaryData.category}
+          score={sscTop100SummaryData.score}
+          accuracy={sscTop100SummaryData.accuracy}
+          mistakeCount={sscTop100SummaryData.mistakeCount}
+          totalSolved={sscTop100SummaryData.totalSolved}
+          onClose={() => setShowSscTop100CompletionModal(false)}
+          onReviewMistakes={() => {
+            setShowSscTop100CompletionModal(false);
+            setPracticeCustomQueue(null);
+            setPracticeModeBannerTitle(null);
+            setActiveSscTop100Category(null);
+            setSscTop100InitialIndex(0);
+            setCurrentTab('mistakes');
+          }}
+          onReturnToArena={() => {
+            setShowSscTop100CompletionModal(false);
+            setPracticeCustomQueue(null);
+            setPracticeModeBannerTitle(null);
+            setActiveSscTop100Category(null);
+            setSscTop100InitialIndex(0);
+            setCurrentTab('arena');
+          }}
+          onRestartCategory={() => {
+            setShowSscTop100CompletionModal(false);
+            handleStartSscTop100Drill(sscTop100SummaryData.category, 0);
+          }}
         />
       )}
 

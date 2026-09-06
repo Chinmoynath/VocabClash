@@ -177,6 +177,48 @@
         "updatedAt": { "type": "number", "description": "Timestamp cached" }
       },
       "required": ["word", "meaning", "mnemonicHook", "rootEtymology"]
+    },
+    "SscTop100CategoryDoc": {
+      "title": "SscTop100CategoryDoc",
+      "description": "Authoritative Top 100 most asked SSC questions pool for a category",
+      "type": "object",
+      "properties": {
+        "category": { "type": "string", "description": "synonyms, antonyms, ows, or idioms" },
+        "title": { "type": "string", "description": "Category title" },
+        "totalRanked": { "type": "number", "description": "Number of questions ranked (typically 100)" },
+        "questionIds": { "type": "array", "description": "Ordered array of top 100 question IDs" },
+        "questions": { "type": "array", "description": "Array of complete Question objects ranked 1 to 100" },
+        "lastRebuiltAt": { "type": "number", "description": "Timestamp of last ranking calculation" }
+      },
+      "required": ["category", "totalRanked", "questionIds", "lastRebuiltAt"]
+    },
+    "SscVocabFrequencyDoc": {
+      "title": "SscVocabFrequencyDoc",
+      "description": "Authoritative SSC exam frequency count for an individual vocabulary concept",
+      "type": "object",
+      "properties": {
+        "conceptKey": { "type": "string", "description": "Normalized concept word or phrase" },
+        "category": { "type": "string", "description": "Vocabulary category" },
+        "sscRepeatCount": { "type": "number", "description": "Number of appearances across SSC exams" },
+        "canonicalQuestionId": { "type": "string", "description": "Primary question ID" },
+        "lastUpdated": { "type": "number", "description": "Timestamp of last update" }
+      },
+      "required": ["conceptKey", "category", "sscRepeatCount", "lastUpdated"]
+    },
+    "SscTop100UserProgressDoc": {
+      "title": "SscTop100UserProgressDoc",
+      "description": "User progress for an SSC Top 100 category drill",
+      "type": "object",
+      "properties": {
+        "category": { "type": "string", "description": "synonyms, antonyms, ows, or idioms" },
+        "completedQuestionIds": { "type": "array", "description": "List of solved question IDs" },
+        "solvedCount": { "type": "number", "description": "Total solved count" },
+        "correctCount": { "type": "number", "description": "Total correct count" },
+        "currentQuestionIndex": { "type": "number", "description": "Current active question index" },
+        "status": { "type": "string", "description": "not_started, in_progress, or completed" },
+        "lastAttemptAt": { "type": "number", "description": "Timestamp of last attempt" }
+      },
+      "required": ["category", "completedQuestionIds", "solvedCount", "lastAttemptAt"]
     }
   },
   "firestore": {
@@ -219,6 +261,18 @@
     "/pyq_import_batches/{batchId}": {
       "schema": "PyqImportBatch",
       "description": "Admin batch ingestion logs and tracking"
+    },
+    "/ssc_top100/{category}": {
+      "schema": "SscTop100CategoryDoc",
+      "description": "Ranked Top 100 question pools for SSC categories"
+    },
+    "/ssc_vocab_frequency/{conceptKey}": {
+      "schema": "SscVocabFrequencyDoc",
+      "description": "SSC exam frequency records for unique vocabulary concepts"
+    },
+    "/users/{userId}/ssc_top100_progress/{category}": {
+      "schema": "SscTop100UserProgressDoc",
+      "description": "User progress on SSC Top 100 drills"
     }
   }
 }

@@ -24,6 +24,8 @@ import { User as FirebaseUser } from 'firebase/auth';
 import { AdSenseUnit } from './AdSenseUnit';
 import { ADSENSE_BANNER_SLOT } from '../services/adSenseService';
 import { DailyTargetCard } from './DailyTargetCard';
+import { SscTop100Section } from './SscTop100Section';
+import { SscTop100Category } from '../data/sscTop100';
 
 interface ArenaHomeProps {
   player: PlayerProfile;
@@ -32,6 +34,7 @@ interface ArenaHomeProps {
   selectedCategory: QuestionCategory | 'mixed';
   selectedExam: ExamType;
   currentUser?: FirebaseUser | null;
+  isAdmin?: boolean;
   onSelectCategory: (cat: QuestionCategory | 'mixed') => void;
   onSelectExam: (exam: ExamType) => void;
   onStartMatchmaking: (mode: '1v1_ranked' | 'quick_duel' | 'daily_challenge') => void;
@@ -44,6 +47,7 @@ interface ArenaHomeProps {
   onNavigateTab?: (tab: 'arena' | 'practice' | 'leaderboard' | 'mistakes' | 'ai_coach') => void;
   onRewardLP: (lpDelta: number, reason: string) => void;
   onTriggerTestAd: () => void;
+  onStartSscTop100Drill?: (category: SscTop100Category, resumeIndex?: number) => void;
 }
 
 export const ArenaHome: React.FC<ArenaHomeProps> = ({
@@ -53,6 +57,7 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
   selectedCategory,
   selectedExam,
   currentUser,
+  isAdmin = false,
   onSelectCategory,
   onSelectExam,
   onStartMatchmaking,
@@ -65,6 +70,7 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
   onNavigateTab,
   onRewardLP,
   onTriggerTestAd,
+  onStartSscTop100Drill,
 }) => {
   const [secondsToAd, setSecondsToAd] = useState<number>(() => getSecondsUntilNextAd(subscription.isPremium));
 
@@ -125,7 +131,7 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6 items-start">
         
         {/* LEFT COLUMN: Duel Actions, Exam Selector, Categories, Quick Modes (7 Cols on Desktop) */}
-        <div className="lg:col-span-7 xl:col-span-7 space-y-4">
+        <div className="order-1 lg:col-span-7 xl:col-span-7 space-y-4">
           
           {/* Target Exam Filter Pills */}
           <div className="space-y-1.5 bg-slate-900/60 border border-slate-800/80 rounded-2xl p-3 sm:p-3.5">
@@ -310,7 +316,7 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
         </div>
 
         {/* RIGHT COLUMN: Cadre Rank Card, Daily Target Missions, VIP / Auth (5 Cols on Desktop) */}
-        <div className="lg:col-span-5 xl:col-span-5 space-y-4">
+        <div className="order-3 lg:order-2 lg:col-span-5 xl:col-span-5 space-y-4">
           
           {/* Govt Service Rank & Promotion Progress Card */}
           <div className="bg-gradient-to-br from-slate-800/90 via-slate-800/60 to-slate-900/90 border border-slate-700/80 rounded-2xl p-4 sm:p-5 shadow-xl relative overflow-hidden">
@@ -438,6 +444,17 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
           )}
 
         </div>
+
+        {/* 🔥 SSC TOP 100 Most Repeated Vocabulary Module (Full 12 columns across PC/Desktop, below battle modes on mobile) */}
+        {onStartSscTop100Drill && (
+          <div className="order-2 lg:order-3 col-span-1 lg:col-span-12 xl:col-span-12 w-full">
+            <SscTop100Section
+              userId={currentUser?.uid || player.id}
+              isAdmin={isAdmin}
+              onStartDrill={onStartSscTop100Drill}
+            />
+          </div>
+        )}
 
       </div>
 
