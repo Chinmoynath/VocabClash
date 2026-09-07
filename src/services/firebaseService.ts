@@ -2,6 +2,7 @@ import { initializeApp, getApps } from 'firebase/app';
 import { 
   getAuth, 
   initializeAuth,
+  browserPopupRedirectResolver,
   indexedDBLocalPersistence,
   browserLocalPersistence,
   inMemoryPersistence,
@@ -45,14 +46,20 @@ try {
 // Initialize Firebase App
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
 
-// Standard Firebase Auth instance with multi-layer persistence fallback (IndexedDB -> localStorage -> memory)
+// Standard Firebase Auth instance with browser popup/redirect resolver and multi-tier persistence
 let authInstance: ReturnType<typeof getAuth>;
 try {
-  authInstance = initializeAuth(app, {
-    persistence: [indexedDBLocalPersistence, browserLocalPersistence, inMemoryPersistence],
-  });
-} catch {
+  // getAuth(app) sets up browserPopupRedirectResolver and default persistence automatically in browser
   authInstance = getAuth(app);
+} catch {
+  try {
+    authInstance = initializeAuth(app, {
+      popupRedirectResolver: browserPopupRedirectResolver,
+      persistence: [indexedDBLocalPersistence, browserLocalPersistence, inMemoryPersistence],
+    });
+  } catch {
+    authInstance = getAuth(app);
+  }
 }
 export const auth = authInstance;
 
@@ -258,6 +265,13 @@ export function getFriendlyAuthErrorMessage(error: any): string {
     return 'Browser storage connection was refreshed. Please tap Sign In again or continue with Email.';
   }
 
+  if (
+    code.includes('argument-error') || 
+    message.includes('argument-error')
+  ) {
+    return 'Authentication resolver was refreshed. Please tap Continue with Google again or use Email Sign-In.';
+  }
+
   // Clean raw "Firebase: Error (auth/...)" strings into readable text
   if (rawMsg.includes('Firebase: Error (auth/') || rawMsg.includes('auth/')) {
     const clean = rawMsg
@@ -314,10 +328,10 @@ export async function signInWithGoogle(forceRedirect = false): Promise<FirebaseU
   try {
     const provider = createGoogleProvider();
     if (forceRedirect) {
-      await signInWithRedirect(auth, provider);
+      await signInWithRedirect(auth, provider, browserPopupRedirectResolver);
       return null;
     }
-    const result = await signInWithPopup(auth, provider);
+    const result = await signInWithPopup(auth, provider, browserPopupRedirectResolver);
     try {
       const addInfo = getAdditionalUserInfo(result);
       if (addInfo?.isNewUser) {
@@ -333,7 +347,7 @@ export async function signInWithGoogle(forceRedirect = false): Promise<FirebaseU
       console.warn('Transient IndexedDB closing during popup; retrying Google Sign-in after brief pause...');
       await new Promise(r => setTimeout(r, 400));
       try {
-        const retryResult = await signInWithPopup(auth, createGoogleProvider());
+        const retryResult = await signInWithPopup(auth, createGoogleProvider(), browserPopupRedirectResolver);
         try {
           const addInfo = getAdditionalUserInfo(retryResult);
           if (addInfo?.isNewUser) {
@@ -356,13 +370,13 @@ export async function signInWithGoogle(forceRedirect = false): Promise<FirebaseU
 // Direct Google Sign-In via Full-Page Redirect
 export async function signInWithGoogleRedirect(): Promise<void> {
   const provider = createGoogleProvider();
-  await signInWithRedirect(auth, provider);
+  await signInWithRedirect(auth, provider, browserPopupRedirectResolver);
 }
 
 // Check for pending redirect sign-in result on page load
 export async function checkRedirectAuthResult(): Promise<FirebaseUser | null> {
   try {
-    const res = await getRedirectResult(auth);
+    const res = await getRedirectResult(auth, browserPopupRedirectResolver);
     if (res?.user) {
       try {
         const addInfo = getAdditionalUserInfo(res);
