@@ -13,6 +13,7 @@
         "subscription": { "type": "object", "description": "User subscription plan details" },
         "streak": { "type": "object", "description": "Daily attendance and study streak record" },
         "savedWords": { "type": "array", "description": "Vocabulary mistakes and revision vault" },
+        "practiceFilters": { "type": "object", "description": "Saved PYQ endless drill exam and category filter preferences" },
         "updatedAt": { "type": "number", "description": "Epoch timestamp of last update" }
       },
       "required": ["uid", "updatedAt"]

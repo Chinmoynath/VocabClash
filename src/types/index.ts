@@ -123,6 +123,10 @@ export interface PlayerProfile {
   accuracyRate: number;
   bestCategory: QuestionCategory;
   badges: string[];
+  practiceFilters?: {
+    category: QuestionCategory | 'mixed';
+    exam: ExamType;
+  };
 }
 
 export interface PlayerAnswerRecord {

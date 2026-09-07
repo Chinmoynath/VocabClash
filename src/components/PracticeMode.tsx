@@ -59,6 +59,9 @@ import {
 
 interface PracticeModeProps {
   pyqScore: number;
+  category?: QuestionCategory | 'mixed';
+  exam?: ExamType;
+  onFilterChange?: (category: QuestionCategory | 'mixed', exam: ExamType) => void;
   onUpdatePyqScore: (delta: number) => void;
   onBookmarkQuestion: (question: Question) => void;
   onOpenAiTutor: (question: Question) => void;
@@ -81,6 +84,42 @@ interface PracticeModeProps {
   onReviewMistakes?: () => void;
   onExitCustomQueue?: () => void;
 }
+
+export const STORAGE_KEY_PYQ_FILTER = 'vocabclash_pyq_filter_preferences_v1';
+
+export interface PyqFilterPreferences {
+  category: QuestionCategory | 'mixed';
+  exam: ExamType;
+}
+
+export const getStoredPyqFilterPreferences = (): PyqFilterPreferences => {
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY_PYQ_FILTER);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && (parsed.category || parsed.exam)) {
+          return {
+            category: parsed.category || 'mixed',
+            exam: parsed.exam || 'ALL',
+          };
+        }
+      }
+    } catch { /* ignore */ }
+  }
+  return {
+    category: 'mixed',
+    exam: 'ALL',
+  };
+};
+
+export const saveStoredPyqFilterPreferences = (prefs: PyqFilterPreferences) => {
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem(STORAGE_KEY_PYQ_FILTER, JSON.stringify(prefs));
+    } catch { /* ignore */ }
+  }
+};
 
 const getTodayStrKey = () => {
   const now = new Date();
@@ -123,6 +162,9 @@ const saveDailyProgress = (progress: DailyDrillProgress) => {
 
 export const PracticeMode: React.FC<PracticeModeProps> = ({
   pyqScore,
+  category: categoryProp,
+  exam: examProp,
+  onFilterChange,
   onUpdatePyqScore,
   onBookmarkQuestion,
   onOpenAiTutor,
@@ -144,8 +186,25 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
   onReviewMistakes,
   onExitCustomQueue,
 }) => {
-  const [category, setCategory] = useState<QuestionCategory | 'mixed'>('mixed');
-  const [exam, setExam] = useState<ExamType>('ALL');
+  const [category, setCategory] = useState<QuestionCategory | 'mixed'>(() => {
+    return categoryProp || getStoredPyqFilterPreferences().category;
+  });
+  const [exam, setExam] = useState<ExamType>(() => {
+    return examProp || getStoredPyqFilterPreferences().exam;
+  });
+
+  // Keep state in sync if parent prop changes (e.g. from cloud fetch)
+  useEffect(() => {
+    if (categoryProp && categoryProp !== category) {
+      setCategory(categoryProp);
+    }
+  }, [categoryProp]);
+
+  useEffect(() => {
+    if (examProp && examProp !== exam) {
+      setExam(examProp);
+    }
+  }, [examProp]);
 
   // Custom targeted coaching drill state
   const validInitialIndex = useMemo(() => {
@@ -199,7 +258,9 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
       return customTargetQueue[idx];
     }
     const initHistory = getPersistentSeenWords().slice(-100);
-    return getNextDrillQuestion('mixed', 'ALL', initHistory);
+    const initialCat = categoryProp || getStoredPyqFilterPreferences().category;
+    const initialEx = examProp || getStoredPyqFilterPreferences().exam;
+    return getNextDrillQuestion(initialCat, initialEx, initHistory);
   });
 
   useEffect(() => {
@@ -228,6 +289,9 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
   const [showReportModal, setShowReportModal] = useState<boolean>(false);
   const [showSupportModal, setShowSupportModal] = useState<boolean>(false);
   const [isFilterOpen, setIsFilterOpen] = useState<boolean>(false);
+  const [pendingCategory, setPendingCategory] = useState<QuestionCategory | 'mixed'>(category);
+  const [pendingExam, setPendingExam] = useState<ExamType>(exam);
+  const [isAppliedAnimation, setIsAppliedAnimation] = useState<boolean>(false);
   const filterPopoverRef = useRef<HTMLDivElement | null>(null);
 
   // Click outside to dismiss filter dropdown
@@ -348,6 +412,10 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     soundManager.playTap();
     setCategory(newCat);
     setExam(newExam);
+    saveStoredPyqFilterPreferences({ category: newCat, exam: newExam });
+    if (onFilterChange) {
+      onFilterChange(newCat, newExam);
+    }
     hasFiredPracticeStartRef.current = false;
     batchCorrectCountRef.current = 0;
     const nextQ = getNextDrillQuestion(newCat, newExam, recentWordsHistory);
@@ -915,6 +983,11 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
                   id="practice-filter-button"
                   onClick={() => {
                     soundManager.playTap();
+                    if (!isFilterOpen) {
+                      setPendingCategory(category);
+                      setPendingExam(exam);
+                      setIsAppliedAnimation(false);
+                    }
                     setIsFilterOpen(prev => !prev);
                   }}
                   className={`flex items-center justify-center gap-1.5 p-1.5 sm:px-2.5 sm:py-1 rounded-xl border text-xs font-bold transition-all shadow-sm cursor-pointer select-none active:scale-95 min-w-[34px] min-h-[34px] sm:min-w-0 sm:min-h-0 ${
@@ -953,15 +1026,18 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
                       </div>
                       <button
                         type="button"
-                        onClick={() => setIsFilterOpen(false)}
-                        className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200 text-xs transition-colors cursor-pointer"
+                        onClick={() => {
+                          soundManager.playTap();
+                          setIsFilterOpen(false);
+                        }}
+                        className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200 text-xs transition-colors cursor-pointer active:scale-95"
                         aria-label="Close Filter"
                       >
                         <X className="w-3.5 h-3.5" />
                       </button>
                     </div>
 
-                    {/* Target Exam Family Selector (Replica of Image 1 in sleek compact format) */}
+                    {/* Target Exam Family Selector */}
                     <div className="space-y-1.5">
                       <div className="flex items-center justify-between text-[11px] font-bold text-slate-300">
                         <span className="flex items-center gap-1">
@@ -969,43 +1045,45 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
                           Target Exam:
                         </span>
                         <span className="text-[10px] text-cyan-400 font-mono font-semibold">
-                          {normalizeFilterToFamily(exam) === 'all'
+                          {normalizeFilterToFamily(pendingExam) === 'all'
                             ? 'All Board PYQs'
-                            : `${normalizeFilterToFamily(exam).toUpperCase()} PYQ Bank`}
+                            : `${normalizeFilterToFamily(pendingExam).toUpperCase()} PYQ Bank`}
                         </span>
                       </div>
 
                       <div className="grid grid-cols-2 gap-1.5">
                         {EXAM_FAMILY_PILLS.map(pill => {
-                          const activeFam = normalizeFilterToFamily(exam);
+                          const activeFam = normalizeFilterToFamily(pendingExam);
                           const isSelected = (pill.id === 'ALL' && activeFam === 'all') || (pill.family && activeFam === pill.family);
                           return (
                             <button
                               key={pill.id}
                               type="button"
                               onClick={() => {
-                                handleApplyFilter(category, pill.id);
+                                soundManager.playTap();
+                                setPendingExam(pill.id as ExamType);
                               }}
-                              className={`px-2.5 py-1.5 rounded-xl border text-xs font-bold transition-all text-center cursor-pointer ${
+                              className={`px-2.5 py-1.5 rounded-xl border text-xs font-bold transition-all text-center cursor-pointer flex items-center justify-center gap-1 active:scale-95 ${
                                 isSelected
-                                  ? 'bg-cyan-500 border-cyan-300 text-slate-950 font-black shadow-md shadow-cyan-950/50 ring-1 ring-cyan-300'
+                                  ? 'bg-gradient-to-r from-cyan-500 to-sky-500 border-cyan-300 text-slate-950 font-black shadow-md shadow-cyan-950/50 ring-2 ring-cyan-300/80 scale-[1.02]'
                                   : 'bg-slate-800/90 border-slate-700/80 text-slate-300 hover:bg-slate-750 hover:text-white'
                               }`}
                             >
-                              {pill.label}
+                              {isSelected && <Check className="w-3 h-3 text-slate-950 stroke-[3] shrink-0" />}
+                              <span>{pill.label}</span>
                             </button>
                           );
                         })}
                       </div>
 
                       {/* Included Sub-Exam Preview Tags */}
-                      {normalizeFilterToFamily(exam) !== 'all' && EXAM_FAMILY_SUB_TAGS[normalizeFilterToFamily(exam)]?.length > 0 && (
+                      {normalizeFilterToFamily(pendingExam) !== 'all' && EXAM_FAMILY_SUB_TAGS[normalizeFilterToFamily(pendingExam)]?.length > 0 && (
                         <div className="pt-1.5 bg-slate-950/70 border border-slate-800/90 rounded-xl p-2 space-y-1">
                           <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block">
-                            Included In {normalizeFilterToFamily(exam).toUpperCase()}:
+                            Included In {normalizeFilterToFamily(pendingExam).toUpperCase()}:
                           </span>
                           <div className="flex flex-wrap gap-1">
-                            {EXAM_FAMILY_SUB_TAGS[normalizeFilterToFamily(exam)].map((tag, idx) => (
+                            {EXAM_FAMILY_SUB_TAGS[normalizeFilterToFamily(pendingExam)].map((tag, idx) => (
                               <span
                                 key={idx}
                                 className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800 text-slate-300 font-medium text-[10px]"
@@ -1026,7 +1104,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
                           Vocab Category:
                         </span>
                         <span className="text-[10px] text-sky-400 font-mono">
-                          {category === 'mixed' ? 'All Mixed' : category.toUpperCase()}
+                          {pendingCategory === 'mixed' ? 'All Mixed' : pendingCategory.toUpperCase()}
                         </span>
                       </div>
 
@@ -1037,33 +1115,57 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
                           { id: 'synonyms', label: 'Synonyms' },
                           { id: 'ows', label: 'One Word' },
                           { id: 'idioms', label: 'Idioms' },
-                        ].map(tab => (
-                          <button
-                            key={tab.id}
-                            type="button"
-                            onClick={() => {
-                              handleApplyFilter(tab.id as QuestionCategory | 'mixed', exam);
-                            }}
-                            className={`px-2 py-1 rounded-lg border text-[11px] font-semibold transition-all text-center cursor-pointer ${
-                              category === tab.id
-                                ? 'bg-sky-600 border-sky-400 text-white font-bold shadow-sm'
-                                : 'bg-slate-800/80 border-slate-700/80 text-slate-400 hover:text-slate-200'
-                            }`}
-                          >
-                            {tab.label}
-                          </button>
-                        ))}
+                        ].map(tab => {
+                          const isSelected = pendingCategory === tab.id;
+                          return (
+                            <button
+                              key={tab.id}
+                              type="button"
+                              onClick={() => {
+                                soundManager.playTap();
+                                setPendingCategory(tab.id as QuestionCategory | 'mixed');
+                              }}
+                              className={`px-2 py-1.5 rounded-lg border text-[11px] font-bold transition-all text-center cursor-pointer active:scale-95 flex items-center justify-center gap-1 ${
+                                isSelected
+                                  ? 'bg-sky-500 border-sky-300 text-white font-black shadow-sm ring-2 ring-sky-300/80 scale-[1.02]'
+                                  : 'bg-slate-800/80 border-slate-700/80 text-slate-400 hover:text-slate-200'
+                              }`}
+                            >
+                              {isSelected && <Check className="w-2.5 h-2.5 stroke-[3] text-white shrink-0" />}
+                              <span>{tab.label}</span>
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
 
-                    {/* Footer Close Button */}
-                    <div className="pt-1">
+                    {/* Footer Apply & Close Button with Real Click Feedback */}
+                    <div className="pt-2 border-t border-slate-800/80">
                       <button
                         type="button"
-                        onClick={() => setIsFilterOpen(false)}
-                        className="w-full py-1.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-200 text-xs font-bold border border-slate-700 transition-colors cursor-pointer text-center"
+                        id="apply-filter-button"
+                        onClick={() => {
+                          soundManager.playTap();
+                          setIsAppliedAnimation(true);
+                          handleApplyFilter(pendingCategory, pendingExam);
+                          setTimeout(() => {
+                            setIsFilterOpen(false);
+                            setIsAppliedAnimation(false);
+                          }, 200);
+                        }}
+                        className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-cyan-500 via-sky-500 to-blue-500 hover:from-cyan-400 hover:via-sky-400 hover:to-blue-400 active:scale-[0.97] active:brightness-90 text-slate-950 text-xs sm:text-sm font-black shadow-lg shadow-cyan-500/25 border border-cyan-300/50 transition-all duration-150 cursor-pointer flex items-center justify-center gap-2 select-none"
                       >
-                        Apply & Close
+                        {isAppliedAnimation ? (
+                          <>
+                            <Check className="w-4 h-4 text-slate-950 stroke-[3] animate-bounce" />
+                            <span>Filters Applied!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Check className="w-4 h-4 text-slate-950 stroke-[2.5]" />
+                            <span>Apply & Close</span>
+                          </>
+                        )}
                       </button>
                     </div>
                   </div>
@@ -1132,10 +1234,14 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
             ].map(tab => (
               <button
                 key={tab.id}
-                onClick={() => handleApplyFilter(tab.id as QuestionCategory | 'mixed', exam)}
-                className={`px-3 py-1.5 rounded-xl border font-bold text-xs whitespace-nowrap transition-all flex items-center gap-1 cursor-pointer ${
+                type="button"
+                onClick={() => {
+                  soundManager.playTap();
+                  handleApplyFilter(tab.id as QuestionCategory | 'mixed', exam);
+                }}
+                className={`px-3 py-1.5 rounded-xl border font-bold text-xs whitespace-nowrap transition-all flex items-center gap-1 cursor-pointer active:scale-95 ${
                   category === tab.id
-                    ? 'bg-sky-600 border-sky-400 text-white shadow-md'
+                    ? 'bg-sky-600 border-sky-400 text-white shadow-md ring-1 ring-sky-300/50'
                     : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'
                 }`}
               >

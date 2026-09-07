@@ -481,6 +481,23 @@ export function parseAndValidatePyqJSON(
     }
     const finalOptions = cleanedOptions.slice(0, 4);
 
+    // Reject unsupported statement-numbered options ("1 only", "2 only", "Both 1 and 2", "1,2,3,4", etc.)
+    const isMalformedNumbered = finalOptions.some(opt => {
+      const s = String(opt || '').trim().toLowerCase();
+      return s === '1 only' || s === '2 only' || s === '3 only' || s === '4 only' ||
+             s.startsWith('both 1') || s.startsWith('neither 1') ||
+             /^\d\s*,\s*\d\s*,\s*\d/.test(s);
+    });
+    if (isMalformedNumbered) {
+      skippedItems.push({
+        index: index + 1,
+        rawCategory: rawCategory,
+        question: String(item.question || `Item #${index + 1}`),
+        reason: 'Skipped — unsupported statement/permutation numbered options (e.g. 1 only, Both 1 and 2, 1,2,3,4)',
+      });
+      return;
+    }
+
     const questionPrompt = String(item.question || item.questionText || item.prompt || `Select the correct ${category} option:`).trim();
     const targetWord = extractTargetWordOrPhrase(item, category);
 

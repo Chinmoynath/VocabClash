@@ -93,6 +93,18 @@ export async function fetchPublishedQuestionBank(): Promise<Question[]> {
         const category = data.category as QuestionCategory;
         const wordOrPhrase = data.wordOrPhrase;
         const options = data.options;
+
+        // Skip any malformed or statement-numbered questions (e.g., "1 only", "2 only", "Both 1 and 2", "1,2,3,4")
+        const hasNumberedOptions = Array.isArray(options) && options.some((opt: any) => {
+          const s = String(opt || '').trim().toLowerCase();
+          return s === '1 only' || s === '2 only' || s === '3 only' || s === '4 only' ||
+                 s.startsWith('both 1') || s.startsWith('neither 1') ||
+                 /^\d\s*,\s*\d\s*,\s*\d/.test(s);
+        });
+        if (hasNumberedOptions) {
+          return;
+        }
+
         const correctIndex = typeof data.correctIndex === 'number' ? data.correctIndex : 0;
         const instruction = data.instruction || `Select the most appropriate ${String(category).toUpperCase()} of the given word:`;
 

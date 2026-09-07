@@ -186,6 +186,10 @@ function sanitizeProfile(raw: any, googleUser?: FirebaseUser | null): PlayerProf
 
   const resolvedId = googleUser ? googleUser.uid : (raw.id && raw.id !== 'user-live-1' && raw.id !== 'user-cgl-1' ? raw.id : deviceGuestId);
 
+  const practiceFilters = raw.practiceFilters && typeof raw.practiceFilters === 'object' && raw.practiceFilters.category && raw.practiceFilters.exam
+    ? { category: raw.practiceFilters.category, exam: raw.practiceFilters.exam }
+    : undefined;
+
   return {
     ...INITIAL_PLAYER,
     ...raw,
@@ -202,6 +206,7 @@ function sanitizeProfile(raw: any, googleUser?: FirebaseUser | null): PlayerProf
     winStreak,
     accuracyRate,
     level,
+    ...(practiceFilters ? { practiceFilters } : {}),
   };
 }
 
@@ -329,6 +334,37 @@ export default function App() {
   const [selectedCategory, setSelectedCategory] = useState<QuestionCategory | 'mixed'>('mixed');
   const [selectedExam, setSelectedExam] = useState<ExamType>('SSC_CGL');
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
+
+  // Persistent PYQ Practice Filters (Persists across tabs, sessions, and cloud devices)
+  const [practiceFilters, setPracticeFilters] = useState<{ category: QuestionCategory | 'mixed'; exam: ExamType }>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('vocabclash_pyq_filter_pref');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed && (parsed.category || parsed.exam)) {
+            return {
+              category: parsed.category || 'mixed',
+              exam: parsed.exam || 'ALL',
+            };
+          }
+        }
+      } catch {}
+    }
+    return { category: 'mixed', exam: 'ALL' };
+  });
+
+  const handleUpdatePracticeFilter = (newCat: QuestionCategory | 'mixed', newExam: ExamType) => {
+    const nextFilters = { category: newCat, exam: newExam };
+    setPracticeFilters(nextFilters);
+    try {
+      localStorage.setItem('vocabclash_pyq_filter_pref', JSON.stringify(nextFilters));
+    } catch {}
+    setPlayer(prev => ({
+      ...prev,
+      practiceFilters: nextFilters,
+    }));
+  };
 
   // Targeted Coaching Drill Queue (from AI Vocab Mentor & SSC Top 100)
   const [practiceCustomQueue, setPracticeCustomQueue] = useState<Question[] | null>(null);
@@ -572,9 +608,19 @@ export default function App() {
               level: mergedLevel,
               bestCategory: cloudP.bestCategory || localPlayer.bestCategory || 'synonyms',
               badges: cloudP.badges || localPlayer.badges || ['🏛️ SSC CGL Aspirant'],
+              ...(cloudP.practiceFilters || localPlayer.practiceFilters || practiceFilters
+                ? { practiceFilters: cloudP.practiceFilters || localPlayer.practiceFilters || practiceFilters }
+                : {}),
             };
 
             setPlayer(mergedPlayer);
+
+            if (cloudP.practiceFilters) {
+              setPracticeFilters(cloudP.practiceFilters);
+              try {
+                localStorage.setItem('vocabclash_pyq_filter_pref', JSON.stringify(cloudP.practiceFilters));
+              } catch {}
+            }
 
             if (cloudData.subscription) setSubscription(cloudData.subscription);
             if (cloudData.streak) {
@@ -630,6 +676,7 @@ export default function App() {
               accuracyRate: initialAccuracy,
               bestCategory: localPlayer.bestCategory || 'synonyms',
               badges: localPlayer.badges || ['🏛️ SSC CGL Aspirant'],
+              practiceFilters: localPlayer.practiceFilters || practiceFilters,
             };
 
             setPlayer(newPlayer);
@@ -1435,6 +1482,9 @@ export default function App() {
             {currentTab === 'practice' && (
               <PracticeMode
                 pyqScore={player.pyqScore || 0}
+                category={practiceFilters.category}
+                exam={practiceFilters.exam}
+                onFilterChange={handleUpdatePracticeFilter}
                 onUpdatePyqScore={handleUpdatePyqScore}
                 onBookmarkQuestion={handleBookmarkQuestion}
                 onOpenAiTutor={handleOpenAiTutor}

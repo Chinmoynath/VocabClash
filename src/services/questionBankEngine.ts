@@ -459,6 +459,16 @@ export class QuestionBankEngine {
     let merged = 0;
 
     for (const raw of questions) {
+      // Guard: Ignore any questions with statement/permutation numbered options
+      if (Array.isArray(raw.options) && raw.options.some(opt => {
+        const s = String(opt || '').trim().toLowerCase();
+        return s === '1 only' || s === '2 only' || s === '3 only' || s === '4 only' ||
+               s.startsWith('both 1') || s.startsWith('neither 1') ||
+               /^\d\s*,\s*\d\s*,\s*\d/.test(s);
+      })) {
+        continue;
+      }
+
       const memoryKey = raw.memoryKey || buildMemoryKey(raw.category, raw.wordOrPhrase, raw.options, raw.correctIndex);
       const canonicalId = raw.canonicalQuestionId || raw.id || generateCanonicalQuestionId(
         raw.category,

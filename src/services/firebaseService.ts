@@ -34,7 +34,7 @@ import {
   getDocFromServer
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { PlayerProfile, UserSubscription, DailyStreakState, SavedWord } from '../types';
+import { PlayerProfile, UserSubscription, DailyStreakState, SavedWord, QuestionCategory, ExamType } from '../types';
 
 // Suppress internal Firestore connection retry & offline warnings
 try {
@@ -205,6 +205,10 @@ export interface UserCloudData {
   subscription: UserSubscription;
   streak: DailyStreakState;
   savedWords: SavedWord[];
+  practiceFilters?: {
+    category: QuestionCategory | 'mixed';
+    exam: ExamType;
+  };
   updatedAt: number;
 }
 
@@ -476,6 +480,10 @@ export async function saveUserDataToFirestore(
     subscription: UserSubscription;
     streak: DailyStreakState;
     savedWords: SavedWord[];
+    practiceFilters?: {
+      category: QuestionCategory | 'mixed';
+      exam: ExamType;
+    };
   },
   currentUser?: FirebaseUser | null
 ): Promise<void> {
@@ -492,6 +500,7 @@ export async function saveUserDataToFirestore(
         ...data.player,
         photoURL: currentUser?.photoURL || data.player.photoURL || null,
         email: currentUser?.email || data.player.email || null,
+        practiceFilters: data.practiceFilters || data.player.practiceFilters || null,
       },
       subscription: {
         isPremium: Boolean(data.subscription?.isPremium),
@@ -503,6 +512,7 @@ export async function saveUserDataToFirestore(
       },
       streak: data.streak || null,
       savedWords: data.savedWords || [],
+      practiceFilters: data.practiceFilters || data.player.practiceFilters || null,
       updatedAt: Date.now(),
     };
     
