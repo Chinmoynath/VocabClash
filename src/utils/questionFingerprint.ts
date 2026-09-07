@@ -207,6 +207,31 @@ export function computeRepeatCount(
 }
 
 /**
+ * Formats repeat count for UI displays:
+ * If the number is greater than 5 (e.g. 6, 21), returns '>5x'.
+ * If 5 or below (e.g. 2, 3, 4, 5), returns `${count}x`.
+ */
+export function formatRepeatCount(count?: number | null): string {
+  const num = typeof count === 'number' ? count : Number(count) || 0;
+  if (num > 5) {
+    return '>5x';
+  }
+  if (num >= 2) {
+    return `${num}x`;
+  }
+  return `${Math.max(1, num)}x`;
+}
+
+/**
+ * Formats full repeated badge label:
+ * If count > 5, returns 'Repeated >5x'.
+ * If count <= 5, returns 'Repeated ${count}x'.
+ */
+export function formatRepeatedText(count?: number | null): string {
+  return `Repeated ${formatRepeatCount(count)}`;
+}
+
+/**
  * Format a single appearance tag
  */
 export function formatAppearanceTag(app: ExamAppearance): string {

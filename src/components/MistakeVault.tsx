@@ -22,13 +22,16 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
-  ChevronsRight
+  ChevronsRight,
+  CheckCircle2
 } from 'lucide-react';
 import { ReportQuestionModal } from './ReportQuestionModal';
 import { formatExamTag } from '../services/jsonPyqParser';
 import { ExamAppearancesBadge } from './ExamAppearancesBadge';
 import { resolveCardEducation } from '../utils/questionEducationResolver';
 import { QuestionSolutionBreakdown } from './QuestionSolutionBreakdown';
+import { MistakeVaultRevisionCard } from './MistakeVaultRevisionCard';
+import { resolveRevisionCard } from '../utils/mistakeVaultCardResolver';
 
 interface MistakeVaultProps {
   savedWords: SavedWord[];
@@ -430,62 +433,102 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
                 }}
                 className="w-full h-full min-h-[280px] bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700 rounded-3xl p-5 shadow-2xl flex flex-col justify-between items-center text-center cursor-grab active:cursor-grabbing hover:border-amber-500/60 transition-colors relative overflow-hidden select-none touch-pan-y"
               >
-                {!isFlipped ? (
-                  /* Front of Card */
-                  <div className="my-auto space-y-3 pointer-events-none">
-                    <span className="text-[10px] bg-amber-950/90 text-amber-300 border border-amber-700/60 px-2.5 py-0.5 rounded-full font-bold">
-                      TAP TO FLIP
-                    </span>
-                    <h3 className="text-2xl font-black text-amber-400 break-words">
-                      {currentCard.question.wordOrPhrase}
-                    </h3>
-                    <div className="text-xs text-slate-400">
-                      {currentCard.question.instruction || 'What is the meaning and correct answer?'}
+                {(() => {
+                  const card = resolveRevisionCard(currentCard.question, currentCard);
+                  return !isFlipped ? (
+                    /* Front of Card */
+                    <div className="my-auto space-y-3 pointer-events-none w-full max-w-md">
+                      <div className="flex items-center justify-center gap-2">
+                        <span className="text-[10px] bg-slate-900 text-sky-300 border border-slate-750 px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider">
+                          {card.categoryDisplay}
+                        </span>
+                        {card.targetSublabel && (
+                          <span className="text-[10px] bg-slate-900/80 text-slate-400 border border-slate-800 px-2 py-0.5 rounded-full font-semibold">
+                            {card.targetSublabel}
+                          </span>
+                        )}
+                        <span className="text-[10px] bg-amber-950/90 text-amber-300 border border-amber-700/60 px-2.5 py-0.5 rounded-full font-bold">
+                          TAP TO FLIP
+                        </span>
+                      </div>
+                      <h3 className="text-xl sm:text-2xl font-black text-amber-400 break-words leading-tight">
+                        {card.target}
+                      </h3>
+                      <div className="text-xs text-slate-300 font-medium">
+                        {card.prompt}
+                      </div>
+                      <div className="pt-1 flex items-center justify-center">
+                        <ExamAppearancesBadge
+                          appearances={currentCard.question.appearances}
+                          exam={currentCard.question.exam}
+                          year={currentCard.question.year}
+                          tier={currentCard.question.tier}
+                          examHistory={currentCard.question.examHistory}
+                          repeatCount={currentCard.question.repeatCount}
+                          showRepeatCount={true}
+                          size="xs"
+                        />
+                      </div>
                     </div>
-                    <div className="pt-1 flex items-center justify-center">
-                      <ExamAppearancesBadge
-                        appearances={currentCard.question.appearances}
-                        exam={currentCard.question.exam}
-                        year={currentCard.question.year}
-                        tier={currentCard.question.tier}
-                        examHistory={currentCard.question.examHistory}
-                        repeatCount={currentCard.question.repeatCount}
-                        showRepeatCount={true}
-                        size="xs"
-                      />
-                    </div>
-                  </div>
-                ) : (
-                  /* Back of Card */
-                  (() => {
-                    const cardEdu = resolveCardEducation(currentCard.question);
-                    return (
-                      <div className="my-auto space-y-2.5 animate-fadeIn w-full pointer-events-none">
-                        <div className="text-sm font-extrabold text-emerald-400">
-                          Correct: {currentCard.question.options[currentCard.question.correctIndex]}
+                  ) : (
+                    /* Back of Card */
+                    <div className="my-auto space-y-2.5 animate-fadeIn w-full text-left">
+                      {/* Target Section */}
+                      {(card.targetMeaning || card.targetHindiMeaning) && (
+                        <div className="bg-slate-900/80 rounded-xl p-2.5 border border-slate-800 space-y-0.5">
+                          {card.isSituationBased && (
+                            <div className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">
+                              Situation:
+                            </div>
+                          )}
+                          {card.targetMeaning && (
+                            <div className="text-xs text-slate-300 leading-relaxed">
+                              {card.targetMeaning}
+                            </div>
+                          )}
+                          {card.targetHindiMeaning && (
+                            <div className="text-xs text-amber-300/90 font-medium">
+                              {card.targetHindiMeaning}
+                            </div>
+                          )}
                         </div>
-                        {/* Meaning & Hindi Meaning with clear line separation */}
-                        <div className="text-left">
-                          <QuestionSolutionBreakdown
-                            breakdown={cardEdu.meaningsBreakdown}
-                            meaning={cardEdu.meaning}
-                            hindiMeaning={cardEdu.hindiMeaning}
-                            category={currentCard.question.category}
-                          />
+                      )}
+
+                      {/* Answer & Relationship */}
+                      <div className="bg-slate-900/80 rounded-xl p-2.5 border border-emerald-900/40 space-y-1">
+                        <div className="text-[10px] font-extrabold uppercase tracking-wider text-sky-400">
+                          {card.relation}
                         </div>
-                        <div className="text-xs text-slate-300 bg-slate-950/70 p-2.5 rounded-xl text-left border border-slate-800/80">
-                          <span className="font-bold text-sky-400">💡 Memory Hack: </span>
-                          {cardEdu.mnemonic}
+                        <div className="text-sm font-black text-emerald-300 tracking-wide uppercase flex items-center gap-1.5">
+                          <span>{card.answer}</span>
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                         </div>
-                        {cardEdu.exampleSentence && (
-                          <div className="text-[11px] text-slate-400 italic">
-                            "{cardEdu.exampleSentence}"
+                        {card.answerMeaning && (
+                          <div className="text-xs text-slate-200 leading-relaxed">
+                            {card.answerMeaning}
+                          </div>
+                        )}
+                        {card.answerHindiMeaning && (
+                          <div className="text-xs text-amber-300/90 font-medium">
+                            {card.answerHindiMeaning}
                           </div>
                         )}
                       </div>
-                    );
-                  })()
-                )}
+
+                      {/* Memory Hook */}
+                      {card.mnemonic && (
+                        <div className="bg-slate-900/90 rounded-xl p-2.5 border border-slate-800 text-xs">
+                          <div className="font-bold text-amber-400 flex items-center gap-1">
+                            <span>💡 Memory Hook</span>
+                          </div>
+                          <p className="text-slate-300 leading-relaxed mt-0.5 text-[11px]">
+                            {card.mnemonic}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 <div className="text-[10px] text-slate-400 flex items-center justify-center gap-3 pt-2">
                   <span className="flex items-center gap-1 text-slate-400">
@@ -616,127 +659,27 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
               </div>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-3.5">
-            {filteredWords.map(item => {
-              const userSaved = isItemSaved(item);
-              const mistake = isItemMistake(item);
-              const itemEdu = resolveCardEducation(item.question);
-
-              return (
-                <div
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
+              {filteredWords.map((item) => (
+                <MistakeVaultRevisionCard
                   key={item.question.id}
-                  className="bg-slate-850 border border-slate-750/90 rounded-2xl p-3.5 space-y-2.5 shadow-sm hover:border-slate-700 transition-all flex flex-col justify-between"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="font-black text-sm text-slate-100 break-words">
-                          {item.question.wordOrPhrase}
-                        </span>
-                        <span className="text-[9px] bg-slate-750 text-slate-300 px-2 py-0.5 rounded-full uppercase font-mono font-bold shrink-0">
-                          {item.question.category === 'ows' ? 'ONE WORD' : item.question.category}
-                        </span>
-                        {userSaved && (
-                          <span className="text-[9px] bg-amber-950/90 text-amber-300 border border-amber-700/80 px-2 py-0.5 rounded-full font-bold flex items-center gap-1 shrink-0">
-                            <Star className="w-2.5 h-2.5 fill-amber-300 text-amber-300" />
-                            Saved
-                          </span>
-                        )}
-                        {mistake && (
-                          <span className="text-[9px] bg-rose-950/80 text-rose-300 border border-rose-800 px-2 py-0.5 rounded-full font-bold shrink-0">
-                            {item.mistakeCount}x Mistake
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-xs text-amber-300/90 mt-1 font-medium break-words">
-                        {itemEdu.hindiMeaning}
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-1 shrink-0">
-                      {/* Star / Bookmark Toggle Button: modifies ONLY Saved state */}
-                      {onToggleUserSaved && (
-                        <button
-                          onClick={() => onToggleUserSaved(item.question.id, item.question)}
-                          className={`p-1.5 rounded-lg border transition-all ${
-                            userSaved
-                              ? 'bg-amber-950/90 border-amber-600 text-amber-400 shadow-sm'
-                              : 'bg-slate-900 text-slate-500 hover:text-amber-400 border-slate-800'
-                          }`}
-                          title={userSaved ? "Remove from Saved" : "Save question"}
-                        >
-                          <Star className={`w-3.5 h-3.5 ${userSaved ? 'fill-amber-400' : ''}`} />
-                        </button>
-                      )}
-
-                      {/* Report Question Button */}
-                      <button
-                        onClick={() => {
-                          soundManager.playTap();
-                          setReportingQuestion(item.question);
-                        }}
-                        className="p-1.5 rounded-lg bg-slate-900 text-slate-500 hover:text-rose-400 border border-slate-800 hover:border-rose-800"
-                        title="Report issue in question (support@vocabclash.in)"
-                      >
-                        <Flag className="w-3.5 h-3.5" />
-                      </button>
-
-                      {/* Delete from Vault / Current Scope */}
-                      <button
-                        onClick={() => {
-                          soundManager.playTap();
-                          onRemoveWord(item.question.id, filterOrigin);
-                        }}
-                        className="p-1.5 rounded-lg bg-slate-900 text-slate-500 hover:text-rose-400 border border-slate-800 hover:border-rose-800"
-                        title={
-                          filterOrigin === 'mistakes'
-                            ? "Remove from Mistakes (keeps Saved if bookmarked)"
-                            : filterOrigin === 'saved_by_me'
-                            ? "Remove from Saved (keeps Mistake record if present)"
-                            : "Remove completely from Vault"
-                        }
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Meaning for Vocab */}
-                  <div className="text-xs text-slate-300 bg-slate-900/70 p-2 rounded-xl border border-slate-800 break-words">
-                    <span className="font-bold text-sky-400">Meaning: </span>
-                    {itemEdu.meaning}
-                  </div>
-
-                  {/* Correct Option */}
-                  <div className="text-xs text-emerald-400 font-bold bg-emerald-950/30 border border-emerald-900/50 px-2.5 py-1 rounded-lg break-words">
-                    Correct: {item.question.options[item.question.correctIndex]}
-                  </div>
-
-                  {/* Mnemonic Hook */}
-                  <div className="text-[11px] text-slate-300 bg-slate-900/80 p-2 rounded-xl border border-slate-800 break-words">
-                    <span className="font-bold text-amber-400">💡 Trick: </span>
-                    {itemEdu.mnemonic}
-                  </div>
-
-                  {/* Exam Attribution */}
-                  <div className="pt-0.5 flex items-center justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <ExamAppearancesBadge
-                        appearances={item.question.appearances}
-                        exam={item.question.exam}
-                        year={item.question.year}
-                        tier={item.question.tier}
-                        examHistory={item.question.examHistory}
-                        repeatCount={item.question.repeatCount}
-                        showRepeatCount={false}
-                        size="xs"
-                      />
-                    </div>
-                    <span className="text-amber-400 font-bold text-[10px] shrink-0">Repeated {item.question.repeatCount}x</span>
-                  </div>
-                </div>
-              );
-            })}
+                  item={item}
+                  onToggleBookmark={(id) => {
+                    soundManager.playTap();
+                    if (onToggleUserSaved) {
+                      onToggleUserSaved(id, item.question);
+                    }
+                  }}
+                  onDelete={(id) => {
+                    soundManager.playTap();
+                    onRemoveWord(id, filterOrigin);
+                  }}
+                  onReport={(q) => {
+                    soundManager.playTap();
+                    setReportingQuestion(q);
+                  }}
+                />
+              ))}
             </div>
           )}
         </div>

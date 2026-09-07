@@ -22,7 +22,7 @@ import {
 import { questionReviewScheduler } from './services/questionReviewScheduler';
 import { LiveRoomFinalResult, forfeitLiveRoom } from './services/realtimeMatchmaking';
 import { soundManager } from './utils/audio';
-import { isAdDue, resetAdTimerForTest, recordAdShown } from './utils/adManager';
+import { isAdDue, resetAdTimerForTest, recordAdShown, ADS_ENABLED } from './utils/adManager';
 import { extractCleanUserName, formatNameFromEmail } from './utils/nameHelper';
 import { 
   getInitialStreak, 
@@ -796,6 +796,9 @@ export default function App() {
 
   // Check 10-minute ad trigger safely (never after first duel to protect new user retention)
   const triggerAdIfDue = () => {
+    if (!ADS_ENABLED) {
+      return;
+    }
     if (player.matchesPlayed <= 1) {
       return;
     }
@@ -1071,14 +1074,16 @@ export default function App() {
 
     // Trigger 10-min interval ad safely after match completion (only for free tier)
     // NEVER show ad after the user's first duel (to maximize new player retention)
-    const isFirstDuel = player.matchesPlayed === 0 || nextMatchesPlayed <= 1;
-    if (isFirstDuel) {
-      // Cleanly start their ad timer cooldown so they get a full grace period going forward
-      recordAdShown();
-    } else if (isAdDue(subscription.isPremium, nextMatchesPlayed)) {
-      setTimeout(() => {
-        setShowAdModal(true);
-      }, 700);
+    if (ADS_ENABLED) {
+      const isFirstDuel = player.matchesPlayed === 0 || nextMatchesPlayed <= 1;
+      if (isFirstDuel) {
+        // Cleanly start their ad timer cooldown so they get a full grace period going forward
+        recordAdShown();
+      } else if (isAdDue(subscription.isPremium, nextMatchesPlayed)) {
+        setTimeout(() => {
+          setShowAdModal(true);
+        }, 700);
+      }
     }
   };
 
@@ -1200,6 +1205,7 @@ export default function App() {
   };
 
   const handleTriggerTestAd = () => {
+    if (!ADS_ENABLED) return;
     resetAdTimerForTest();
     setShowAdModal(true);
   };
@@ -1859,7 +1865,7 @@ export default function App() {
       )}
 
       {/* 10-Minute Interstitial Ad Modal (for free users after match or back) */}
-      {showAdModal && (
+      {ADS_ENABLED && showAdModal && (
         <InterstitialAdModal
           onClose={() => setShowAdModal(false)}
           onOpenPremium={() => {

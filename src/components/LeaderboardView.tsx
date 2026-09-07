@@ -14,7 +14,7 @@ import {
   TrendingUp
 } from 'lucide-react';
 import { AdSenseUnit } from './AdSenseUnit';
-import { ADSENSE_BANNER_SLOT } from '../services/adSenseService';
+import { ADSENSE_BANNER_SLOT, ADS_ENABLED } from '../services/adSenseService';
 
 interface LeaderboardViewProps {
   player: PlayerProfile;
@@ -403,8 +403,8 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ player, isPrem
         </div>
       )}
 
-      {/* AdSense / AdMob Banner Slot (Free users only) */}
-      {!isPremium && (
+      {/* AdSense / AdMob Banner Slot (Free users only, gated by ADS_ENABLED) */}
+      {ADS_ENABLED && !isPremium && (
         <div className="pt-2">
           <AdSenseUnit slotId={ADSENSE_BANNER_SLOT} format="horizontal" isPremium={isPremium} />
         </div>

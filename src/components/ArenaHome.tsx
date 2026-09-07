@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { PlayerProfile, QuestionCategory, ExamType, UserSubscription, DailyStreakState } from '../types';
 import { soundManager } from '../utils/audio';
-import { getSecondsUntilNextAd } from '../utils/adManager';
+import { getSecondsUntilNextAd, ADS_ENABLED } from '../utils/adManager';
 import { User as FirebaseUser } from 'firebase/auth';
 import { AdSenseUnit } from './AdSenseUnit';
 import { ADSENSE_BANNER_SLOT } from '../services/adSenseService';
@@ -84,7 +84,7 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
   const [secondsToAd, setSecondsToAd] = useState<number>(() => getSecondsUntilNextAd(subscription.isPremium));
 
   useEffect(() => {
-    if (subscription.isPremium) return;
+    if (!ADS_ENABLED || subscription.isPremium) return;
     const interval = setInterval(() => {
       setSecondsToAd(getSecondsUntilNextAd(subscription.isPremium));
     }, 1000);
@@ -404,8 +404,8 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
             </div>
           ) : null}
 
-          {/* Free-Tier Ad Status Helper */}
-          {!subscription.isPremium && (
+          {/* Free-Tier Ad Status Helper (Rendered only when ADS_ENABLED is true) */}
+          {ADS_ENABLED && !subscription.isPremium && (
             <div className="bg-slate-900/90 border border-slate-800 rounded-xl px-3 py-1.5 flex items-center justify-between text-[11px] text-slate-400">
               <div className="flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse" />
@@ -427,8 +427,8 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
             </div>
           )}
 
-          {/* AdSense Unit */}
-          {!subscription.isPremium && (
+          {/* AdSense Unit (Rendered only when ADS_ENABLED is true) */}
+          {ADS_ENABLED && !subscription.isPremium && (
             <div className="pt-1">
               <AdSenseUnit slotId={ADSENSE_BANNER_SLOT} format="horizontal" />
             </div>

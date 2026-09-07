@@ -13,7 +13,7 @@ import {
   Radio
 } from 'lucide-react';
 import { soundManager } from '../utils/audio';
-import { recordAdShown } from '../utils/adManager';
+import { recordAdShown, ADS_ENABLED } from '../utils/adManager';
 import { AdSenseUnit } from './AdSenseUnit';
 import { ADSENSE_INTERSTITIAL_SLOT } from '../services/adSenseService';
 
@@ -26,6 +26,11 @@ export const InterstitialAdModal: React.FC<InterstitialAdModalProps> = ({
   onClose,
   onOpenPremium,
 }) => {
+  // Completely dormant when ads are disabled
+  if (!ADS_ENABLED) {
+    return null;
+  }
+
   const [countdown, setCountdown] = useState<number>(5);
   const [canSkip, setCanSkip] = useState<boolean>(false);
   const [adMuted, setAdMuted] = useState<boolean>(false);

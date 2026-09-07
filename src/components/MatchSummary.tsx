@@ -33,7 +33,7 @@ import {
 import { MatchState, PlayerProfile, Question } from '../types';
 import { soundManager } from '../utils/audio';
 import { AdSenseUnit } from './AdSenseUnit';
-import { ADSENSE_BANNER_SLOT } from '../services/adSenseService';
+import { ADSENSE_BANNER_SLOT, ADS_ENABLED } from '../services/adSenseService';
 import { ReportQuestionModal } from './ReportQuestionModal';
 import { ShareBattleResultModal } from './ShareBattleResultModal';
 import { BattleShareData } from '../utils/shareCardGenerator';
@@ -42,6 +42,7 @@ import { resolveCardEducation } from '../utils/questionEducationResolver';
 import { QuestionSolutionBreakdown } from './QuestionSolutionBreakdown';
 import { ExamAppearancesBadge } from './ExamAppearancesBadge';
 import { formatExamTag } from '../services/jsonPyqParser';
+import { formatRepeatCount } from '../utils/questionFingerprint';
 
 import { User as FirebaseUser } from 'firebase/auth';
 import { AuthCard } from './AuthCard';
@@ -177,8 +178,11 @@ const MatchQuestionReviewCard: React.FC<MatchQuestionReviewCardProps> = ({
           </span>
 
           {/* Repeat Frequency */}
-          <span className="text-[10px] font-bold bg-amber-950/60 text-amber-300 border border-amber-700/50 px-2 py-0.5 rounded-md">
-            🔥 {q.repeatCount}x in SSC
+          <span 
+            title={q.repeatCount > 5 ? `Repeated ${q.repeatCount} times in SSC exams` : undefined}
+            className="text-[10px] font-bold bg-amber-950/60 text-amber-300 border border-amber-700/50 px-2 py-0.5 rounded-md"
+          >
+            🔥 {formatRepeatCount(q.repeatCount)} in SSC
           </span>
         </div>
 
@@ -847,8 +851,8 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
               </div>
             )}
 
-            {/* AdSense Unit (Omitted after first duel for clean onboarding & retention) */}
-            {!isPremium && player.matchesPlayed > 1 && (
+            {/* AdSense Unit (Omitted after first duel for clean onboarding & retention, gated by ADS_ENABLED) */}
+            {ADS_ENABLED && !isPremium && player.matchesPlayed > 1 && (
               <div className="py-1 max-w-xl mx-auto">
                 <AdSenseUnit slotId={ADSENSE_BANNER_SLOT} format="horizontal" isPremium={isPremium} />
               </div>

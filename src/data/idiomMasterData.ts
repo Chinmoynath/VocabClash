@@ -217,4 +217,17 @@ export const IDIOM_MASTER_EXTENDED: IdiomEntry[] = [
       'Losing a sports match by one point'
     ],
   },
+  {
+    idiom: 'Midas touch',
+    meaning: 'The ability to make a lot of money easily, or be successful at anything one undertakes',
+    hindi: 'जिस काम में हाथ लगाएं उसमें सफलता पाना / पारस का स्पर्श',
+    example: 'Every startup he invested in became a billion-dollar unicorn; he truly possesses the Midas touch.',
+    origin: 'Greek legend of King Midas, whose touch turned everything into solid gold.',
+    repeats: 19,
+    distractors: [
+      'A healing medicinal touch',
+      'The ability to predict market crashes',
+      'A tendency to ruin everything one touches'
+    ],
+  },
 ];

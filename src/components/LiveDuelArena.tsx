@@ -20,6 +20,7 @@ import {
   LiveRoomFinalResult 
 } from '../services/realtimeMatchmaking';
 import { soundManager } from '../utils/audio';
+import { formatRepeatCount } from '../utils/questionFingerprint';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { 
   Zap, 
@@ -1002,8 +1003,11 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
             )}
           </div>
 
-          <div className="flex items-center gap-1 bg-amber-950/90 border border-amber-600/70 text-amber-300 px-3 py-1 sm:px-3.5 sm:py-1.5 rounded-full text-xs sm:text-sm font-extrabold">
-            <span>🔥 {currentQuestion.repeatCount}x</span>
+          <div 
+            title={currentQuestion.repeatCount > 5 ? `Repeated ${currentQuestion.repeatCount} times in exams` : undefined}
+            className="flex items-center gap-1 bg-amber-950/90 border border-amber-600/70 text-amber-300 px-3 py-1 sm:px-3.5 sm:py-1.5 rounded-full text-xs sm:text-sm font-extrabold"
+          >
+            <span>🔥 {formatRepeatCount(currentQuestion.repeatCount)}</span>
           </div>
         </div>
 

@@ -30,8 +30,10 @@ import {
   Search,
   Filter,
   Calendar,
-  Tag
+  Tag,
+  Tv
 } from 'lucide-react';
+import { ADS_ENABLED, ADSENSE_CLIENT_ID, ADSENSE_BANNER_SLOT, ADSENSE_INTERSTITIAL_SLOT } from '../services/adSenseService';
 import { ExtractedQuestion, ImportBatch, ReviewStatus } from '../types/pyqImport';
 import { parseAndValidatePyqJSON, SkippedQuestionItem, extractJsonMetadata, formatExamTag, normalizeExamDate } from '../services/jsonPyqParser';
 import { questionBankEngine } from '../services/questionBankEngine';
@@ -53,6 +55,7 @@ import {
   generateCanonicalQuestionId,
   computeImportanceLevel,
   computeRepeatCount,
+  formatRepeatCount,
   mergeAppearances,
   sortAppearances,
 } from '../utils/questionFingerprint';
@@ -1773,6 +1776,77 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
               )}
             </div>
 
+            {/* Admin-Only Monetization & Ad System Diagnostics */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <Tv className="w-4 h-4 text-sky-400" />
+                    Monetization & Advertising Architecture Diagnostics
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    System-level ad configuration, feature flags, and Google AdSense publisher parameters (Admin View Only).
+                  </p>
+                </div>
+                <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${
+                  ADS_ENABLED 
+                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40' 
+                    : 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
+                }`}>
+                  <span className={`w-2 h-2 rounded-full ${ADS_ENABLED ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+                  {ADS_ENABLED ? 'Ads Active (Live Mode)' : 'Ads Dormant (Clean Study Mode)'}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 pt-1">
+                <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3.5 space-y-1">
+                  <div className="text-[11px] text-slate-400 font-semibold">Feature Flag Status</div>
+                  <div className="font-mono text-sm font-bold text-white">
+                    {ADS_ENABLED ? 'true' : 'false'}
+                  </div>
+                  <div className="text-[10px] text-slate-400">
+                    Gated by <code>VITE_ADS_ENABLED</code> / <code>ADS_ENABLED</code>
+                  </div>
+                </div>
+
+                <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3.5 space-y-1">
+                  <div className="text-[11px] text-slate-400 font-semibold">Publisher Client ID</div>
+                  <div className="font-mono text-xs font-bold text-sky-300 truncate" title={ADSENSE_CLIENT_ID}>
+                    {ADSENSE_CLIENT_ID}
+                  </div>
+                  <div className="text-[10px] text-slate-400">
+                    Site meta tag verified
+                  </div>
+                </div>
+
+                <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3.5 space-y-1">
+                  <div className="text-[11px] text-slate-400 font-semibold">Configured Slots</div>
+                  <div className="font-mono text-xs font-bold text-emerald-300">
+                    Banner: {ADSENSE_BANNER_SLOT}
+                  </div>
+                  <div className="text-[10px] text-slate-400">
+                    Modal: {ADSENSE_INTERSTITIAL_SLOT}
+                  </div>
+                </div>
+
+                <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3.5 space-y-1">
+                  <div className="text-[11px] text-slate-400 font-semibold">Cadence & Retention Rule</div>
+                  <div className="font-mono text-xs font-bold text-amber-300">
+                    10m Cooldown
+                  </div>
+                  <div className="text-[10px] text-slate-400">
+                    Exempts match #1 (100% clean onboarding)
+                  </div>
+                </div>
+              </div>
+
+              {!ADS_ENABLED && (
+                <div className="bg-amber-950/20 border border-amber-500/20 rounded-xl p-3 text-xs text-amber-200/90 leading-relaxed">
+                  💡 <strong>Admin Notice:</strong> All student-facing ad banners, intermission countdowns, test ad triggers, and ad network requests are currently dormant. To activate advertisements once your Google AdSense publisher approval is completed, change <code>ADS_ENABLED</code> in <code>src/services/adSenseService.ts</code> to <code>true</code> or set <code>VITE_ADS_ENABLED=true</code> in your environment.
+                </div>
+              )}
+            </div>
+
             {/* Live Question Previewer */}
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
               <div className="flex items-center justify-between flex-wrap gap-3">
@@ -1832,8 +1906,11 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
                       </span>
                     </div>
 
-                    <span className="text-xs text-amber-400 font-bold">
-                      Repeated {previewQuestion.repeatCount}x in Govt Exams
+                    <span 
+                      title={previewQuestion.repeatCount > 5 ? `Repeated ${previewQuestion.repeatCount} times across exam papers` : undefined}
+                      className="text-xs text-amber-400 font-bold"
+                    >
+                      Repeated {formatRepeatCount(previewQuestion.repeatCount)} in Govt Exams
                     </span>
                   </div>
 
@@ -2146,8 +2223,11 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
                               {q.exam || 'SSC'} {q.year || ''} {q.tier ? `• ${q.tier}` : ''} {q.shift ? `• ${q.shift}` : ''}
                             </span>
                             {q.repeatCount && q.repeatCount > 1 && (
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                                Repeated {q.repeatCount}x
+                              <span 
+                                title={q.repeatCount > 5 ? `Repeated ${q.repeatCount} times` : undefined}
+                                className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                              >
+                                Repeated {formatRepeatCount(q.repeatCount)}
                               </span>
                             )}
                           </div>

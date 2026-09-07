@@ -102,6 +102,34 @@ export const HIGH_YIELD_EXAM_VOCAB: Record<string, VocabMasterRecord> = {
   },
 
   // HIGH-YIELD A-Z VOCABULARY FREQUENTLY TESTED IN SSC/CGL/CHSL
+  'astonished': {
+    hindi: 'हैरान / चकित / विस्मित',
+    english: 'Very surprised, amazed, or filled with sudden wonder.',
+    mnemonic: 'Astonished → so surprised that you feel stunned.',
+    example: 'I was astonished to know the truth about what had happened.',
+    root: 'Old French estoner ("to stun, daze").',
+  },
+  'stunned': {
+    hindi: 'स्तब्ध / भौंचक्का / अवाक',
+    english: 'Extremely shocked or surprised.',
+    mnemonic: 'Stun gun impact = totally stunned and overwhelmed.',
+    example: 'The unexpected revelation left everyone completely stunned.',
+    root: 'Middle English stonen ("to daze, shock").',
+  },
+  'succumb': {
+    hindi: 'हार मान लेना / झुक जाना / दम तोड़ देना',
+    english: 'To give in, yield, or fail to resist pressure or temptation.',
+    mnemonic: 'Succumb = surrender and give in to pressure.',
+    example: 'Despite the immense adversity, the team refused to succumb.',
+    root: 'Latin succumbere ("to sink down, yield").',
+  },
+  'refuse': {
+    hindi: 'इंकार करना / अस्वीकार करना / मना करना',
+    english: 'To decline, reject, or not agree to something.',
+    mnemonic: 'Refuse = resist and say no; the direct antonym of succumb.',
+    example: 'She chose to refuse the unethical offer with absolute conviction.',
+    root: 'Latin recusare / refundere ("to turn back, reject").',
+  },
   'respectful': {
     hindi: 'आदरणीय / सम्मानपूर्ण / विनम्र',
     english: 'Feeling or showing deference, polite regard, and respect for others.',
@@ -318,6 +346,37 @@ export const HIGH_YIELD_EXAM_VOCAB: Record<string, VocabMasterRecord> = {
     mnemonic: 'Credit card de de bina soche -> Credulous person.',
     example: 'Credulous investors lost their savings in a fraudulent Ponzi scheme.',
     root: 'Latin credere ("to believe").',
+  },
+  'equanimity': {
+    hindi: 'मानसिक शांति / धैर्य / समभाव',
+    english: 'Mental calmness, composure, and evenness of temper, especially in a difficult situation.',
+    mnemonic: 'EQUA = equal. An equal, balanced mind = equanimity. Agitation is the opposite.',
+    example: 'She accepted both victory and defeat with unwavering equanimity.',
+    root: 'Latin aequus ("equal") + animus ("mind").',
+  },
+  'agitation': {
+    hindi: 'बेचैनी / उत्तेजना / अशांति',
+    english: 'A state of anxiety, nervous excitement, or emotional disturbance.',
+    mnemonic: 'Agitate = stirring up restless disturbance; opposite of calm equanimity.',
+    example: 'His visible agitation betrayed his anxiety before the results were announced.',
+  },
+  'fertile': {
+    hindi: 'उपजाऊ / फलदायी / उर्वर',
+    english: 'Capable of producing abundant vegetation or fruitful crops.',
+    mnemonic: 'Fertile land is productive land.',
+    example: 'The fertile river valleys yielded bumper harvests year after year.',
+  },
+  'productive': {
+    hindi: 'उत्पादक / फलदायी / उपयोगी',
+    english: 'Producing useful or successful results; yielding high output.',
+    mnemonic: 'Produce + Active = producing useful and successful results.',
+    example: 'A productive revision session helps retain exam concepts effortlessly.',
+  },
+  'careless': {
+    hindi: 'लापरवाह / बेपरवाह / असावधान',
+    english: 'Not giving sufficient attention or thought to avoiding harm or errors.',
+    mnemonic: 'Care + Less = without care or attention.',
+    example: 'A careless mistake on the answer sheet can cost valuable marks.',
   },
   'dearth': {
     hindi: 'कमी / अभाव / अकाल',
@@ -962,8 +1021,17 @@ export function resolveQuestionMeaningsBreakdown(question: {
     }
   }
 
+  const targetLookup = lookupMasterEntry(targetWord);
+  if (targetLookup?.english) {
+    // If targetWord has authoritative dictionary entry and targetMeaning was empty, repetitive, or describing correctOption
+    const describesAnswer = correctOption && targetMeaning.toLowerCase().startsWith(correctOption.toLowerCase());
+    const isRepetitive = targetMeaning.includes('(Synonym') || targetMeaning.includes('(Antonym') || targetMeaning.length < 5;
+    if (!targetMeaning || describesAnswer || isRepetitive) {
+      targetMeaning = targetLookup.english;
+    }
+  }
+
   if (!targetMeaning) {
-    const targetLookup = lookupMasterEntry(targetWord);
     if (targetLookup?.english) {
       targetMeaning = targetLookup.english;
     } else if (isSynonym) {
@@ -1014,8 +1082,15 @@ export function resolveQuestionMeaningsBreakdown(question: {
     if (idiomMatch?.hindi) targetHindi = idiomMatch.hindi;
   }
 
+  if (targetLookup?.hindi) {
+    const describesAnswerHindi = correctOption && targetHindi.toLowerCase().startsWith(correctOption.toLowerCase());
+    const isRepetitiveHindi = targetHindi.includes('(Synonym') || targetHindi.includes('(Antonym') || targetHindi.length < 3;
+    if (!targetHindi || describesAnswerHindi || isRepetitiveHindi) {
+      targetHindi = targetLookup.hindi;
+    }
+  }
+
   if (!targetHindi) {
-    const targetLookup = lookupMasterEntry(targetWord);
     if (targetLookup?.hindi) {
       targetHindi = targetLookup.hindi;
     } else {
@@ -1130,35 +1205,42 @@ export function resolveQuestionMeaningsBreakdown(question: {
   // 6. Descriptive Target & Category Labels
   let targetLabel = 'Question Term';
   let categoryLabel = 'Correct Answer';
+  let categoryLabelHindi = 'सटीक उत्तर';
 
   if (isOWS) {
     targetLabel = targetWord.split(' ').length > 2 ? 'Given Phrase' : 'Question Term';
-    categoryLabel = (correctOption && correctOption.split(' ').length <= 2) ? 'One Word Substitution' : 'Correct Answer';
+    categoryLabel = (correctOption && correctOption.split(' ').length <= 2) ? 'One Word' : 'Correct Answer';
+    categoryLabelHindi = 'एक शब्द';
   } else if (isIdiom) {
     targetLabel = 'Idiom / Phrase';
-    categoryLabel = 'Correct Meaning';
+    categoryLabel = 'Meaning';
+    categoryLabelHindi = 'भावार्थ';
   } else if (isSynonym) {
     targetLabel = 'Target Word';
-    categoryLabel = 'Synonym (समानार्थी)';
+    categoryLabel = 'Synonym';
+    categoryLabelHindi = 'समानार्थी';
   } else if (isAntonym) {
     targetLabel = 'Target Word';
-    categoryLabel = 'Antonym (विलोमार्थी)';
+    categoryLabel = 'Antonym';
+    categoryLabelHindi = 'विलोमार्थी';
   }
 
-  // 7. Format combined strings
+  // 7. Format combined strings cleanly without nested parentheses
   const cleanTargetDisplay = targetWord || 'Word';
   const targetLineEnglish = `${cleanTargetDisplay} – ${targetMeaning}`;
   const targetLineHindi = `${cleanTargetDisplay}: ${targetHindi}`;
 
   let combinedEnglishText = targetLineEnglish;
   if (isDistinctCorrect && correctOption && correctMeaning) {
-    const correctLineEnglish = `${correctOption} (${categoryLabel}) – ${correctMeaning}`;
+    const cleanCorrectEng = correctMeaning.replace(/\((?:Synonym|Antonym|समानार्थी|विलोमार्थी)[^)]*\)/gi, '').trim();
+    const correctLineEnglish = `${correctOption} (${categoryLabel}) – ${cleanCorrectEng}`;
     combinedEnglishText = `${targetLineEnglish}\n• ${correctLineEnglish}`;
   }
 
   let combinedHindiText = targetLineHindi;
   if (isDistinctCorrect && correctOption && correctHindi) {
-    const correctLineHindi = `${correctOption} (${categoryLabel}): ${correctHindi}`;
+    const cleanCorrectHin = correctHindi.replace(/\((?:Synonym|Antonym|समानार्थी|विलोमार्थी)[^)]*\)/gi, '').trim();
+    const correctLineHindi = `${correctOption} (${categoryLabelHindi}): ${cleanCorrectHin}`;
     combinedHindiText = `${targetLineHindi}\n• ${correctLineHindi}`;
   }
 

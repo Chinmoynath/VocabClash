@@ -4,6 +4,25 @@
  * responsive ad pushes, and error handling for web & hybrid app wrappers.
  */
 
+/**
+ * =======================================================================
+ * CENTRAL ADVERTISING FEATURE FLAG
+ * =======================================================================
+ * Set to `false` to completely disable all user-facing ad UI, modals,
+ * timers, countdowns, test ad buttons, and network requests.
+ * 
+ * To re-enable advertisements in the future:
+ *   Option A: Change this default to `true`:
+ *     export const ADS_ENABLED: boolean = true;
+ *   Option B: Configure in your environment/.env:
+ *     VITE_ADS_ENABLED=true
+ * =======================================================================
+ */
+export const ADS_ENABLED: boolean = 
+  typeof import.meta.env.VITE_ADS_ENABLED !== 'undefined'
+    ? import.meta.env.VITE_ADS_ENABLED === 'true'
+    : false;
+
 // User Configured Publisher & AdMob IDs
 export const ADSENSE_CLIENT_ID = 
   import.meta.env.VITE_GOOGLE_ADSENSE_CLIENT_ID || 'ca-pub-6402582146558440';
@@ -35,6 +54,8 @@ let scriptInjected = false;
  * Ensures the Google AdSense library script is injected into document head.
  */
 export function initGoogleAdSense(): void {
+  // Prevent SDK injection and network loading while ads are disabled
+  if (!ADS_ENABLED) return;
   if (typeof window === 'undefined') return;
   if (scriptInjected) return;
 
@@ -67,6 +88,7 @@ export function initGoogleAdSense(): void {
  * Pushes an ad request to window.adsbygoogle queue safely.
  */
 export function pushAdSenseRequest(): boolean {
+  if (!ADS_ENABLED) return false;
   if (typeof window === 'undefined') return false;
   try {
     window.adsbygoogle = window.adsbygoogle || [];

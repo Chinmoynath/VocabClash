@@ -275,4 +275,15 @@ export const OWS_MASTER_EXTENDED: OWSEntry[] = [
     repeats: 16,
     distractors: ['Calligrapher', 'Bibliophile', 'Polyglot'],
   },
+  {
+    phrase: 'Spoken or done without any previous thought or preparation',
+    answer: 'Extempore',
+    hindi: 'बिना तैयारी के / आशुभाषण',
+    meaning: 'Spoken or done without preparation; impromptu.',
+    mnemonic: 'Ex-tempore = produced on the spot without tempo or advance preparation.',
+    root: 'Latin ex tempore ("out of the moment / off the cuff").',
+    example: 'He delivered an outstanding extempore speech that captivated the entire audience.',
+    repeats: 24,
+    distractors: ['Impromptu', 'Deliberate', 'Rehearsed'],
+  },
 ];

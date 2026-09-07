@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ExamAppearance } from '../types';
 import { formatExamTag } from '../services/jsonPyqParser';
-import { sortAppearances } from '../utils/questionFingerprint';
+import { sortAppearances, formatRepeatCount } from '../utils/questionFingerprint';
 import { Layers, ChevronDown, X, History, Sparkles } from 'lucide-react';
 
 interface ExamAppearancesBadgeProps {
@@ -148,9 +148,12 @@ export const ExamAppearancesBadge: React.FC<ExamAppearancesBadgeProps> = ({
 
       {/* Repeat count badge if requested */}
       {showRepeatCount && (repeatCount || totalCount) > 1 && (
-        <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-400 bg-amber-950/60 border border-amber-500/30 px-1.5 py-0.5 rounded-full">
+        <span 
+          title={(repeatCount || totalCount) > 5 ? `Repeated ${repeatCount || totalCount} times in exam papers` : undefined}
+          className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-400 bg-amber-950/60 border border-amber-500/30 px-1.5 py-0.5 rounded-full"
+        >
           <Sparkles className="w-2.5 h-2.5" />
-          {repeatCount || totalCount}x
+          {formatRepeatCount(repeatCount || totalCount)}
         </span>
       )}
 

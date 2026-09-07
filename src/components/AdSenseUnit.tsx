@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { 
+  ADS_ENABLED,
   ADSENSE_CLIENT_ID, 
   ADSENSE_BANNER_SLOT, 
   initGoogleAdSense 
@@ -21,7 +22,8 @@ export const AdSenseUnit: React.FC<AdSenseUnitProps> = ({
   responsive = true,
   isPremium = false,
 }) => {
-  if (isPremium) {
+  // If ads are disabled globally or the user is Premium, render nothing (zero DOM footprint)
+  if (!ADS_ENABLED || isPremium) {
     return null;
   }
 

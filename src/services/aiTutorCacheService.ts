@@ -452,7 +452,7 @@ export async function getRecentCachedWords(limitCount: number = 8): Promise<{ wo
   return [
     { word: 'ABERRATION', category: 'synonyms', tag: 'High-Yield' },
     { word: 'TACITURN', category: 'antonyms', tag: 'SSC CGL' },
-    { word: 'EPHEMERAL', category: 'synonyms', tag: 'Repeated 6x' },
+    { word: 'EPHEMERAL', category: 'synonyms', tag: 'Repeated >5x' },
     { word: 'OBSEQUIOUS', category: 'synonyms', tag: 'Bank PO' },
     { word: 'METICULOUS', category: 'synonyms', tag: 'SSC CHSL' },
     { word: 'LACONIC', category: 'antonyms', tag: 'CPO SI' },

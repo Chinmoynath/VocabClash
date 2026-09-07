@@ -39,11 +39,12 @@ import {
   Filter
 } from 'lucide-react';
 import { AdSenseUnit } from './AdSenseUnit';
-import { ADSENSE_BANNER_SLOT } from '../services/adSenseService';
+import { ADSENSE_BANNER_SLOT, ADS_ENABLED } from '../services/adSenseService';
 import { ReportQuestionModal } from './ReportQuestionModal';
 import { SupportModal } from './SupportModal';
 import { formatExamTag } from '../services/jsonPyqParser';
 import { ExamAppearancesBadge } from './ExamAppearancesBadge';
+import { formatRepeatCount } from '../utils/questionFingerprint';
 import { resolveCardEducation } from '../utils/questionEducationResolver';
 import { QuestionSolutionBreakdown } from './QuestionSolutionBreakdown';
 import { VaultFlyAnimation, VaultFlyItem } from './VaultFlyAnimation';
@@ -1258,8 +1259,11 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
           {/* Top Info & Actions Header (Clean 1-line layout) */}
           <div className="flex items-center justify-between text-xs text-slate-400 gap-2">
             <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
-              <span className="bg-amber-950/80 text-amber-300 border border-amber-800/60 px-2 py-0.5 rounded-full font-bold text-[10px] shrink-0">
-                🔥 Repeated {currentQ.repeatCount}x
+              <span 
+                title={currentQ.repeatCount > 5 ? `Repeated ${currentQ.repeatCount} times in official exams` : undefined}
+                className="bg-amber-950/80 text-amber-300 border border-amber-800/60 px-2 py-0.5 rounded-full font-bold text-[10px] shrink-0"
+              >
+                🔥 Repeated {formatRepeatCount(currentQ.repeatCount)}
               </span>
 
               {/* Spaced Review Reason Pill (Subtle & clean) */}
@@ -1679,8 +1683,8 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
         </div>
       )}
 
-      {/* AdSense / AdMob Banner Slot (Free users only) */}
-      {!isPremium && (
+      {/* AdSense / AdMob Banner Slot (Free users only, gated by ADS_ENABLED) */}
+      {ADS_ENABLED && !isPremium && (
         <div className="pt-2">
           <AdSenseUnit slotId={ADSENSE_BANNER_SLOT} format="horizontal" isPremium={isPremium} />
         </div>
