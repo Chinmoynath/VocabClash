@@ -1,6 +1,8 @@
 // Dictionary & lookup engine providing precise Hindi & English meanings and mnemonic context
 // for ALL options across Synonyms, Antonyms, One Word Substitutions, and Idioms.
 
+import { lookupMasterEntry } from './questionEducationResolver';
+
 export interface OptionDetail {
   option: string;
   hindiMeaning: string;
@@ -996,6 +998,18 @@ export function getOptionBreakdown(
       }
     }
 
+    // 1.5 Master exam vocab table lookup (contains high-yield words like puritanical, prudish, etc.)
+    const masterLookup = lookupMasterEntry(cleanOpt);
+    if (masterLookup) {
+      return {
+        option: opt,
+        hindiMeaning: masterLookup.hindi,
+        englishMeaning: masterLookup.english,
+        mnemonicHook: masterLookup.mnemonic,
+        isCorrect,
+      };
+    }
+
     // 2. Phrase / idiom lookup (exact and partial)
     for (const [phrase, meaning] of Object.entries(IDIOM_PHRASE_LOOKUP)) {
       if (plainLower.includes(phrase) || phrase.includes(plainLower) || normalizedKey === phrase.replace(/[^a-z0-9]/g, '')) {
@@ -1023,11 +1037,31 @@ export function getOptionBreakdown(
 
     // 4. If this is the correct option and question meaning is provided, use the question's explicit meaning
     if (isCorrect) {
-      if (questionHindiMeaning && questionMeaning) {
+      let optMeaning = questionMeaning;
+      let optHindi = questionHindiMeaning;
+
+      // If questionMeaning contains a dedicated line for this option (e.g. "prudish (Synonym) – ...")
+      if (questionMeaning && questionMeaning.toLowerCase().includes(cleanOpt.toLowerCase())) {
+        const lines = questionMeaning.split('\n');
+        const matchLine = lines.find(l => l.toLowerCase().includes(cleanOpt.toLowerCase()));
+        if (matchLine) {
+          optMeaning = matchLine.replace(/^[•\-\s]+/, '').trim();
+        }
+      }
+
+      if (questionHindiMeaning && questionHindiMeaning.toLowerCase().includes(cleanOpt.toLowerCase())) {
+        const hLines = questionHindiMeaning.split('\n');
+        const matchHLine = hLines.find(l => l.toLowerCase().includes(cleanOpt.toLowerCase()));
+        if (matchHLine) {
+          optHindi = matchHLine.replace(/^[•\-\s]+/, '').trim();
+        }
+      }
+
+      if (optHindi && optMeaning) {
         return {
           option: opt,
-          hindiMeaning: questionHindiMeaning,
-          englishMeaning: questionMeaning,
+          hindiMeaning: optHindi,
+          englishMeaning: optMeaning,
           isCorrect: true,
         };
       }
@@ -1041,8 +1075,8 @@ export function getOptionBreakdown(
       }
       return {
         option: opt,
-        hindiMeaning: questionHindiMeaning || `"${cleanOpt}" का यथार्थ शब्दार्थ`,
-        englishMeaning: questionMeaning || `Accurate definition corresponding to "${cleanOpt}"`,
+        hindiMeaning: optHindi || `"${cleanOpt}" का यथार्थ शब्दार्थ`,
+        englishMeaning: optMeaning || `Accurate definition corresponding to "${cleanOpt}"`,
         isCorrect: true,
       };
     }

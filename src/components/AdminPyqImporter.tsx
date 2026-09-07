@@ -44,6 +44,7 @@ import {
   needsEnrichment 
 } from '../services/pyqEnrichmentService';
 import { Question, QuestionCategory, ExamAppearance } from '../types';
+import { resolveQuestionMeaningsBreakdown } from '../utils/questionEducationResolver';
 import { EXAMS_BY_FAMILY, EXAM_STAGE_OPTIONS, getStageOptionsForExam, normalizeTier } from '../config/examMetadataConfig';
 import { ExamAppearancesBadge } from './ExamAppearancesBadge';
 import {
@@ -1410,16 +1411,63 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
 
                             {/* Learning & Educational Information Box */}
                             <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3 space-y-2 text-xs">
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                <div>
-                                  <span className="text-slate-500 font-bold uppercase text-[10px] block">English Meaning</span>
-                                  <span className="text-slate-200">{q.meaning || <em className="text-slate-600">Pending AI enrichment</em>}</span>
-                                </div>
-                                <div>
-                                  <span className="text-emerald-400/90 font-bold uppercase text-[10px] block">Hindi Meaning (हिन्दी अर्थ)</span>
-                                  <span className="text-emerald-200 font-medium">{q.hindiMeaning || <em className="text-slate-600">Pending AI enrichment</em>}</span>
-                                </div>
-                              </div>
+                              {(() => {
+                                const breakdown = resolveQuestionMeaningsBreakdown(q);
+                                return (
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div>
+                                      <span className="text-slate-500 font-bold uppercase text-[10px] block mb-1">English Meaning</span>
+                                      {breakdown.targetMeaning ? (
+                                        <div className="space-y-1.5">
+                                          <div className="text-slate-200 leading-relaxed">
+                                            <span className="font-bold text-sky-400 capitalize">{breakdown.targetWord}</span>
+                                            <span className="text-slate-400 font-normal"> – </span>
+                                            <span>{breakdown.targetMeaning}</span>
+                                          </div>
+                                          {breakdown.correctOption && breakdown.correctMeaning && (
+                                            <div className="text-slate-300 pt-1.5 border-t border-slate-800/70 leading-relaxed">
+                                              <span className="font-bold text-emerald-400 capitalize">{breakdown.correctOption}</span>
+                                              {breakdown.categoryLabel && (
+                                                <span className="text-[10px] text-emerald-300 font-semibold uppercase ml-1.5 px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30">
+                                                  {breakdown.categoryLabel}
+                                                </span>
+                                              )}
+                                              <span className="text-slate-400 font-normal"> – </span>
+                                              <span>{breakdown.correctMeaning}</span>
+                                            </div>
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <em className="text-slate-600">Pending AI enrichment</em>
+                                      )}
+                                    </div>
+                                    <div>
+                                      <span className="text-emerald-400/90 font-bold uppercase text-[10px] block mb-1">Hindi Meaning (हिन्दी अर्थ)</span>
+                                      {breakdown.targetHindi ? (
+                                        <div className="space-y-1.5">
+                                          <div className="text-emerald-200 font-medium leading-relaxed">
+                                            <span className="font-bold text-emerald-400 capitalize">{breakdown.targetWord}: </span>
+                                            <span>{breakdown.targetHindi}</span>
+                                          </div>
+                                          {breakdown.correctOption && breakdown.correctHindi && (
+                                            <div className="text-emerald-200/90 font-medium pt-1.5 border-t border-slate-800/70 leading-relaxed">
+                                              <span className="font-bold text-teal-300 capitalize">{breakdown.correctOption}</span>
+                                              {breakdown.categoryLabel && (
+                                                <span className="text-[10px] text-teal-300 font-semibold uppercase ml-1.5 px-1.5 py-0.5 rounded bg-teal-500/15 border border-teal-500/30">
+                                                  {breakdown.categoryLabel}
+                                                </span>
+                                              )}
+                                              <span>: {breakdown.correctHindi}</span>
+                                            </div>
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <em className="text-slate-600">Pending AI enrichment</em>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })()}
 
                               {(q.mnemonic || q.exampleSentence || q.rootWordInfo || q.explanation) && (
                                 <div className="pt-1.5 border-t border-slate-800/80 space-y-1.5">
@@ -2160,20 +2208,52 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
                         {/* Collapsible Enrichment & Explanation Details */}
                         {isExpanded && (
                           <div className="pt-3 border-t border-slate-800/80 space-y-3 text-xs">
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                              {q.hindiMeaning && (
-                                <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800">
-                                  <span className="text-slate-400 font-semibold block text-[10px] uppercase">Hindi Meaning</span>
-                                  <span className="text-amber-200 font-medium text-sm">{q.hindiMeaning}</span>
+                            {(() => {
+                              const breakdown = resolveQuestionMeaningsBreakdown(q);
+                              return (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                  <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800 space-y-1.5">
+                                    <span className="text-slate-400 font-semibold block text-[10px] uppercase">Hindi Meaning (हिन्दी अर्थ)</span>
+                                    <div className="text-amber-200 font-medium text-xs leading-relaxed">
+                                      <span className="font-bold text-amber-400 capitalize">{breakdown.targetWord}: </span>
+                                      <span>{breakdown.targetHindi}</span>
+                                    </div>
+                                    {breakdown.correctOption && breakdown.correctHindi && (
+                                      <div className="text-amber-100/90 font-medium text-xs pt-1.5 border-t border-slate-800/70 leading-relaxed">
+                                        <span className="font-bold text-teal-300 capitalize">{breakdown.correctOption}</span>
+                                        {breakdown.categoryLabel && (
+                                          <span className="text-[9px] text-teal-300 font-semibold uppercase ml-1 px-1 py-0.5 rounded bg-teal-500/15 border border-teal-500/30">
+                                            {breakdown.categoryLabel}
+                                          </span>
+                                        )}
+                                        <span>: {breakdown.correctHindi}</span>
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800 space-y-1.5">
+                                    <span className="text-slate-400 font-semibold block text-[10px] uppercase">English Meaning</span>
+                                    <div className="text-slate-200 text-xs leading-relaxed">
+                                      <span className="font-bold text-sky-400 capitalize">{breakdown.targetWord}</span>
+                                      <span className="text-slate-400 font-normal"> – </span>
+                                      <span>{breakdown.targetMeaning}</span>
+                                    </div>
+                                    {breakdown.correctOption && breakdown.correctMeaning && (
+                                      <div className="text-slate-300 text-xs pt-1.5 border-t border-slate-800/70 leading-relaxed">
+                                        <span className="font-bold text-emerald-400 capitalize">{breakdown.correctOption}</span>
+                                        {breakdown.categoryLabel && (
+                                          <span className="text-[9px] text-emerald-300 font-semibold uppercase ml-1 px-1 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30">
+                                            {breakdown.categoryLabel}
+                                          </span>
+                                        )}
+                                        <span className="text-slate-400 font-normal"> – </span>
+                                        <span>{breakdown.correctMeaning}</span>
+                                      </div>
+                                    )}
+                                  </div>
                                 </div>
-                              )}
-                              {q.meaning && (
-                                <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800">
-                                  <span className="text-slate-400 font-semibold block text-[10px] uppercase">English Meaning</span>
-                                  <span className="text-slate-200">{q.meaning}</span>
-                                </div>
-                              )}
-                            </div>
+                              );
+                            })()}
 
                             {q.mnemonic && (
                               <div className="bg-amber-950/20 border border-amber-500/30 p-2.5 rounded-lg text-amber-200">

@@ -38,6 +38,8 @@ import { ReportQuestionModal } from './ReportQuestionModal';
 import { ShareBattleResultModal } from './ShareBattleResultModal';
 import { BattleShareData } from '../utils/shareCardGenerator';
 import { getOptionBreakdown, OptionDetail } from '../utils/optionExplanations';
+import { resolveCardEducation } from '../utils/questionEducationResolver';
+import { QuestionSolutionBreakdown } from './QuestionSolutionBreakdown';
 import { ExamAppearancesBadge } from './ExamAppearancesBadge';
 import { formatExamTag } from '../services/jsonPyqParser';
 
@@ -102,64 +104,9 @@ const MatchQuestionReviewCard: React.FC<MatchQuestionReviewCardProps> = ({
     );
   }, [q]);
 
-  // Guaranteed educational fields resolution
+  // Guaranteed educational fields resolution with disambiguated word & option meanings
   const eduDetails = useMemo(() => {
-    const targetWord = (q.wordOrPhrase || '').trim();
-    const correctOpt = q.options[q.correctIndex] || 'Option';
-    const lower = targetWord.toLowerCase();
-
-    let root = q.rootWordInfo?.trim() || '';
-    if (!root) {
-      if (lower.startsWith('pan')) {
-        root = 'Greek pan- ("all, whole") -> formal speech of praise delivered in a public gathering.';
-      } else if (lower.startsWith('castig') || lower.startsWith('chast')) {
-        root = 'Latin castigare (castus "pure" + agere "to drive") -> to discipline or severely criticize.';
-      } else if (lower.startsWith('fastid')) {
-        root = 'Latin fastidium ("loathing, distaste") -> difficult to please; excessively particular.';
-      } else if (lower.startsWith('bene') || lower.startsWith('bon')) {
-        root = 'Latin bene ("well, good") -> expressing kindness or favorable disposition.';
-      } else if (lower.startsWith('mal')) {
-        root = 'Latin malus ("bad, ill") -> denoting harmful, defective, or hostile state.';
-      } else if (lower.startsWith('equ')) {
-        root = 'Latin aequus ("even, equal") -> denoting calmness, balance, or fair proportion.';
-      } else if (lower.startsWith('tacit')) {
-        root = 'Latin tacere ("to be silent") -> expressing quietness or habitual lack of speech.';
-      } else if (lower.startsWith('loqu') || lower.startsWith('locu')) {
-        root = 'Latin loqui ("to speak") -> tending to speak fluently or at great length.';
-      } else {
-        root = `Root and morphological structure of "${targetWord}" tested frequently in competitive examinations.`;
-      }
-    }
-
-    let meaning = q.meaning?.trim() || '';
-    let hindiMeaning = q.hindiMeaning?.trim() || '';
-
-    if (!meaning) {
-      if (q.category === 'synonyms') {
-        meaning = `Shows characteristics or qualities closely corresponding to "${correctOpt}".`;
-        hindiMeaning = `"${targetWord}" का यथार्थ शब्दार्थ एवं भावार्थ`;
-      } else if (q.category === 'antonyms') {
-        meaning = `Denotes a state or quality in direct contrast to "${correctOpt}".`;
-        hindiMeaning = `"${targetWord}" का सटीक विलोमार्थी भाव`;
-      } else if (q.category === 'ows') {
-        meaning = `One who or that which corresponds to: "${targetWord}".`;
-        hindiMeaning = `"${correctOpt}" का एक शब्द में सटीक अर्थ`;
-      } else {
-        meaning = `Figurative meaning: Denotes "${correctOpt}".`;
-        hindiMeaning = `मुहावरे "${targetWord}" का लाक्षणिक अर्थ`;
-      }
-    }
-
-    const mnemonic = q.mnemonic?.trim() || `Memory Hook: Connect "${targetWord}" with "${correctOpt}" for rapid recall during revision.`;
-    const example = q.exampleSentence?.trim() || `The examination sentence tested the precise contextual nuance of "${targetWord}".`;
-
-    return {
-      meaning,
-      hindiMeaning,
-      rootWordInfo: root,
-      mnemonic,
-      exampleSentence: example,
-    };
+    return resolveCardEducation(q);
   }, [q]);
 
   const whyThisAnswerText = useMemo(() => {
@@ -240,7 +187,11 @@ const MatchQuestionReviewCard: React.FC<MatchQuestionReviewCardProps> = ({
           {/* Bookmark/Star to Vault */}
           <button
             onClick={() => {
-              soundManager.playTap();
+              if (isBookmarked) {
+                soundManager.playUnsave();
+              } else {
+                soundManager.playWhoosh();
+              }
               onBookmark(q);
             }}
             className={`p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
@@ -364,21 +315,19 @@ const MatchQuestionReviewCard: React.FC<MatchQuestionReviewCardProps> = ({
 
       {/* Educational Explanations: Word Meaning, Morphological Insight & Why this Answer */}
       <div className="bg-slate-950/90 rounded-xl p-3 sm:p-3.5 border border-slate-800 text-xs space-y-2.5">
-        {/* Word Meaning */}
-        <div className="space-y-1">
-          <div className="flex items-start gap-2">
-            <span className="font-bold text-sky-400 shrink-0">Word Meaning:</span>
-            <span className="text-slate-100 font-medium leading-relaxed">
-              {eduDetails.meaning}
-            </span>
+        <QuestionSolutionBreakdown
+          breakdown={eduDetails.meaningsBreakdown}
+          meaning={eduDetails.meaning}
+          hindiMeaning={eduDetails.hindiMeaning}
+          category={q.category}
+        />
+
+        {eduDetails.exampleSentence && (
+          <div className="text-[11px] text-slate-400 italic pt-1.5 border-t border-slate-800/60">
+            <span className="font-semibold text-slate-500 not-italic">Example: </span>
+            "{eduDetails.exampleSentence}"
           </div>
-          {eduDetails.exampleSentence && (
-            <div className="text-[11px] text-slate-400 italic pl-1">
-              <span className="font-semibold text-slate-500 not-italic">Example: </span>
-              "{eduDetails.exampleSentence}"
-            </div>
-          )}
-        </div>
+        )}
 
         {/* Morphological Insight */}
         {eduDetails.rootWordInfo && (

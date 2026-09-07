@@ -28,6 +28,7 @@ import { ReportQuestionModal } from './ReportQuestionModal';
 import { formatExamTag } from '../services/jsonPyqParser';
 import { ExamAppearancesBadge } from './ExamAppearancesBadge';
 import { resolveCardEducation } from '../utils/questionEducationResolver';
+import { QuestionSolutionBreakdown } from './QuestionSolutionBreakdown';
 
 interface MistakeVaultProps {
   savedWords: SavedWord[];
@@ -463,16 +464,14 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
                         <div className="text-sm font-extrabold text-emerald-400">
                           Correct: {currentCard.question.options[currentCard.question.correctIndex]}
                         </div>
-                        {/* Meaning & Hindi Meaning for Synonyms / Antonyms / Vocab */}
-                        <div className="bg-slate-950/80 p-2.5 rounded-xl text-left border border-slate-800 space-y-1">
-                          <div className="text-xs text-slate-100 font-medium">
-                            <span className="font-bold text-sky-400">Meaning: </span>
-                            {cardEdu.meaning}
-                          </div>
-                          <div className="text-xs text-amber-300 font-medium">
-                            <span className="font-bold text-amber-400">हिन्दी अर्थ: </span>
-                            {cardEdu.hindiMeaning}
-                          </div>
+                        {/* Meaning & Hindi Meaning with clear line separation */}
+                        <div className="text-left">
+                          <QuestionSolutionBreakdown
+                            breakdown={cardEdu.meaningsBreakdown}
+                            meaning={cardEdu.meaning}
+                            hindiMeaning={cardEdu.hindiMeaning}
+                            category={currentCard.question.category}
+                          />
                         </div>
                         <div className="text-xs text-slate-300 bg-slate-950/70 p-2.5 rounded-xl text-left border border-slate-800/80">
                           <span className="font-bold text-sky-400">💡 Memory Hack: </span>

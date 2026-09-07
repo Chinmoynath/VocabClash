@@ -2,7 +2,7 @@ import { Question, QuestionOptionDetail } from '../types';
 import { ExtractedQuestion } from '../types/pyqImport';
 import { backfillBatchEnrichments, fetchPublishedQuestionBank } from './pyqFirestoreService';
 import { questionBankEngine } from './questionBankEngine';
-import { resolveCardEducation } from '../utils/questionEducationResolver';
+import { resolveCardEducation, lookupMasterEntry } from '../utils/questionEducationResolver';
 
 export interface EnrichmentProgress {
   current: number;
@@ -56,13 +56,16 @@ export function mergeEnrichment(
     finalOptionDetails = original.options.map((origOpt, idx) => {
       const incoming = enriched.optionDetails?.[idx];
       const isCorrect = idx === original.correctIndex;
+      const masterLookup = lookupMasterEntry(origOpt);
+      const fallbackEnglish = masterLookup?.english || (isCorrect && enriched.meaning ? enriched.meaning : `Exam concept: "${origOpt}"`);
+      const fallbackHindi = masterLookup?.hindi || (isCorrect && enriched.hindiMeaning ? enriched.hindiMeaning : `"${origOpt}" का अर्थ`);
       return {
         option: origOpt,
-        englishMeaning: incoming?.englishMeaning?.trim() || (isCorrect && enriched.meaning ? enriched.meaning : `Exam concept: "${origOpt}"`),
-        hindiMeaning: incoming?.hindiMeaning?.trim() || (isCorrect && enriched.hindiMeaning ? enriched.hindiMeaning : `"${origOpt}" का अर्थ`),
+        englishMeaning: incoming?.englishMeaning?.trim() || fallbackEnglish,
+        hindiMeaning: incoming?.hindiMeaning?.trim() || fallbackHindi,
         explanation: incoming?.explanation?.trim() || incoming?.shortExplanation?.trim() || (isCorrect ? 'Correct Answer' : 'Distractor option'),
         shortExplanation: incoming?.shortExplanation?.trim() || (isCorrect ? 'Correct Answer' : undefined),
-        mnemonicHook: incoming?.mnemonicHook?.trim() || undefined,
+        mnemonicHook: incoming?.mnemonicHook?.trim() || masterLookup?.mnemonic || undefined,
         isCorrect,
       };
     });

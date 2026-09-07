@@ -3,12 +3,26 @@ import { ALL_VOCAB_MASTER } from '../services/questionBankEngine';
 import { OWS_MASTER_EXTENDED } from '../data/owsMasterData';
 import { IDIOM_MASTER_EXTENDED } from '../data/idiomMasterData';
 
+export interface QuestionMeaningsBreakdown {
+  targetWord: string;
+  targetMeaning: string;
+  targetHindi: string;
+  targetLabel?: string;
+  correctOption?: string;
+  correctMeaning?: string;
+  correctHindi?: string;
+  categoryLabel?: string;
+  combinedEnglishText: string;
+  combinedHindiText: string;
+}
+
 export interface CardEducation {
   meaning: string;
   hindiMeaning: string;
   mnemonic: string;
   exampleSentence: string;
   rootWordInfo?: string;
+  meaningsBreakdown: QuestionMeaningsBreakdown;
 }
 
 interface VocabMasterRecord {
@@ -88,6 +102,40 @@ export const HIGH_YIELD_EXAM_VOCAB: Record<string, VocabMasterRecord> = {
   },
 
   // HIGH-YIELD A-Z VOCABULARY FREQUENTLY TESTED IN SSC/CGL/CHSL
+  'respectful': {
+    hindi: 'आदरणीय / सम्मानपूर्ण / विनम्र',
+    english: 'Feeling or showing deference, polite regard, and respect for others.',
+    mnemonic: 'Respect + Ful: Full of deep regard and courtesy towards elders.',
+    example: 'He gave a respectful bow to the committee members.',
+    root: 'Latin respectus ("act of looking back, regard").',
+  },
+  'dutiful': {
+    hindi: 'कर्तव्यनिष्ठ / आज्ञाकारी / निष्ठावान',
+    english: 'Conscientiously fulfilling one’s duty or obligations; obedient and devoted.',
+    mnemonic: 'Duty + Ful: Jo apni duty aur obligations ko full honesty ke sath nibhaye.',
+    example: 'A dutiful civil servant working tirelessly for public welfare.',
+    root: 'Anglo-Norman duetee ("obligation, duty").',
+  },
+  'derogatory': {
+    hindi: 'अपमानजनक / निंदात्मक / अनादरपूर्ण',
+    english: 'Showing a critical or disrespectful attitude; disparaging and belittling.',
+    mnemonic: 'De-rogate: Kisi ke samman ko ghatana ya derogatory remarks pass karna.',
+    example: 'He apologized for making derogatory remarks during the heated debate.',
+    root: 'Latin derogare ("to detract from, repeal partly").',
+  },
+  'insolent': {
+    hindi: 'ढीठ / असभ्य / गुस्ताख़ / उद्दंड',
+    english: 'Showing a rude and arrogant lack of respect towards others.',
+    mnemonic: 'In (not) + Solent: Jo adab se silent na rahe aur arrogant ban jaye.',
+    example: 'The insolent student was reprimanded for talking back to the teacher.',
+    root: 'Latin insolens ("unaccustomed, immoderate, arrogant").',
+  },
+  'admiring': {
+    hindi: 'प्रशंसक / आदरयुक्त / सराहना करने वाला',
+    english: 'Regarding someone or something with respect or warm approval.',
+    mnemonic: 'Admire: Jo kisi ke guno ki prashansa (admiration) kare.',
+    example: 'The young artist attracted an admiring audience at the exhibition.',
+  },
   'aberration': {
     hindi: 'विपथन / सामान्य से विचलन',
     english: 'A departure from what is normal, usual, or expected.',
@@ -598,6 +646,38 @@ export const HIGH_YIELD_EXAM_VOCAB: Record<string, VocabMasterRecord> = {
     mnemonic: 'Pro + Life: Abundant output produced.',
     example: 'Rabindranath Tagore was a prolific writer who composed thousands of poems and songs.',
   },
+  'puritanical': {
+    hindi: 'नैतिकतावादी / अत्यधिक नियमनिष्ठ / कट्टर',
+    english: 'Having or displaying excessively strict moral or religious views.',
+    mnemonic: 'Puri + Tan (strict) + ical: People who are too strict about purity in daily moral life.',
+    example: 'The Victorian era was known for its puritanical approach to literature and dress.',
+    root: 'Latin puritas ("purity").',
+  },
+  'prudish': {
+    hindi: 'आवश्यकता से अधिक नैतिक / दकियानूसी / लज्जाशील',
+    english: 'Excessively proper, modest, or easily shocked by matters relating to modesty or morality.',
+    mnemonic: 'Prude + ish: Someone acting like a prude over normal expressions.',
+    example: 'Her prudish relatives frowned at modern relaxed clothing styles.',
+    root: 'Old French prude ("virtuous, modest woman").',
+  },
+  'permissive': {
+    hindi: 'उदार / अत्यधिक छूट देने वाला / सहनशील',
+    english: 'Allowing or characterized by great or excessive freedom of behavior.',
+    mnemonic: 'Permission dene wala = Permissive attitude.',
+    example: 'Permissive parenting styles can sometimes lead to disciplinary issues.',
+  },
+  'orthodox': {
+    hindi: 'रूढ़िवादी / परंपरावादी / कट्टर',
+    english: 'Following or conforming to traditional or generally accepted rules or beliefs.',
+    mnemonic: 'Ortho (straight/conventional) + dox (belief) = Strictly conforming to tradition.',
+    example: 'He held orthodox religious opinions and adhered to ancient ceremonies.',
+  },
+  'blasphemous': {
+    hindi: 'ईशनिंदक / धर्मविरोधी / अपवित्र',
+    english: 'Sacrilegious against God or sacred things; profane.',
+    mnemonic: 'Blast against faith = Blasphemous utterance.',
+    example: 'The publication was banned after being declared blasphemous by authorities.',
+  },
   'quixotic': {
     hindi: 'अव्यावहारिक / ख्याली पुलाव पकाने वाला',
     english: 'Exceedingly idealistic; unrealistic and impractical.',
@@ -737,7 +817,7 @@ function normalizeKey(str: string): string {
 /**
  * Searches our comprehensive master vocabulary table or returns null.
  */
-function lookupMasterEntry(word: string): VocabMasterRecord | null {
+export function lookupMasterEntry(word: string): VocabMasterRecord | null {
   if (!word) return null;
   const rawLower = word.trim().toLowerCase();
   const clean = normalizeKey(rawLower);
@@ -771,6 +851,332 @@ function lookupMasterEntry(word: string): VocabMasterRecord | null {
 }
 
 /**
+ * Resolves disambiguated educational meanings for both the target word (e.g. puritanical)
+ * and the correct option (e.g. prudish) to prevent student confusion in synonyms/antonyms.
+ */
+export function resolveQuestionMeaningsBreakdown(question: {
+  question?: string;
+  wordOrPhrase?: string;
+  category?: string;
+  options?: string[];
+  correctIndex?: number | null;
+  meaning?: string;
+  englishMeaning?: string;
+  hindiMeaning?: string;
+  optionDetails?: any[];
+}): QuestionMeaningsBreakdown {
+  if (!question) {
+    return {
+      targetWord: 'Vocabulary',
+      targetMeaning: 'Standard examination vocabulary term.',
+      targetHindi: 'प्रतियोगी परीक्षा हेतु महत्वपूर्ण शब्दार्थ',
+      combinedEnglishText: 'Vocabulary – Standard examination vocabulary term.',
+      combinedHindiText: 'Vocabulary: प्रतियोगी परीक्षा हेतु महत्वपूर्ण शब्दार्थ',
+    };
+  }
+
+  const rawCat = (question.category || '').toLowerCase();
+  const rawQText = (question.question || '').toLowerCase();
+
+  const isSynonym = rawCat.includes('synonym') || rawQText.includes('synonym') || (!rawCat && !rawQText);
+  const isAntonym = rawCat.includes('antonym') || rawQText.includes('antonym');
+  const isOWS = rawCat.includes('ows') || rawCat.includes('one word') || rawQText.includes('one word') || rawQText.includes('substitut');
+  const isIdiom = rawCat.includes('idiom') || rawCat.includes('phrase') || rawQText.includes('idiom') || rawQText.includes('phrase');
+  const isDuoCategory = isSynonym || isAntonym;
+
+  // 1. Extract clean target word
+  let targetWord = (question.wordOrPhrase || '').trim();
+  if (!targetWord && question.question) {
+    const quoteMatch = question.question.match(/["']([^"']+)["']/);
+    if (quoteMatch && quoteMatch[1] && quoteMatch[1].length <= 45) {
+      targetWord = quoteMatch[1].trim();
+    } else {
+      targetWord = question.question.trim();
+    }
+  }
+  // Strip outer quotes
+  targetWord = targetWord.replace(/^["']+|["']+$/g, '').trim();
+
+  // 2. Identify correct option
+  const correctIdx = typeof question.correctIndex === 'number' ? question.correctIndex : null;
+  const correctOption = (correctIdx !== null && Array.isArray(question.options) && question.options[correctIdx])
+    ? String(question.options[correctIdx]).replace(/^["']+|["']+$/g, '').trim()
+    : undefined;
+
+  const isDistinctCorrect = Boolean(
+    correctOption &&
+    targetWord &&
+    normalizeKey(correctOption) !== normalizeKey(targetWord)
+  );
+
+  // Helper to split text joined by bullet points, newlines, or pipes
+  const splitCombined = (text: string): [string, string] => {
+    if (!text) return ['', ''];
+    const delimiterRegex = /(?:\r?\n\s*[•·\-\*]\s*|\s+[•·]\s+|\s*\|\s*|\s*\/\/\s*)/;
+    const parts = text.split(delimiterRegex);
+    if (parts.length >= 2) {
+      return [parts[0].trim(), parts.slice(1).join(' ').trim()];
+    }
+    return [text.trim(), ''];
+  };
+
+  // 3. Resolve Target Meaning
+  const rawMeaning = (question.meaning || question.englishMeaning || '').trim();
+  let targetMeaning = '';
+  let extractedCorrectMeaningFromRaw = '';
+
+  const [part1English, part2English] = splitCombined(rawMeaning);
+  targetMeaning = part1English;
+  if (part2English) extractedCorrectMeaningFromRaw = part2English;
+
+  // Clean target meaning from pre-existing word prefix if already there
+  if (targetWord && targetMeaning) {
+    const prefixRegex = new RegExp(`^${targetWord.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*[-–:]\\s*`, 'i');
+    targetMeaning = targetMeaning.replace(prefixRegex, '').trim();
+  }
+  // Clean generic prefix
+  targetMeaning = targetMeaning.replace(/^(?:target\s*word|given\s*word|question\s*term|word|meaning)\s*[-–:]\s*/i, '').trim();
+
+  // OWS lookup for target word
+  if (isOWS) {
+    const owsMatch = OWS_MASTER_EXTENDED.find(
+      o => o.answer.toLowerCase() === targetWord.toLowerCase() ||
+           normalizeKey(o.answer) === normalizeKey(targetWord) ||
+           o.phrase.toLowerCase().includes(targetWord.toLowerCase().slice(0, 25)) ||
+           targetWord.toLowerCase().includes(o.phrase.toLowerCase().slice(0, 25))
+    );
+    if (owsMatch) {
+      if (!targetMeaning) targetMeaning = owsMatch.meaning || owsMatch.phrase;
+    }
+  }
+
+  // Idiom lookup for target word
+  if (isIdiom) {
+    const idiomMatch = IDIOM_MASTER_EXTENDED.find(
+      idm => normalizeKey(idm.idiom) === normalizeKey(targetWord) ||
+             idm.idiom.toLowerCase().includes(targetWord.toLowerCase()) ||
+             targetWord.toLowerCase().includes(idm.idiom.toLowerCase())
+    );
+    if (idiomMatch && !targetMeaning) {
+      targetMeaning = idiomMatch.meaning;
+    }
+  }
+
+  if (!targetMeaning) {
+    const targetLookup = lookupMasterEntry(targetWord);
+    if (targetLookup?.english) {
+      targetMeaning = targetLookup.english;
+    } else if (isSynonym) {
+      targetMeaning = correctOption
+        ? `Denotes qualities closely aligned with "${correctOption}".`
+        : 'High-yield examination vocabulary term.';
+    } else if (isAntonym) {
+      targetMeaning = correctOption
+        ? `Expresses a state or quality in direct opposition to "${correctOption}".`
+        : 'High-yield examination vocabulary term.';
+    } else if (isOWS) {
+      targetMeaning = 'High-frequency one-word substitution examination concept.';
+    } else if (isIdiom) {
+      targetMeaning = 'Authentic competitive exam idiom and phrase requirement.';
+    } else {
+      targetMeaning = 'High-yield competitive examination concept.';
+    }
+  }
+
+  // 4. Resolve Target Hindi
+  const rawHindi = (question.hindiMeaning || '').trim();
+  let targetHindi = '';
+  let extractedCorrectHindiFromRaw = '';
+
+  const [part1Hindi, part2Hindi] = splitCombined(rawHindi);
+  targetHindi = part1Hindi;
+  if (part2Hindi) extractedCorrectHindiFromRaw = part2Hindi;
+
+  if (targetWord && targetHindi) {
+    const prefixHindiRegex = new RegExp(`^${targetWord.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*[-–:]\\s*`, 'i');
+    targetHindi = targetHindi.replace(prefixHindiRegex, '').trim();
+  }
+  targetHindi = targetHindi.replace(/^(?:target\s*word|word|हिन्दी|भावार्थ|अर्थ)\s*[-–:]\s*/i, '').trim();
+  targetHindi = targetHindi.replace(/\s*।\s*$/, '').trim();
+
+  // OWS / Idioms Hindi lookup
+  if (isOWS && !targetHindi) {
+    const owsMatch = OWS_MASTER_EXTENDED.find(
+      o => o.answer.toLowerCase() === targetWord.toLowerCase() ||
+           normalizeKey(o.answer) === normalizeKey(targetWord)
+    );
+    if (owsMatch?.hindi) targetHindi = owsMatch.hindi;
+  }
+  if (isIdiom && !targetHindi) {
+    const idiomMatch = IDIOM_MASTER_EXTENDED.find(
+      idm => normalizeKey(idm.idiom) === normalizeKey(targetWord)
+    );
+    if (idiomMatch?.hindi) targetHindi = idiomMatch.hindi;
+  }
+
+  if (!targetHindi) {
+    const targetLookup = lookupMasterEntry(targetWord);
+    if (targetLookup?.hindi) {
+      targetHindi = targetLookup.hindi;
+    } else {
+      targetHindi = `"${targetWord}" का यथार्थ शब्दार्थ`;
+    }
+  }
+
+  // 5. Resolve Correct Option Meaning & Hindi
+  let correctMeaning: string | undefined;
+  let correctHindi: string | undefined;
+
+  if (isDistinctCorrect && correctOption) {
+    // Check if extracted from raw combined
+    if (extractedCorrectMeaningFromRaw) {
+      let cleaned = extractedCorrectMeaningFromRaw;
+      const cleanPrefixRegex = new RegExp(`^${correctOption.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\s*\\([^)]*\\))?\\s*[-–:]\\s*`, 'i');
+      cleaned = cleaned.replace(cleanPrefixRegex, '').trim();
+      cleaned = cleaned.replace(/^(?:\([^)]*\)|correct\s*answer|answer|meaning|option)\s*[-–:]\s*/i, '').trim();
+      if (cleaned) correctMeaning = cleaned;
+    }
+
+    if (extractedCorrectHindiFromRaw) {
+      let cleanedHindi = extractedCorrectHindiFromRaw;
+      const cleanOptionPrefixRegex = new RegExp(`^${correctOption.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\s*\\([^)]*\\))?\\s*[-–:]\\s*`, 'i');
+      cleanedHindi = cleanedHindi.replace(cleanOptionPrefixRegex, '').trim();
+      cleanedHindi = cleanedHindi.replace(/^(?:\([^)]*\)|correct\s*answer|answer|हिन्दी|भावार्थ|अर्थ)\s*[-–:]\s*/i, '').trim();
+      cleanedHindi = cleanedHindi.replace(/\s*।\s*$/, '').trim();
+      if (cleanedHindi) correctHindi = cleanedHindi;
+    }
+
+    // Check optionDetails on question
+    if (!correctMeaning && correctIdx !== null && Array.isArray(question.optionDetails) && question.optionDetails[correctIdx]) {
+      const od = question.optionDetails[correctIdx];
+      const odEnglish = (od.englishMeaning || od.meaning || '').trim();
+      if (odEnglish && odEnglish.toLowerCase() !== targetMeaning.toLowerCase()) {
+        correctMeaning = odEnglish;
+      }
+      const odHindi = (od.hindiMeaning || '').trim();
+      if (odHindi && odHindi.toLowerCase() !== targetHindi.toLowerCase()) {
+        correctHindi = odHindi;
+      }
+    }
+
+    // Lookup OWS master data for correctOption
+    if (isOWS && (!correctMeaning || !correctHindi)) {
+      const owsOptMatch = OWS_MASTER_EXTENDED.find(
+        o => o.answer.toLowerCase() === correctOption.toLowerCase() ||
+             normalizeKey(o.answer) === normalizeKey(correctOption) ||
+             o.phrase.toLowerCase().includes(correctOption.toLowerCase().slice(0, 25))
+      );
+      if (owsOptMatch) {
+        if (!correctMeaning) correctMeaning = owsOptMatch.meaning || owsOptMatch.phrase;
+        if (!correctHindi) correctHindi = owsOptMatch.hindi;
+      }
+    }
+
+    // Lookup Idioms master data for correctOption
+    if (isIdiom && (!correctMeaning || !correctHindi)) {
+      const idiomOptMatch = IDIOM_MASTER_EXTENDED.find(
+        idm => normalizeKey(idm.idiom) === normalizeKey(correctOption) ||
+               idm.meaning.toLowerCase().includes(correctOption.toLowerCase())
+      );
+      if (idiomOptMatch) {
+        if (!correctMeaning) correctMeaning = idiomOptMatch.meaning;
+        if (!correctHindi) correctHindi = idiomOptMatch.hindi;
+      }
+    }
+
+    // Lookup master dictionary entry for correctOption
+    if (!correctMeaning || !correctHindi) {
+      const correctLookup = lookupMasterEntry(correctOption);
+      if (!correctMeaning && correctLookup?.english) {
+        correctMeaning = correctLookup.english;
+      }
+      if (!correctHindi && correctLookup?.hindi) {
+        correctHindi = correctLookup.hindi;
+      }
+    }
+
+    // Fallbacks for specific categories
+    if (!correctMeaning) {
+      if (isSynonym) {
+        correctMeaning = `Accurately corresponds to "${targetWord}", conveying the equivalent contextual meaning.`;
+      } else if (isAntonym) {
+        correctMeaning = `Expresses the contrasting or polar opposite state of "${targetWord}".`;
+      } else if (isOWS) {
+        correctMeaning = correctOption.split(' ').length > 2
+          ? `Detailed definition and contextual meaning corresponding to "${targetWord}".`
+          : `Precise one-word substitution for the given description.`;
+      } else if (isIdiom) {
+        correctMeaning = `Conveys the authentic figurative meaning of "${targetWord}".`;
+      } else {
+        correctMeaning = `Accurately satisfies the question requirement.`;
+      }
+    }
+
+    if (!correctHindi) {
+      if (isSynonym) {
+        correctHindi = `"${targetWord}" का सटीक समानार्थी अर्थ`;
+      } else if (isAntonym) {
+        correctHindi = `"${targetWord}" का विलोमार्थी भाव`;
+      } else if (isOWS) {
+        correctHindi = `"${targetWord}" का सटीक यथार्थ अर्थ / प्रतिस्थापन`;
+      } else if (isIdiom) {
+        correctHindi = `मुहावरे "${targetWord}" का वास्तविक भावार्थ`;
+      } else {
+        correctHindi = `दिए गए प्रश्न का सटीक उत्तर`;
+      }
+    }
+  }
+
+  // 6. Descriptive Target & Category Labels
+  let targetLabel = 'Question Term';
+  let categoryLabel = 'Correct Answer';
+
+  if (isOWS) {
+    targetLabel = targetWord.split(' ').length > 2 ? 'Given Phrase' : 'Question Term';
+    categoryLabel = (correctOption && correctOption.split(' ').length <= 2) ? 'One Word Substitution' : 'Correct Answer';
+  } else if (isIdiom) {
+    targetLabel = 'Idiom / Phrase';
+    categoryLabel = 'Correct Meaning';
+  } else if (isSynonym) {
+    targetLabel = 'Target Word';
+    categoryLabel = 'Synonym (समानार्थी)';
+  } else if (isAntonym) {
+    targetLabel = 'Target Word';
+    categoryLabel = 'Antonym (विलोमार्थी)';
+  }
+
+  // 7. Format combined strings
+  const cleanTargetDisplay = targetWord || 'Word';
+  const targetLineEnglish = `${cleanTargetDisplay} – ${targetMeaning}`;
+  const targetLineHindi = `${cleanTargetDisplay}: ${targetHindi}`;
+
+  let combinedEnglishText = targetLineEnglish;
+  if (isDistinctCorrect && correctOption && correctMeaning) {
+    const correctLineEnglish = `${correctOption} (${categoryLabel}) – ${correctMeaning}`;
+    combinedEnglishText = `${targetLineEnglish}\n• ${correctLineEnglish}`;
+  }
+
+  let combinedHindiText = targetLineHindi;
+  if (isDistinctCorrect && correctOption && correctHindi) {
+    const correctLineHindi = `${correctOption} (${categoryLabel}): ${correctHindi}`;
+    combinedHindiText = `${targetLineHindi}\n• ${correctLineHindi}`;
+  }
+
+  return {
+    targetWord: cleanTargetDisplay,
+    targetMeaning,
+    targetHindi,
+    targetLabel,
+    correctOption: isDistinctCorrect ? correctOption : undefined,
+    correctMeaning: isDistinctCorrect ? correctMeaning : undefined,
+    correctHindi: isDistinctCorrect ? correctHindi : undefined,
+    categoryLabel: isDistinctCorrect ? categoryLabel : undefined,
+    combinedEnglishText,
+    combinedHindiText,
+  };
+}
+
+/**
  * Resolves or synthesizes complete educational fields (meaning, hindiMeaning, mnemonic, exampleSentence)
  * for ANY question in the application. Guarantees non-empty, high-yield content.
  */
@@ -781,40 +1187,34 @@ export function resolveCardEducation(question: Question): CardEducation {
       hindiMeaning: 'प्रतियोगी परीक्षा हेतु महत्वपूर्ण शब्दार्थ',
       mnemonic: 'Memory Hook: Review this term regularly to secure full marks in the exam.',
       exampleSentence: 'This question represents high-frequency exam vocabulary.',
+      meaningsBreakdown: {
+        targetWord: 'Vocabulary',
+        targetMeaning: 'Standard examination vocabulary requirement.',
+        targetHindi: 'प्रतियोगी परीक्षा हेतु महत्वपूर्ण शब्दार्थ',
+        combinedEnglishText: 'Vocabulary – Standard examination vocabulary requirement.',
+        combinedHindiText: 'Vocabulary: प्रतियोगी परीक्षा हेतु महत्वपूर्ण शब्दार्थ',
+      },
     };
   }
 
+  const breakdown = resolveQuestionMeaningsBreakdown(question);
   const category: QuestionCategory = question.category || 'synonyms';
-  const targetWord = (question.wordOrPhrase || question.question || '').trim();
+  const targetWord = breakdown.targetWord;
   const correctIdx = typeof question.correctIndex === 'number' ? question.correctIndex : 0;
-  const correctOption = (Array.isArray(question.options) && question.options[correctIdx])
-    ? String(question.options[correctIdx]).trim()
-    : targetWord;
+  const correctOption = breakdown.correctOption || (
+    Array.isArray(question.options) && question.options[correctIdx]
+      ? String(question.options[correctIdx]).trim()
+      : targetWord
+  );
 
-  // Check if question already has non-empty, non-placeholder fields
-  const existingMeaning = question.meaning?.trim();
-  const existingHindi = question.hindiMeaning?.trim();
   const existingMnemonic = question.mnemonic?.trim();
   const existingExample = question.exampleSentence?.trim();
   const existingRoot = question.rootWordInfo?.trim();
 
-  // If all fields are already populated and valid, return directly
-  const isMeaningValid = existingMeaning && existingMeaning.length > 2 && existingMeaning !== '""';
-  const isHindiValid = existingHindi && existingHindi.length > 1;
   const isMnemonicValid = existingMnemonic && existingMnemonic.length > 3;
   const isExampleValid = existingExample && existingExample.length > 5 && existingExample !== '""';
 
-  if (isMeaningValid && isHindiValid && isMnemonicValid && isExampleValid) {
-    return {
-      meaning: existingMeaning!,
-      hindiMeaning: existingHindi!,
-      mnemonic: existingMnemonic!,
-      exampleSentence: existingExample!,
-      rootWordInfo: existingRoot,
-    };
-  }
-
-  // Attempt dictionary lookups on both prompt and correct answer
+  // Check dictionary lookups
   const promptLookup = lookupMasterEntry(targetWord);
   const correctLookup = lookupMasterEntry(correctOption);
 
@@ -843,61 +1243,7 @@ export function resolveCardEducation(question: Question): CardEducation {
     ? question.optionDetails[correctIdx]
     : null;
 
-  // 1. RESOLVE ENGLISH MEANING
-  let finalMeaning = isMeaningValid ? existingMeaning! : '';
-  if (!finalMeaning) {
-    if (owsLookup?.meaning) {
-      finalMeaning = `${correctOption}: ${owsLookup.meaning}`;
-    } else if (owsLookup?.phrase) {
-      finalMeaning = `${correctOption}: ${owsLookup.phrase}`;
-    } else if (idiomLookup?.meaning) {
-      finalMeaning = idiomLookup.meaning;
-    } else if (promptLookup?.english) {
-      finalMeaning = promptLookup.english;
-    } else if (correctLookup?.english) {
-      finalMeaning = correctLookup.english;
-    } else if (correctOptionDetail?.englishMeaning && correctOptionDetail.englishMeaning.length > 5) {
-      finalMeaning = correctOptionDetail.englishMeaning;
-    } else if (category === 'synonyms') {
-      finalMeaning = `Accurately denotes "${correctOption}", expressing the exact synonymic attribute for "${targetWord}".`;
-    } else if (category === 'antonyms') {
-      finalMeaning = `Directly contrasts with "${targetWord}", representing its opposite state or meaning.`;
-    } else if (category === 'ows') {
-      finalMeaning = `One who or that which denotes "${correctOption}", answering: "${targetWord}".`;
-    } else if (category === 'idioms') {
-      finalMeaning = `Figurative meaning: "${correctOption}".`;
-    } else {
-      finalMeaning = `Denotes the attribute or concept corresponding to "${correctOption}".`;
-    }
-  }
-
-  // 2. RESOLVE HINDI MEANING
-  let finalHindi = isHindiValid ? existingHindi! : '';
-  if (!finalHindi) {
-    if (owsLookup?.hindi) {
-      finalHindi = owsLookup.hindi;
-    } else if (idiomLookup?.hindi) {
-      finalHindi = idiomLookup.hindi;
-    } else if (promptLookup?.hindi) {
-      finalHindi = promptLookup.hindi;
-    } else if (correctLookup?.hindi) {
-      finalHindi = correctLookup.hindi;
-    } else if (correctOptionDetail?.hindiMeaning && correctOptionDetail.hindiMeaning.length > 2) {
-      finalHindi = correctOptionDetail.hindiMeaning;
-    } else if (category === 'synonyms') {
-      finalHindi = `"${targetWord}" / "${correctOption}" का सटीक अर्थ एवं भावार्थ`;
-    } else if (category === 'antonyms') {
-      finalHindi = `"${targetWord}" का विलोमार्थी शब्द: "${correctOption}"`;
-    } else if (category === 'ows') {
-      finalHindi = `"${correctOption}" का एक शब्द में सटीक हिन्दी अर्थ`;
-    } else if (category === 'idioms') {
-      finalHindi = `मुहावरे "${targetWord}" का लाक्षणिक अर्थ: "${correctOption}"`;
-    } else {
-      finalHindi = `"${correctOption}" का हिन्दी शब्दार्थ`;
-    }
-  }
-
-  // 3. RESOLVE MEMORY HACK / MNEMONIC
+  // 1. RESOLVE MEMORY HACK / MNEMONIC
   let finalMnemonic = isMnemonicValid ? existingMnemonic! : '';
   if (!finalMnemonic) {
     if (owsLookup?.mnemonic) {
@@ -911,7 +1257,6 @@ export function resolveCardEducation(question: Question): CardEducation {
     } else if (correctOptionDetail?.mnemonicHook) {
       finalMnemonic = correctOptionDetail.mnemonicHook;
     } else {
-      // Smart contextual mnemonic generation
       const cleanPrompt = targetWord.charAt(0).toUpperCase() + targetWord.slice(1);
       const cleanAnswer = correctOption.charAt(0).toUpperCase() + correctOption.slice(1);
 
@@ -929,7 +1274,7 @@ export function resolveCardEducation(question: Question): CardEducation {
     }
   }
 
-  // 4. RESOLVE EXAMPLE SENTENCE
+  // 2. RESOLVE EXAMPLE SENTENCE
   let finalExample = isExampleValid ? existingExample! : '';
   if (!finalExample) {
     if (owsLookup?.example) {
@@ -954,11 +1299,12 @@ export function resolveCardEducation(question: Question): CardEducation {
   }
 
   return {
-    meaning: finalMeaning,
-    hindiMeaning: finalHindi,
+    meaning: breakdown.combinedEnglishText,
+    hindiMeaning: breakdown.combinedHindiText,
     mnemonic: finalMnemonic,
     exampleSentence: finalExample,
     rootWordInfo: existingRoot || promptLookup?.root || correctLookup?.root,
+    meaningsBreakdown: breakdown,
   };
 }
 

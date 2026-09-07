@@ -255,6 +255,101 @@ class SoundManager {
     }
     this.triggerHaptic([30, 20, 50]);
   }
+
+  public playWhoosh() {
+    if (!this.soundEnabled) return;
+    const ctx = this.getAudioContext();
+    if (!ctx) return;
+
+    try {
+      const now = ctx.currentTime;
+      const duration = 0.32;
+
+      // 1. Aerodynamic noise whoosh via filtered white noise buffer
+      const bufferSize = Math.floor(ctx.sampleRate * duration);
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        // Taper edges with smooth sine envelope
+        const taper = Math.sin((i / bufferSize) * Math.PI);
+        data[i] = (Math.random() * 2 - 1) * taper;
+      }
+
+      const noiseSource = ctx.createBufferSource();
+      noiseSource.buffer = buffer;
+
+      // Bandpass sweep: sweeps rapidly from 350Hz up to 1800Hz and down to 400Hz
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.Q.setValueAtTime(1.8, now);
+      filter.frequency.setValueAtTime(350, now);
+      filter.frequency.exponentialRampToValueAtTime(1800, now + 0.12);
+      filter.frequency.exponentialRampToValueAtTime(420, now + duration);
+
+      const noiseGain = ctx.createGain();
+      noiseGain.gain.setValueAtTime(0.001, now);
+      noiseGain.gain.exponentialRampToValueAtTime(0.26, now + 0.08);
+      noiseGain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+      noiseSource.connect(filter);
+      filter.connect(noiseGain);
+      noiseGain.connect(ctx.destination);
+
+      // 2. Subtle low-mid resonant whistling body for distinct physical rush
+      const toneOsc = ctx.createOscillator();
+      const toneGain = ctx.createGain();
+      toneOsc.type = 'sine';
+      toneOsc.frequency.setValueAtTime(380, now);
+      toneOsc.frequency.exponentialRampToValueAtTime(740, now + 0.1);
+      toneOsc.frequency.exponentialRampToValueAtTime(260, now + duration);
+
+      toneGain.gain.setValueAtTime(0.001, now);
+      toneGain.gain.exponentialRampToValueAtTime(0.08, now + 0.08);
+      toneGain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+      toneOsc.connect(toneGain);
+      toneGain.connect(ctx.destination);
+
+      noiseSource.start(now);
+      noiseSource.stop(now + duration);
+      toneOsc.start(now);
+      toneOsc.stop(now + duration);
+    } catch {
+      // ignore
+    }
+    this.triggerHaptic([18, 12]);
+  }
+
+  public playUnsave() {
+    if (!this.soundEnabled) return;
+    const ctx = this.getAudioContext();
+    if (!ctx) return;
+
+    try {
+      const now = ctx.currentTime;
+      const duration = 0.22;
+
+      // Gentle soft untether sound
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(540, now);
+      osc.frequency.exponentialRampToValueAtTime(240, now + duration);
+
+      gain.gain.setValueAtTime(0.09, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(now);
+      osc.stop(now + duration);
+    } catch {
+      // ignore
+    }
+    this.triggerHaptic(12);
+  }
 }
 
 export const soundManager = new SoundManager();

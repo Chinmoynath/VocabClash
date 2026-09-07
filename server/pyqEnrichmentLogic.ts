@@ -140,8 +140,8 @@ ${JSON.stringify(
 STRICT EDUCATIONAL MANDATE (EVERY SINGLE QUESTION MUST BE FULLY ENRICHED):
 1. NEVER leave meaning, hindiMeaning, rootWordInfo, mnemonic, exampleSentence, or optionDetails empty.
 2. Word Meaning (Main target word/phrase):
-   - "meaning": Accurate, concise English dictionary definition.
-   - "hindiMeaning": 2 to 4 natural Hindi synonyms separated by slashes (e.g., "तुनकमिजाज / जिसे संतुष्ट करना कठिन हो").
+   - "meaning": Format explicitly pairing the word and definition: "<targetWord> – <Accurate, concise English dictionary definition>". For synonym or antonym questions where the correct answer option has a distinctive dictionary meaning, also include it: e.g., "puritanical – having or displaying excessively strict moral or religious views. | prudish (synonym) – excessively proper or easily shocked by matters relating to modesty."
+   - "hindiMeaning": Format with word name: "<targetWord>: 2 to 4 natural Hindi synonyms. / <correctOption>: Hindi meaning."
 3. Root & Etymology:
    - Provide genuine Latin, Greek, French, or Sanskrit roots, prefixes, and suffixes.
    - Format example: 'Latin fastidium ("loathing, distaste")' or 'Greek panegyrikos (pan "all" + agyris "assembly")'.

@@ -44,6 +44,9 @@ import { ReportQuestionModal } from './ReportQuestionModal';
 import { SupportModal } from './SupportModal';
 import { formatExamTag } from '../services/jsonPyqParser';
 import { ExamAppearancesBadge } from './ExamAppearancesBadge';
+import { resolveCardEducation } from '../utils/questionEducationResolver';
+import { QuestionSolutionBreakdown } from './QuestionSolutionBreakdown';
+import { VaultFlyAnimation, VaultFlyItem } from './VaultFlyAnimation';
 import { EXAM_FAMILY_PILLS, EXAM_FAMILY_SUB_TAGS, normalizeFilterToFamily } from '../utils/examFamilyUtils';
 import { 
   trackPracticeStart, 
@@ -220,7 +223,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
 
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
   const [isAnswered, setIsAnswered] = useState<boolean>(false);
-  const [saveToast, setSaveToast] = useState<string | null>(null);
+  const [flyItems, setFlyItems] = useState<VaultFlyItem[]>([]);
   const [showAllOptionBreakdown, setShowAllOptionBreakdown] = useState<boolean>(true);
   const [showReportModal, setShowReportModal] = useState<boolean>(false);
   const [showSupportModal, setShowSupportModal] = useState<boolean>(false);
@@ -242,7 +245,6 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     };
   }, [isFilterOpen]);
 
-  const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const hasFiredPracticeStartRef = useRef<boolean>(false);
   const batchCorrectCountRef = useRef<number>(0);
 
@@ -341,14 +343,6 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isAnswered, currentQ, showReportModal, showSupportModal, bookmarkedIds]);
-
-  const showSaveConfirmation = (message: string) => {
-    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
-    setSaveToast(message);
-    toastTimeoutRef.current = setTimeout(() => {
-      setSaveToast(null);
-    }, 2200);
-  };
 
   const handleApplyFilter = (newCat: QuestionCategory | 'mixed', newExam: ExamType) => {
     soundManager.playTap();
@@ -554,17 +548,50 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     }, 400);
   };
 
-  const handleToggleBookmark = () => {
+  const handleToggleBookmark = (e?: React.MouseEvent<HTMLElement> | React.TouchEvent<HTMLElement>) => {
     if (!currentQ) return;
-    soundManager.playTap();
+
+    // Detect click / tap coordinates for the letter flight origin
+    let startX = typeof window !== 'undefined' ? window.innerWidth * 0.75 : 200;
+    let startY = 120;
+
+    if (e && 'clientX' in e && e.clientX && e.clientY) {
+      startX = e.clientX;
+      startY = e.clientY;
+    } else if (e && 'touches' in e && e.touches && e.touches[0]) {
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+    } else if (typeof document !== 'undefined') {
+      const btn = document.querySelector('#pyq-save-button, #pyq-explanation-save-button');
+      if (btn) {
+        const rect = btn.getBoundingClientRect();
+        startX = rect.left + rect.width / 2;
+        startY = rect.top + rect.height / 2;
+      }
+    }
+
     onBookmarkQuestion(currentQ);
     const alreadyBookmarked = bookmarkedIds.includes(currentQ.id);
     const nextSaved = !alreadyBookmarked;
     questionReviewScheduler.setSavedStatus(currentQ.memoryKey || currentQ.wordOrPhrase, nextSaved);
 
-    showSaveConfirmation(
-      alreadyBookmarked ? 'Removed from Saved' : '⭐ Question Saved to Revision Vault'
-    );
+    // Audio & Haptic feedback
+    if (nextSaved) {
+      soundManager.playWhoosh();
+    } else {
+      soundManager.playUnsave();
+    }
+
+    const cleanWord = (currentQ.wordOrPhrase || 'Question').replace(/^["']+|["']+$/g, '').trim();
+    const newFlyItem: VaultFlyItem = {
+      id: `${currentQ.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      startX,
+      startY,
+      word: cleanWord,
+      isSave: nextSaved,
+    };
+
+    setFlyItems(prev => [...prev, newFlyItem]);
   };
 
   const isBookmarked = currentQ ? bookmarkedIds.includes(currentQ.id) : false;
@@ -591,76 +618,19 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     );
   }, [currentQ]);
 
-  // Guaranteed educational fields resolution so that every question has complete enrichment
+  // Guaranteed educational fields resolution with disambiguated word & option meanings
   const eduDetails = useMemo(() => {
     if (!currentQ) return null;
-    const targetWord = (currentQ.wordOrPhrase || '').trim();
-    const correctOpt = currentQ.options[currentQ.correctIndex] || 'Option';
-    const lower = targetWord.toLowerCase();
-
-    let root = currentQ.rootWordInfo?.trim() || '';
-    if (!root) {
-      if (lower.startsWith('pan')) {
-        root = 'Greek pan- ("all, whole") -> formal speech of praise delivered in a public gathering.';
-      } else if (lower.startsWith('castig') || lower.startsWith('chast')) {
-        root = 'Latin castigare (castus "pure" + agere "to drive") -> to discipline or severely criticize.';
-      } else if (lower.startsWith('fastid')) {
-        root = 'Latin fastidium ("loathing, distaste") -> difficult to please; excessively particular.';
-      } else if (lower.startsWith('bene') || lower.startsWith('bon')) {
-        root = 'Latin bene ("well, good") -> expressing kindness or favorable disposition.';
-      } else if (lower.startsWith('mal')) {
-        root = 'Latin malus ("bad, ill") -> denoting harmful, defective, or hostile state.';
-      } else if (lower.startsWith('equ')) {
-        root = 'Latin aequus ("even, equal") -> denoting calmness, balance, or fair proportion.';
-      } else if (lower.startsWith('tacit')) {
-        root = 'Latin tacere ("to be silent") -> expressing quietness or habitual lack of speech.';
-      } else if (lower.startsWith('loqu') || lower.startsWith('locu')) {
-        root = 'Latin loqui ("to speak") -> tending to speak fluently or at great length.';
-      } else {
-        root = `Root and morphological structure of "${targetWord}" tested frequently in competitive examinations.`;
-      }
-    }
-
-    let meaning = currentQ.meaning?.trim() || '';
-    let hindiMeaning = currentQ.hindiMeaning?.trim() || '';
-
-    if (!meaning) {
-      if (currentQ.category === 'synonyms') {
-        meaning = `Shows characteristics or qualities closely corresponding to "${correctOpt}".`;
-        hindiMeaning = `"${targetWord}" का यथार्थ शब्दार्थ एवं भावार्थ`;
-      } else if (currentQ.category === 'antonyms') {
-        meaning = `Denotes a state or quality in direct contrast to "${correctOpt}".`;
-        hindiMeaning = `"${targetWord}" का सटीक विलोमार्थी भाव`;
-      } else if (currentQ.category === 'ows') {
-        meaning = `One who or that which corresponds to: "${targetWord}".`;
-        hindiMeaning = `"${correctOpt}" का एक शब्द में सटीक अर्थ`;
-      } else {
-        meaning = `Figurative meaning: Denotes "${correctOpt}".`;
-        hindiMeaning = `मुहावरे "${targetWord}" का लाक्षणिक अर्थ`;
-      }
-    }
-
-    const mnemonic = currentQ.mnemonic?.trim() || `Memory Hook: Connect "${targetWord}" with "${correctOpt}" for rapid recall during revision.`;
-    const example = currentQ.exampleSentence?.trim() || `The examination sentence tested the precise contextual nuance of "${targetWord}".`;
-
-    return {
-      meaning,
-      hindiMeaning,
-      rootWordInfo: root,
-      mnemonic,
-      exampleSentence: example,
-    };
+    return resolveCardEducation(currentQ);
   }, [currentQ]);
 
   return (
     <div className="p-3.5 sm:p-5 lg:p-6 space-y-4 pb-8 max-w-4xl mx-auto w-full">
-      {/* Toast Notification */}
-      {saveToast && (
-        <div className="fixed top-14 left-1/2 -translate-x-1/2 z-50 bg-amber-500 text-slate-950 font-black px-4 py-2 rounded-full shadow-2xl text-xs flex items-center gap-2 border border-amber-300 animate-bounce">
-          <BookmarkCheck className="w-4 h-4" />
-          <span>{saveToast}</span>
-        </div>
-      )}
+      {/* Smooth Flying Letter Whoosh Animation into Vault */}
+      <VaultFlyAnimation
+        items={flyItems}
+        onComplete={(id) => setFlyItems(prev => prev.filter(item => item.id !== id))}
+      />
 
       {/* Custom Coaching Drill Completion Summary */}
       {customDrillCompleted ? (
@@ -1248,7 +1218,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
 
               {/* Save / Bookmark Button - Symbol ONLY */}
               <button
-                onClick={handleToggleBookmark}
+                onClick={(e) => handleToggleBookmark(e)}
                 id="pyq-save-button"
                 className={`p-2 rounded-xl border transition-all active:scale-90 flex items-center justify-center ${
                   isBookmarked
@@ -1352,123 +1322,58 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
           {/* Post-Answer Detailed Explanation Box with 4 Options Breakdown */}
           {isAnswered && (
             <div className="bg-slate-850 border border-slate-700/80 rounded-2xl p-3.5 space-y-3 animate-fadeIn shadow-md">
-              {/* Header Action Bar & Dedicated Word Meaning */}
-              {currentQ.category !== 'idioms' && currentQ.category !== 'ows' ? (
-                /* Dedicated Word Meaning for Synonyms, Antonyms & Vocab */
-                <div className="bg-slate-900/90 border border-slate-750 rounded-xl p-3 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5">
-                      <BookOpen className="w-3.5 h-3.5 text-amber-400" />
-                      <span className="text-[11px] font-black uppercase tracking-wider text-amber-300">
-                        Word Meaning (शब्दार्थ):
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={handleToggleBookmark}
-                        className={`px-2 py-1 rounded-lg border text-[11px] flex items-center gap-1 font-bold ${
-                          isBookmarked
-                            ? 'bg-amber-950 border-amber-600 text-amber-400'
-                            : 'bg-slate-800 border-slate-750 text-slate-300'
-                        }`}
-                      >
-                        <Bookmark className={`w-3 h-3 ${isBookmarked ? 'fill-amber-400' : ''}`} />
-                        <span>{isBookmarked ? 'Saved' : 'Save'}</span>
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          soundManager.playTap();
-                          onOpenAiTutor(currentQ);
-                        }}
-                        className="px-2 py-1 rounded-lg bg-purple-950/90 border border-purple-800 text-purple-300 text-[11px] flex items-center gap-1 font-bold hover:bg-purple-900"
-                      >
-                        <Sparkles className="w-3 h-3" />
-                        AI Deep Dive
-                      </button>
-                    </div>
-                  </div>
-
-                  {eduDetails && (
-                    <div className="space-y-1.5 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/80">
-                      {eduDetails.meaning && (
-                        <div className="text-xs text-slate-100 font-medium">
-                          <span className="font-bold text-sky-400">English: </span>
-                          <span>{eduDetails.meaning}</span>
-                        </div>
-                      )}
-                      {eduDetails.hindiMeaning && (
-                        <div className="text-xs text-amber-300/90 font-medium">
-                          <span className="font-bold text-amber-400">हिन्दी अर्थ: </span>
-                          <span>{eduDetails.hindiMeaning}</span>
-                        </div>
-                      )}
-                      {eduDetails.rootWordInfo && (
-                        <div className="text-[11px] text-teal-300/90 pt-0.5 border-t border-slate-800/60">
-                          <span className="font-bold text-teal-400">Performance Diagnostic: </span>
-                          <span>{eduDetails.rootWordInfo}</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                /* Clean Action Bar for Idioms & One-Word Substitutions */
-                <div className="bg-slate-900/90 border border-slate-750 rounded-xl p-3 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                      {currentQ.category === 'idioms' ? '📖 Idiom & Phrase Insight' : '💡 One Word Substitution Insight'}
+              {/* Header Action Bar & Structured Educational Solution Breakdown */}
+              <div className="bg-slate-900/90 border border-slate-750 rounded-xl p-3 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <BookOpen className="w-3.5 h-3.5 text-amber-400" />
+                    <span className="text-[11px] font-black uppercase tracking-wider text-amber-300">
+                      {currentQ.category === 'ows'
+                        ? '💡 One Word Substitution Insight'
+                        : currentQ.category === 'idioms'
+                        ? '📖 Idiom & Phrase Insight'
+                        : currentQ.category === 'antonyms'
+                        ? '⚖️ Antonym & Contrast Insight'
+                        : '📚 Vocabulary & Solution Insight'}
                     </span>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={handleToggleBookmark}
-                        className={`px-2 py-1 rounded-lg border text-[11px] flex items-center gap-1 font-bold ${
-                          isBookmarked
-                            ? 'bg-amber-950 border-amber-600 text-amber-400'
-                            : 'bg-slate-800 border-slate-750 text-slate-300'
-                        }`}
-                      >
-                        <Bookmark className={`w-3 h-3 ${isBookmarked ? 'fill-amber-400' : ''}`} />
-                        <span>{isBookmarked ? 'Saved' : 'Save'}</span>
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          soundManager.playTap();
-                          onOpenAiTutor(currentQ);
-                        }}
-                        className="px-2 py-1 rounded-lg bg-purple-950/90 border border-purple-800 text-purple-300 text-[11px] flex items-center gap-1 font-bold hover:bg-purple-900"
-                      >
-                        <Sparkles className="w-3 h-3" />
-                        AI Deep Dive
-                      </button>
-                    </div>
                   </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={(e) => handleToggleBookmark(e)}
+                      id="pyq-explanation-save-button"
+                      className={`px-2 py-1 rounded-lg border text-[11px] flex items-center gap-1 font-bold transition-all active:scale-95 cursor-pointer ${
+                        isBookmarked
+                          ? 'bg-amber-950 border-amber-600 text-amber-400'
+                          : 'bg-slate-800 border-slate-750 text-slate-300 hover:text-slate-100'
+                      }`}
+                    >
+                      <Bookmark className={`w-3 h-3 ${isBookmarked ? 'fill-amber-400' : ''}`} />
+                      <span>{isBookmarked ? 'Saved' : 'Save'}</span>
+                    </button>
 
-                  {eduDetails && (
-                    <div className="space-y-1.5 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/80">
-                      {eduDetails.meaning && (
-                        <div className="text-xs text-slate-100 font-medium">
-                          <span className="font-bold text-sky-400">Meaning: </span>
-                          <span>{eduDetails.meaning}</span>
-                        </div>
-                      )}
-                      {eduDetails.hindiMeaning && (
-                        <div className="text-xs text-amber-300/90 font-medium">
-                          <span className="font-bold text-amber-400">हिन्दी भावार्थ: </span>
-                          <span>{eduDetails.hindiMeaning}</span>
-                        </div>
-                      )}
-                      {eduDetails.rootWordInfo && (
-                        <div className="text-[11px] text-teal-300/90 pt-0.5 border-t border-slate-800/60">
-                          <span className="font-bold text-teal-400">Performance Diagnostic: </span>
-                          <span>{eduDetails.rootWordInfo}</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
+                    <button
+                      onClick={() => {
+                        soundManager.playTap();
+                        onOpenAiTutor(currentQ);
+                      }}
+                      className="px-2 py-1 rounded-lg bg-purple-950/90 border border-purple-800 text-purple-300 text-[11px] flex items-center gap-1 font-bold hover:bg-purple-900"
+                    >
+                      <Sparkles className="w-3 h-3" />
+                      AI Deep Dive
+                    </button>
+                  </div>
                 </div>
-              )}
+
+                {eduDetails && (
+                  <QuestionSolutionBreakdown
+                    breakdown={eduDetails.meaningsBreakdown}
+                    meaning={eduDetails.meaning}
+                    hindiMeaning={eduDetails.hindiMeaning}
+                    rootWordInfo={eduDetails.rootWordInfo}
+                    category={currentQ.category}
+                  />
+                )}
+              </div>
 
               {/* Question Explanation / Rationale */}
               {currentQ.explanation && (
