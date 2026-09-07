@@ -24,6 +24,7 @@ import { User as FirebaseUser } from 'firebase/auth';
 import { AdSenseUnit } from './AdSenseUnit';
 import { ADSENSE_BANNER_SLOT } from '../services/adSenseService';
 import { DailyTargetCard } from './DailyTargetCard';
+import { CadreRankCard } from './CadreRankCard';
 import { SscTop100Section } from './SscTop100Section';
 import { SscTop100Category } from '../data/sscTop100';
 import { 
@@ -49,6 +50,7 @@ interface ArenaHomeProps {
   onOpenPremium: () => void;
   onOpenStreak: () => void;
   onOpenProfile?: () => void;
+  onOpenEditProfile?: () => void;
   onOpenTour?: () => void;
   onNavigateTab?: (tab: 'arena' | 'practice' | 'leaderboard' | 'mistakes' | 'ai_coach') => void;
   onRewardLP: (lpDelta: number, reason: string) => void;
@@ -72,6 +74,7 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
   onOpenPremium,
   onOpenStreak,
   onOpenProfile,
+  onOpenEditProfile,
   onOpenTour,
   onNavigateTab,
   onRewardLP,
@@ -120,18 +123,6 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
 
   // Current selected exam family
   const activeFamily = normalizeFilterToFamily(selectedExam);
-
-  // LP Tier progress computation
-  const currentLP = player.rankPoints;
-  let nextTierLP = 2000;
-  let prevTierLP = 1200;
-  if (currentLP < 600) { prevTierLP = 0; nextTierLP = 600; }
-  else if (currentLP < 1200) { prevTierLP = 600; nextTierLP = 1200; }
-  else if (currentLP < 2000) { prevTierLP = 1200; nextTierLP = 2000; }
-  else if (currentLP < 3000) { prevTierLP = 2000; nextTierLP = 3000; }
-  else { prevTierLP = 3000; nextTierLP = 4500; }
-
-  const progressPercent = Math.min(100, Math.max(0, Math.round(((currentLP - prevTierLP) / (nextTierLP - prevTierLP)) * 100)));
 
   return (
     <div className="p-3.5 sm:p-5 lg:p-6 space-y-4 max-w-7xl mx-auto w-full pb-8">
@@ -353,68 +344,28 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
               </button>
             </div>
           </div>
+
+          {/* 🔥 SSC TOP 100 Most Repeated Vocabulary Module (2-card system to fill PC mode gap, matching phone & tablet) */}
+          {onStartSscTop100Drill && (
+            <div className="w-full pt-1">
+              <SscTop100Section
+                userId={currentUser?.uid || player.id}
+                isAdmin={isAdmin}
+                onStartDrill={onStartSscTop100Drill}
+              />
+            </div>
+          )}
         </div>
 
         {/* RIGHT COLUMN: Cadre Rank Card, Daily Target Missions, VIP / Auth (5 Cols on Desktop) */}
-        <div className="order-3 lg:order-2 lg:col-span-5 xl:col-span-5 space-y-4">
+        <div className="order-2 lg:col-span-5 xl:col-span-5 space-y-4">
           
-          {/* Govt Service Rank & Promotion Progress Card */}
-          <div className="bg-gradient-to-br from-slate-800/90 via-slate-800/60 to-slate-900/90 border border-slate-700/80 rounded-2xl p-4 sm:p-5 shadow-xl relative overflow-hidden">
-            <div className="absolute -right-10 -top-10 w-36 h-36 bg-amber-500/10 rounded-full blur-2xl pointer-events-none"></div>
-
-            <div className="flex items-start justify-between relative z-10">
-              <div>
-                <div className="text-[11px] font-semibold text-slate-400 tracking-wider uppercase flex items-center gap-1.5">
-                  <span>Govt Service Rank</span>
-                  <span className="px-1.5 py-0.2 bg-amber-950/80 text-amber-300 border border-amber-800/60 rounded text-[9px] font-bold">
-                    SEASON 2026
-                  </span>
-                </div>
-                <h2 className="text-base sm:text-lg font-extrabold text-amber-300 mt-0.5 flex items-center gap-1.5">
-                  {player.tierTitle}
-                </h2>
-                <div 
-                  onClick={() => {
-                    if (onOpenProfile) {
-                      soundManager.playTap();
-                      onOpenProfile();
-                    }
-                  }}
-                  className="text-xs text-slate-300 mt-1 cursor-pointer hover:text-white transition-colors flex items-center gap-1 group"
-                  title="Click to switch your target post"
-                >
-                  <span>Target:</span>
-                  <span className="text-emerald-400 font-semibold group-hover:underline underline-offset-2 truncate max-w-[180px]">
-                    {player.targetExam}
-                  </span>
-                  <span className="text-[10px] text-slate-500 group-hover:text-amber-400">✏️</span>
-                </div>
-              </div>
-
-              <div className="text-right">
-                <div className="text-2xl sm:text-3xl font-black text-amber-400 font-mono tracking-tight">
-                  {player.rankPoints} <span className="text-xs font-normal text-slate-400">LP</span>
-                </div>
-                <div className="text-[10px] text-slate-400 mt-0.5">
-                  Win Rate: <span className="text-emerald-400 font-bold">{player.accuracyRate}%</span> ({player.matchesWon}W / {player.matchesPlayed}M)
-                </div>
-              </div>
-            </div>
-
-            {/* Tier Progress Bar */}
-            <div className="mt-4 space-y-1.5">
-              <div className="flex justify-between text-[11px] text-slate-400 font-medium">
-                <span>Cadre Promotion</span>
-                <span className="text-amber-300 font-bold">{nextTierLP - currentLP} LP to Next Cadre</span>
-              </div>
-              <div className="w-full bg-slate-950/80 rounded-full h-2.5 overflow-hidden border border-slate-700/50">
-                <div
-                  className="bg-gradient-to-r from-amber-500 via-orange-500 to-amber-300 h-full rounded-full transition-all duration-500 shadow-sm"
-                  style={{ width: `${progressPercent}%` }}
-                ></div>
-              </div>
-            </div>
-          </div>
+          {/* Govt Service Cadre Rank & Promotion Progress Card */}
+          <CadreRankCard 
+            player={player} 
+            onOpenProfile={onOpenProfile} 
+            onOpenEditProfile={onOpenEditProfile}
+          />
 
           {/* Daily Target Missions Card */}
           <DailyTargetCard
@@ -484,17 +435,6 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
           )}
 
         </div>
-
-        {/* 🔥 SSC TOP 100 Most Repeated Vocabulary Module (Full 12 columns across PC/Desktop, below battle modes on mobile) */}
-        {onStartSscTop100Drill && (
-          <div className="order-2 lg:order-3 col-span-1 lg:col-span-12 xl:col-span-12 w-full">
-            <SscTop100Section
-              userId={currentUser?.uid || player.id}
-              isAdmin={isAdmin}
-              onStartDrill={onStartSscTop100Drill}
-            />
-          </div>
-        )}
 
       </div>
 

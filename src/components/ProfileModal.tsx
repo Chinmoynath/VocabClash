@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { SupportModal } from './SupportModal';
 import { LegalAccountModal } from './LegalAccountModal';
+import { parseTargetExam } from './CadreRankCard';
 
 export const TARGET_EXAM_GROUPS = [
   {
@@ -96,13 +97,15 @@ interface ProfileModalProps {
   dailyStreak: DailyStreakState;
   currentUser: FirebaseUser | null;
   isSyncing: boolean;
+  initialEditing?: boolean;
   onClose: () => void;
-  onUpdatePlayer: (updated: Partial<PlayerProfile>) => void;
+  onUpdatePlayer: (updated: Partial<PlayerProfile>) => void | Promise<void>;
   onResetStats?: () => void;
   onOpenPremium: () => void;
   onOpenStreak: () => void;
   onOpenStats?: () => void;
   onOpenTour?: () => void;
+  onOpenEditProfile?: () => void;
   onUserChange?: (user: FirebaseUser | null) => void;
   onManualSync?: () => void;
   onSignOut?: () => Promise<void>;
@@ -114,6 +117,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   dailyStreak,
   currentUser,
   isSyncing,
+  initialEditing = false,
   onClose,
   onUpdatePlayer,
   onResetStats,
@@ -121,11 +125,13 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   onOpenStreak,
   onOpenStats,
   onOpenTour,
+  onOpenEditProfile,
   onUserChange,
   onManualSync,
   onSignOut,
 }) => {
-  const [isEditing, setIsEditing] = useState<boolean>(false);
+  const [isEditing, setIsEditing] = useState<boolean>(Boolean(initialEditing));
+  const [isSaving, setIsSaving] = useState<boolean>(false);
   const [showResetConfirm, setShowResetConfirm] = useState<boolean>(false);
   const [showSupportModal, setShowSupportModal] = useState<boolean>(false);
   const [showLegalModal, setShowLegalModal] = useState<boolean>(false);
@@ -135,14 +141,23 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
 
   const avatars = ['👨‍💼', '👩‍🎓', '👮‍♂️', '👨‍🏫', '👩‍⚖️', '🧑‍💻', '👨‍✈️', '👩‍🔬'];
 
-  const handleSave = () => {
+  const handleSave = async () => {
     soundManager.playTap();
-    onUpdatePlayer({
-      name: name.trim() || player.name,
-      avatar,
-      targetExam,
-    });
-    setIsEditing(false);
+    setIsSaving(true);
+    try {
+      await onUpdatePlayer({
+        name: name.trim() || player.name,
+        avatar,
+        targetExam,
+      });
+      if (initialEditing) {
+        onClose();
+      } else {
+        setIsEditing(false);
+      }
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -569,8 +584,16 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
             </button>
           ) : (
             <button
-              onClick={() => setIsEditing(true)}
-              className="w-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold p-2.5 rounded-xl text-xs flex items-center justify-center gap-1.5"
+              onClick={() => {
+                soundManager.playTap();
+                if (onOpenEditProfile) {
+                  onClose();
+                  onOpenEditProfile();
+                } else {
+                  setIsEditing(true);
+                }
+              }}
+              className="w-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold p-2.5 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <Edit3 className="w-4 h-4" />
               <span>EDIT PROFILE & TARGET EXAM</span>

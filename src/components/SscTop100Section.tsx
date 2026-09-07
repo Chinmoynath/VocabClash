@@ -171,35 +171,35 @@ export const SscTop100Section: React.FC<SscTop100SectionProps> = ({
   };
 
   return (
-    <section id="ssc-top-100-section" className="w-full mt-4 sm:mt-6 mb-8">
+    <section id="ssc-top-100-section" className="w-full mt-1 mb-2">
       {/* Header Banner */}
-      <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-gradient-to-br from-amber-950/80 via-slate-900/95 to-slate-950 border border-amber-500/40 p-4 sm:p-5 lg:p-6 shadow-2xl backdrop-blur-md">
+      <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-gradient-to-br from-amber-950/80 via-slate-900/95 to-slate-950 border border-amber-500/40 p-3.5 sm:p-5 shadow-xl backdrop-blur-md">
         {/* Subtle decorative glow */}
         <div className="absolute -top-20 -right-20 w-64 h-64 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
         <div className="absolute -bottom-20 -left-20 w-64 h-64 bg-orange-500/10 rounded-full blur-3xl pointer-events-none" />
 
-        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+        <div className="relative z-10 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="max-w-3xl">
-            <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] sm:text-xs font-bold tracking-wide uppercase bg-amber-500/20 border border-amber-400/40 text-amber-300 shadow-sm">
+            <div className="flex items-center gap-1.5 sm:gap-2 mb-1.5 flex-wrap">
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-bold tracking-wide uppercase bg-amber-500/20 border border-amber-400/40 text-amber-300 shadow-sm">
                 SSC TOP 100
               </span>
-              <span className="text-[11px] sm:text-xs font-semibold text-slate-300 bg-slate-800/80 px-2 py-0.5 rounded-full border border-slate-700">
+              <span className="text-[10px] sm:text-xs font-semibold text-slate-300 bg-slate-800/80 px-2 py-0.5 rounded-full border border-slate-700">
                 TCS & Eduquity PYQ Bank
               </span>
-              <span className="text-[11px] sm:text-xs font-bold text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-800/60">
+              <span className="text-[10px] sm:text-xs font-bold text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-800/60">
                 400 Questions
               </span>
             </div>
 
-            <h2 className="text-xl sm:text-2xl lg:text-3xl font-black text-white tracking-tight flex items-center gap-2">
+            <h2 className="text-lg sm:text-xl lg:text-2xl font-black text-white tracking-tight flex items-center gap-2">
               <span>Top 100 Vocab Drill</span>
             </h2>
           </div>
 
           {/* Right Action & Vault Progress Strip */}
-          <div className="flex flex-row lg:flex-col items-center lg:items-end justify-between gap-2.5 shrink-0 pt-1 lg:pt-0 border-t lg:border-t-0 border-slate-800/80">
-            <div className="bg-slate-900/90 border border-slate-800 rounded-xl px-3 py-1.5 sm:px-4 sm:py-2 shadow-md flex items-center gap-2.5">
+          <div className="flex flex-row items-center justify-between sm:justify-end gap-2.5 shrink-0 pt-1 sm:pt-0 border-t sm:border-t-0 border-slate-800/80">
+            <div className="bg-slate-900/90 border border-slate-800 rounded-xl px-3 py-1.5 sm:px-3.5 sm:py-2 shadow-md flex items-center gap-2.5">
               <div className="text-right">
                 <div className="text-[9px] sm:text-[10px] uppercase font-bold text-slate-400 tracking-wider">
                   Vault Mastered
@@ -230,8 +230,8 @@ export const SscTop100Section: React.FC<SscTop100SectionProps> = ({
           </div>
         </div>
 
-        {/* 4 Category Cards Grid: 2 columns on phone (2 up, 2 down), 4 on desktop */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3.5 lg:gap-4 mt-4 sm:mt-5">
+        {/* 4 Category Cards Grid: 2-card system side-by-side (2 up, 2 down) */}
+        <div className="grid grid-cols-2 gap-2.5 sm:gap-3.5 mt-3 sm:mt-4">
           {SSC_TOP_100_CATEGORIES.map((catInfo: SscTop100CategoryInfo) => {
             const prog = progressMap[catInfo.id] || {
               completedQuestionIds: [],

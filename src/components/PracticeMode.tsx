@@ -35,7 +35,8 @@ import {
   Play,
   BarChart3,
   Trophy,
-  XCircle
+  XCircle,
+  Filter
 } from 'lucide-react';
 import { AdSenseUnit } from './AdSenseUnit';
 import { ADSENSE_BANNER_SLOT } from '../services/adSenseService';
@@ -223,6 +224,24 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
   const [showAllOptionBreakdown, setShowAllOptionBreakdown] = useState<boolean>(true);
   const [showReportModal, setShowReportModal] = useState<boolean>(false);
   const [showSupportModal, setShowSupportModal] = useState<boolean>(false);
+  const [isFilterOpen, setIsFilterOpen] = useState<boolean>(false);
+  const filterPopoverRef = useRef<HTMLDivElement | null>(null);
+
+  // Click outside to dismiss filter dropdown
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (filterPopoverRef.current && !filterPopoverRef.current.contains(e.target as Node)) {
+        setIsFilterOpen(false);
+      }
+    };
+    if (isFilterOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isFilterOpen]);
+
   const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const hasFiredPracticeStartRef = useRef<boolean>(false);
   const batchCorrectCountRef = useRef<number>(0);
@@ -900,24 +919,187 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
       ) : (
         <>
           {/* Header */}
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-base font-extrabold text-slate-100 flex items-center gap-1.5">
-                <Target className="w-5 h-5 text-sky-400" />
-                PYQ Endless Drill
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <h2 className="text-sm sm:text-base font-extrabold text-slate-100 flex items-center gap-1.5 truncate">
+                <Target className="w-4 h-4 sm:w-5 sm:h-5 text-sky-400 shrink-0" />
+                <span>PYQ Endless Drill</span>
               </h2>
-              <p className="text-xs text-slate-400">
+              <p className="text-[11px] sm:text-xs text-slate-400 truncate">
                 24,000+ Govt Exam PYQ Pool with Adaptive Spaced Repetition & Option Analysis
               </p>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
               {streak > 1 && (
-                <div className="flex items-center gap-1 bg-orange-950/80 border border-orange-700/60 text-orange-400 px-2 py-0.5 rounded-full text-xs font-bold">
+                <div className="hidden xs:flex items-center gap-1 bg-orange-950/80 border border-orange-700/60 text-orange-400 px-2 py-0.5 rounded-full text-xs font-bold">
                   <Flame className="w-3 h-3 fill-orange-400" />
                   <span>{streak}x</span>
                 </div>
               )}
+
+              {/* 🎯 Small Exam & Category Filter Option (To the Left of Stats Button) */}
+              <div className="relative" ref={filterPopoverRef}>
+                <button
+                  type="button"
+                  id="practice-filter-button"
+                  onClick={() => {
+                    soundManager.playTap();
+                    setIsFilterOpen(prev => !prev);
+                  }}
+                  className={`flex items-center justify-center gap-1.5 p-1.5 sm:px-2.5 sm:py-1 rounded-xl border text-xs font-bold transition-all shadow-sm cursor-pointer select-none active:scale-95 min-w-[34px] min-h-[34px] sm:min-w-0 sm:min-h-0 ${
+                    isFilterOpen || normalizeFilterToFamily(exam) !== 'all'
+                      ? 'bg-cyan-950/60 border-cyan-500/70 text-cyan-300 ring-1 ring-cyan-500/40'
+                      : 'bg-slate-850 hover:bg-slate-800 border-slate-700/80 text-slate-300 hover:text-white'
+                  }`}
+                  title="Filter Exam Board & Vocab Section"
+                  aria-expanded={isFilterOpen}
+                  aria-haspopup="true"
+                >
+                  <Filter className="w-4 h-4 sm:w-3.5 sm:h-3.5 text-cyan-400 shrink-0" />
+                  <span className="text-[11px] font-bold hidden sm:inline">
+                    {normalizeFilterToFamily(exam) === 'all'
+                      ? 'All Exams'
+                      : normalizeFilterToFamily(exam) === 'ssc'
+                      ? 'SSC'
+                      : normalizeFilterToFamily(exam) === 'banking'
+                      ? 'Banking'
+                      : 'Defence'}
+                  </span>
+                  <ChevronDown className={`w-3 h-3 text-slate-400 transition-transform duration-200 hidden sm:inline ${isFilterOpen ? 'rotate-180 text-cyan-400' : ''}`} />
+                </button>
+
+                {/* Dropdown Popover */}
+                {isFilterOpen && (
+                  <div
+                    id="practice-filter-dropdown"
+                    className="absolute right-0 top-full mt-1.5 z-50 w-72 max-w-[calc(100vw-2rem)] sm:w-80 bg-slate-900/98 border border-slate-700/90 rounded-2xl shadow-2xl p-3 sm:p-3.5 backdrop-blur-xl animate-in fade-in zoom-in-95 duration-150 space-y-3"
+                  >
+                    {/* Header */}
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-slate-200">
+                        <Filter className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>Filter PYQ Pool</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsFilterOpen(false)}
+                        className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200 text-xs transition-colors cursor-pointer"
+                        aria-label="Close Filter"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    {/* Target Exam Family Selector (Replica of Image 1 in sleek compact format) */}
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px] font-bold text-slate-300">
+                        <span className="flex items-center gap-1">
+                          <Target className="w-3 h-3 text-cyan-400" />
+                          Target Exam:
+                        </span>
+                        <span className="text-[10px] text-cyan-400 font-mono font-semibold">
+                          {normalizeFilterToFamily(exam) === 'all'
+                            ? 'All Board PYQs'
+                            : `${normalizeFilterToFamily(exam).toUpperCase()} PYQ Bank`}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {EXAM_FAMILY_PILLS.map(pill => {
+                          const activeFam = normalizeFilterToFamily(exam);
+                          const isSelected = (pill.id === 'ALL' && activeFam === 'all') || (pill.family && activeFam === pill.family);
+                          return (
+                            <button
+                              key={pill.id}
+                              type="button"
+                              onClick={() => {
+                                handleApplyFilter(category, pill.id);
+                              }}
+                              className={`px-2.5 py-1.5 rounded-xl border text-xs font-bold transition-all text-center cursor-pointer ${
+                                isSelected
+                                  ? 'bg-cyan-500 border-cyan-300 text-slate-950 font-black shadow-md shadow-cyan-950/50 ring-1 ring-cyan-300'
+                                  : 'bg-slate-800/90 border-slate-700/80 text-slate-300 hover:bg-slate-750 hover:text-white'
+                              }`}
+                            >
+                              {pill.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Included Sub-Exam Preview Tags */}
+                      {normalizeFilterToFamily(exam) !== 'all' && EXAM_FAMILY_SUB_TAGS[normalizeFilterToFamily(exam)]?.length > 0 && (
+                        <div className="pt-1.5 bg-slate-950/70 border border-slate-800/90 rounded-xl p-2 space-y-1">
+                          <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block">
+                            Included In {normalizeFilterToFamily(exam).toUpperCase()}:
+                          </span>
+                          <div className="flex flex-wrap gap-1">
+                            {EXAM_FAMILY_SUB_TAGS[normalizeFilterToFamily(exam)].map((tag, idx) => (
+                              <span
+                                key={idx}
+                                className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800 text-slate-300 font-medium text-[10px]"
+                              >
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Vocab Section / Category Option */}
+                    <div className="space-y-1.5 border-t border-slate-800/90 pt-2.5">
+                      <div className="flex items-center justify-between text-[11px] font-bold text-slate-300">
+                        <span className="flex items-center gap-1">
+                          <Layers className="w-3 h-3 text-sky-400" />
+                          Vocab Category:
+                        </span>
+                        <span className="text-[10px] text-sky-400 font-mono">
+                          {category === 'mixed' ? 'All Mixed' : category.toUpperCase()}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-1">
+                        {[
+                          { id: 'mixed', label: 'All Mixed' },
+                          { id: 'antonyms', label: 'Antonyms' },
+                          { id: 'synonyms', label: 'Synonyms' },
+                          { id: 'ows', label: 'One Word' },
+                          { id: 'idioms', label: 'Idioms' },
+                        ].map(tab => (
+                          <button
+                            key={tab.id}
+                            type="button"
+                            onClick={() => {
+                              handleApplyFilter(tab.id as QuestionCategory | 'mixed', exam);
+                            }}
+                            className={`px-2 py-1 rounded-lg border text-[11px] font-semibold transition-all text-center cursor-pointer ${
+                              category === tab.id
+                                ? 'bg-sky-600 border-sky-400 text-white font-bold shadow-sm'
+                                : 'bg-slate-800/80 border-slate-700/80 text-slate-400 hover:text-slate-200'
+                            }`}
+                          >
+                            {tab.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Footer Close Button */}
+                    <div className="pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setIsFilterOpen(false)}
+                        className="w-full py-1.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-200 text-xs font-bold border border-slate-700 transition-colors cursor-pointer text-center"
+                      >
+                        Apply & Close
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* PYQ Score & Stats Symbol */}
               <button
                 onClick={() => {
@@ -969,45 +1151,6 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
             </div>
           </div>
 
-          {/* Target Govt Exam Family Selector (All Exams / SSC / Banking / Defence) */}
-          <div className="space-y-1">
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 text-xs no-scrollbar">
-              <span className="text-[11px] font-bold text-slate-400 shrink-0 px-1">Exam:</span>
-              {EXAM_FAMILY_PILLS.map(pill => {
-                const activeFam = normalizeFilterToFamily(exam);
-                const isSelected = (pill.id === 'ALL' && activeFam === 'all') || (pill.family && activeFam === pill.family);
-                return (
-                  <button
-                    key={pill.id}
-                    onClick={() => handleApplyFilter(category, pill.id)}
-                    className={`px-3 py-1 rounded-xl border text-xs font-bold whitespace-nowrap transition-all cursor-pointer shrink-0 ${
-                      isSelected
-                        ? 'bg-cyan-500 border-cyan-300 text-slate-950 font-black shadow-sm'
-                        : 'bg-slate-850 border-slate-700 text-slate-300 hover:bg-slate-800'
-                    }`}
-                  >
-                    {pill.label}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Subtle non-touchable preview tags (Compact, no vertical bloat) */}
-            {normalizeFilterToFamily(exam) !== 'all' && EXAM_FAMILY_SUB_TAGS[normalizeFilterToFamily(exam)]?.length > 0 && (
-              <div className="flex items-center gap-1 overflow-x-auto no-scrollbar text-slate-400 select-none pointer-events-none pl-1">
-                <span className="text-slate-500 font-medium shrink-0 text-[10px] uppercase tracking-wider">Includes:</span>
-                {EXAM_FAMILY_SUB_TAGS[normalizeFilterToFamily(exam)].map((tag, idx) => (
-                  <span
-                    key={idx}
-                    className="px-1.5 py-0.5 rounded bg-slate-900/90 border border-slate-800 text-slate-300 font-medium text-[10px] whitespace-nowrap shrink-0"
-                  >
-                    {tag}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-
           {/* Category Pills */}
           <div className="flex gap-1.5 overflow-x-auto pb-1 text-xs no-scrollbar">
             {[
@@ -1020,7 +1163,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
               <button
                 key={tab.id}
                 onClick={() => handleApplyFilter(tab.id as QuestionCategory | 'mixed', exam)}
-                className={`px-3 py-1.5 rounded-xl border font-bold text-xs whitespace-nowrap transition-all flex items-center gap-1 ${
+                className={`px-3 py-1.5 rounded-xl border font-bold text-xs whitespace-nowrap transition-all flex items-center gap-1 cursor-pointer ${
                   category === tab.id
                     ? 'bg-sky-600 border-sky-400 text-white shadow-md'
                     : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'

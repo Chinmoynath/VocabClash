@@ -63,6 +63,7 @@ import { LeaderboardView } from './components/LeaderboardView';
 import { AiTutorModal } from './components/AiTutorModal';
 import { AiTutorTab } from './components/AiTutorTab';
 import { ProfileModal } from './components/ProfileModal';
+import { EditProfileModal } from './components/EditProfileModal';
 import { SscTop100CompletionModal } from './components/SscTop100CompletionModal';
 import { SscTop100Category, getTop100Questions, SSC_TOP_100_META } from './data/sscTop100';
 import { recordSscTop100Answer, markSscTop100CategoryCompleted, sscTop100Service } from './services/sscTop100Service';
@@ -357,6 +358,7 @@ export default function App() {
   const [activeAiQuestion, setActiveAiQuestion] = useState<Question | null>(null);
   const [showAiModal, setShowAiModal] = useState<boolean>(false);
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
+  const [showEditProfileModal, setShowEditProfileModal] = useState<boolean>(false);
   const [showPremiumModal, setShowPremiumModal] = useState<boolean>(false);
   const [showAdModal, setShowAdModal] = useState<boolean>(false);
   const [showStreakModal, setShowStreakModal] = useState<boolean>(false);
@@ -1421,6 +1423,7 @@ export default function App() {
                 onOpenPremium={() => setShowPremiumModal(true)}
                 onOpenStreak={() => setShowStreakModal(true)}
                 onOpenProfile={() => setShowProfileModal(true)}
+                onOpenEditProfile={() => setShowEditProfileModal(true)}
                 onOpenTour={() => setShowTourModal(true)}
                 onNavigateTab={setCurrentTab}
                 onRewardLP={handleRewardLP}
@@ -1670,9 +1673,39 @@ export default function App() {
             setShowProfileModal(false);
             setShowTourModal(true);
           }}
+          onOpenEditProfile={() => {
+            setShowProfileModal(false);
+            setShowEditProfileModal(true);
+          }}
           onUserChange={user => setCurrentUser(user)}
           onManualSync={handleManualSync}
           onSignOut={handleSignOutUser}
+        />
+      )}
+
+      {/* 🎯 Direct Edit Profile & Target Exam Modal (from CadreRankCard "Change" button) */}
+      {showEditProfileModal && (
+        <EditProfileModal
+          player={player}
+          currentUser={currentUser}
+          onClose={() => setShowEditProfileModal(false)}
+          onUpdatePlayer={async updated => {
+            const updatedPlayer = { ...player, ...updated };
+            setPlayer(updatedPlayer);
+            try {
+              localStorage.setItem(STORAGE_KEY_PLAYER, JSON.stringify(updatedPlayer));
+              if (currentUser && !currentUser.isAnonymous) {
+                await saveUserDataToFirestore(currentUser.uid, {
+                  player: updatedPlayer,
+                  subscription,
+                  streak,
+                  savedWords,
+                });
+              }
+            } catch (err) {
+              console.error('Failed to sync profile update to Firebase:', err);
+            }
+          }}
         />
       )}
 
