@@ -48,7 +48,8 @@ import { formatRepeatCount } from '../utils/questionFingerprint';
 import { resolveCardEducation } from '../utils/questionEducationResolver';
 import { QuestionSolutionBreakdown } from './QuestionSolutionBreakdown';
 import { VaultFlyAnimation, VaultFlyItem } from './VaultFlyAnimation';
-import { EXAM_FAMILY_PILLS, EXAM_FAMILY_SUB_TAGS, normalizeFilterToFamily } from '../utils/examFamilyUtils';
+import { EXAM_FAMILY_PILLS, EXAM_FAMILY_SUB_TAGS, normalizeFilterToFamily, matchesExamFamilyFilter } from '../utils/examFamilyUtils';
+import { questionBankEngine } from '../services/questionBankEngine';
 import { 
   trackPracticeStart, 
   trackQuestionAnswered, 
@@ -194,7 +195,24 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     return examProp || getStoredPyqFilterPreferences().exam;
   });
 
-  // Keep state in sync if parent prop changes (e.g. from cloud fetch)
+  // Continuous drill session state - persists across tab switches for today and resets on a new day
+  const [questionNumber, setQuestionNumber] = useState<number>(() => getStoredDailyProgress().questionNumber);
+  const [sessionSolvedCount, setSessionSolvedCount] = useState<number>(() => getStoredDailyProgress().sessionSolvedCount);
+  const [streak, setStreak] = useState<number>(() => getStoredDailyProgress().streak);
+
+  const [recentWordsHistory, setRecentWordsHistory] = useState<string[]>(() => getPersistentSeenWords().slice(-100));
+  const [currentQ, setCurrentQ] = useState<Question>(() => {
+    if (customTargetQueue && customTargetQueue.length > 0) {
+      const idx = Math.min(Math.max(0, customInitialIndex || 0), customTargetQueue.length - 1);
+      return customTargetQueue[idx];
+    }
+    const initHistory = getPersistentSeenWords().slice(-100);
+    const initialCat = categoryProp || getStoredPyqFilterPreferences().category;
+    const initialEx = examProp || getStoredPyqFilterPreferences().exam;
+    return getNextDrillQuestion(initialCat, initialEx, initHistory);
+  });
+
+  // Keep state in sync if parent prop changes (e.g. from cloud fetch or global selector)
   useEffect(() => {
     if (categoryProp && categoryProp !== category) {
       setCategory(categoryProp);
@@ -204,8 +222,17 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
   useEffect(() => {
     if (examProp && examProp !== exam) {
       setExam(examProp);
+      // Immediately reset active question if it does not match the new exam filter
+      if (examProp !== 'ALL' && !matchesExamFamilyFilter(currentQ, examProp)) {
+        const nextQ = getNextDrillQuestion(category, examProp, recentWordsHistory);
+        setCurrentQ(nextQ);
+        setSelectedOption(null);
+        setIsAnswered(false);
+        setCountdown(0);
+        setIsCountdownPaused(false);
+      }
     }
-  }, [examProp]);
+  }, [examProp, exam, category, recentWordsHistory, currentQ]);
 
   // Custom targeted coaching drill state
   const validInitialIndex = useMemo(() => {
@@ -246,23 +273,6 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
   const drillProgressPercent = totalCustomQuestions > 0
     ? Math.min(100, Math.round((currentDrillSolvedCount / totalCustomQuestions) * 100))
     : 0;
-  
-  // Continuous drill session state - persists across tab switches for today and resets on a new day
-  const [questionNumber, setQuestionNumber] = useState<number>(() => getStoredDailyProgress().questionNumber);
-  const [sessionSolvedCount, setSessionSolvedCount] = useState<number>(() => getStoredDailyProgress().sessionSolvedCount);
-  const [streak, setStreak] = useState<number>(() => getStoredDailyProgress().streak);
-
-  const [recentWordsHistory, setRecentWordsHistory] = useState<string[]>(() => getPersistentSeenWords().slice(-100));
-  const [currentQ, setCurrentQ] = useState<Question>(() => {
-    if (customTargetQueue && customTargetQueue.length > 0) {
-      const idx = Math.min(Math.max(0, customInitialIndex || 0), customTargetQueue.length - 1);
-      return customTargetQueue[idx];
-    }
-    const initHistory = getPersistentSeenWords().slice(-100);
-    const initialCat = categoryProp || getStoredPyqFilterPreferences().category;
-    const initialEx = examProp || getStoredPyqFilterPreferences().exam;
-    return getNextDrillQuestion(initialCat, initialEx, initHistory);
-  });
 
   useEffect(() => {
     if (customTargetQueue && customTargetQueue.length > 0) {
@@ -417,12 +427,20 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     if (onFilterChange) {
       onFilterChange(newCat, newExam);
     }
+    if (customTargetQueue && onExitCustomQueue) {
+      const allMatch = customTargetQueue.every(q => matchesExamFamilyFilter(q, newExam));
+      if (!allMatch) {
+        onExitCustomQueue();
+      }
+    }
     hasFiredPracticeStartRef.current = false;
     batchCorrectCountRef.current = 0;
     const nextQ = getNextDrillQuestion(newCat, newExam, recentWordsHistory);
     setCurrentQ(nextQ);
     setSelectedOption(null);
     setIsAnswered(false);
+    setCountdown(0);
+    setIsCountdownPaused(false);
   };
 
   const handleSelectOption = (idx: number) => {
@@ -546,8 +564,8 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
       onBatchComplete();
     }
 
-    // Handle Custom Targeted Coaching Queue if active
-    if (customTargetQueue && customTargetQueue.length > 0) {
+    // Handle Custom Targeted Coaching Queue if active and matches current exam filter
+    if (customTargetQueue && customTargetQueue.length > 0 && customTargetQueue.every(q => matchesExamFamilyFilter(q, exam))) {
       const nextIdx = customQueueIndex + 1;
       if (nextIdx >= customTargetQueue.length) {
         setCustomDrillCompleted(true);
@@ -592,9 +610,12 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
       return;
     }
 
-    // Pull next adaptive repetition question
+    // Pull next adaptive repetition question strictly respecting exam filter
     const nextQ = getNextDrillQuestion(category, exam, [...recentWordsHistory, currentQ.wordOrPhrase]);
-    setCurrentQ(nextQ);
+    const safeQ = (exam !== 'ALL' && !matchesExamFamilyFilter(nextQ, exam))
+      ? questionBankEngine.getNextDrillQuestion(category, exam, recentWordsHistory)
+      : nextQ;
+    setCurrentQ(safeQ);
     
     setQuestionNumber(prev => {
       const nextNum = prev + 1;

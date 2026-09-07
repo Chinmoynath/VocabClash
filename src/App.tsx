@@ -23,6 +23,7 @@ import { questionReviewScheduler } from './services/questionReviewScheduler';
 import { LiveRoomFinalResult, forfeitLiveRoom } from './services/realtimeMatchmaking';
 import { soundManager } from './utils/audio';
 import { isAdDue, resetAdTimerForTest, recordAdShown, ADS_ENABLED } from './utils/adManager';
+import { matchesExamFamilyFilter } from './utils/examFamilyUtils';
 import { extractCleanUserName, formatNameFromEmail } from './utils/nameHelper';
 import { 
   getInitialStreak, 
@@ -332,14 +333,25 @@ export default function App() {
     return 'arena';
   });
   const [selectedCategory, setSelectedCategory] = useState<QuestionCategory | 'mixed'>('mixed');
-  const [selectedExam, setSelectedExam] = useState<ExamType>('SSC_CGL');
+  const [selectedExam, setSelectedExam] = useState<ExamType>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('vocabclash_pyq_filter_pref') || localStorage.getItem('vocabclash_pyq_filter_preferences_v1');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed && parsed.exam) return parsed.exam;
+        }
+      } catch {}
+    }
+    return 'ALL';
+  });
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
 
   // Persistent PYQ Practice Filters (Persists across tabs, sessions, and cloud devices)
   const [practiceFilters, setPracticeFilters] = useState<{ category: QuestionCategory | 'mixed'; exam: ExamType }>(() => {
     if (typeof window !== 'undefined') {
       try {
-        const saved = localStorage.getItem('vocabclash_pyq_filter_pref');
+        const saved = localStorage.getItem('vocabclash_pyq_filter_pref') || localStorage.getItem('vocabclash_pyq_filter_preferences_v1');
         if (saved) {
           const parsed = JSON.parse(saved);
           if (parsed && (parsed.category || parsed.exam)) {
@@ -354,16 +366,50 @@ export default function App() {
     return { category: 'mixed', exam: 'ALL' };
   });
 
-  const handleUpdatePracticeFilter = (newCat: QuestionCategory | 'mixed', newExam: ExamType) => {
-    const nextFilters = { category: newCat, exam: newExam };
+  const handleSelectExam = (newExam: ExamType) => {
+    setSelectedExam(newExam);
+    const nextFilters = { ...practiceFilters, exam: newExam };
     setPracticeFilters(nextFilters);
     try {
       localStorage.setItem('vocabclash_pyq_filter_pref', JSON.stringify(nextFilters));
+      localStorage.setItem('vocabclash_pyq_filter_preferences_v1', JSON.stringify(nextFilters));
     } catch {}
     setPlayer(prev => ({
       ...prev,
       practiceFilters: nextFilters,
     }));
+    // If a custom target queue from another exam was active, clear it so user's filter takes effect
+    if (practiceCustomQueue) {
+      const allMatch = practiceCustomQueue.every(q => matchesExamFamilyFilter(q, newExam));
+      if (!allMatch) {
+        setPracticeCustomQueue(null);
+        setPracticeModeBannerTitle(null);
+        setActiveSscTop100Category(null);
+      }
+    }
+  };
+
+  const handleUpdatePracticeFilter = (newCat: QuestionCategory | 'mixed', newExam: ExamType) => {
+    const nextFilters = { category: newCat, exam: newExam };
+    setPracticeFilters(nextFilters);
+    setSelectedExam(newExam);
+    try {
+      localStorage.setItem('vocabclash_pyq_filter_pref', JSON.stringify(nextFilters));
+      localStorage.setItem('vocabclash_pyq_filter_preferences_v1', JSON.stringify(nextFilters));
+    } catch {}
+    setPlayer(prev => ({
+      ...prev,
+      practiceFilters: nextFilters,
+    }));
+    // If a custom target queue from another exam was active, clear it so user's filter takes effect
+    if (practiceCustomQueue) {
+      const allMatch = practiceCustomQueue.every(q => matchesExamFamilyFilter(q, newExam));
+      if (!allMatch) {
+        setPracticeCustomQueue(null);
+        setPracticeModeBannerTitle(null);
+        setActiveSscTop100Category(null);
+      }
+    }
   };
 
   // Targeted Coaching Drill Queue (from AI Vocab Mentor & SSC Top 100)
@@ -1466,7 +1512,7 @@ export default function App() {
                   (currentUser?.email && currentUser.email.toLowerCase().includes('admin'))
                 )}
                 onSelectCategory={setSelectedCategory}
-                onSelectExam={setSelectedExam}
+                onSelectExam={handleSelectExam}
                 onStartMatchmaking={handleStartMatchmaking}
                 onOpenPlayModeSelector={() => setShowPlayModeModal(true)}
                 onOpenFriendLobby={() => {

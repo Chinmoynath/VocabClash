@@ -1044,11 +1044,48 @@ export class QuestionBankEngine {
   ): Question {
     this.init();
 
-    const targetCategory = category === 'mixed' ? this.chooseMixedCategory() : category;
-    const catMap = this.playableConcepts.get(targetCategory);
+    const targetFamily = normalizeFilterToFamily(exam);
+    const categories: QuestionCategory[] = ['synonyms', 'antonyms', 'ows', 'idioms'];
+    let targetCategory = category === 'mixed' ? this.chooseMixedCategory() : category;
+    let catMap = this.playableConcepts.get(targetCategory);
 
-    if (!catMap || catMap.size === 0) {
-      // Fallback
+    // Filter concepts to only those containing variants matching the exam filter
+    let allConcepts = catMap ? Array.from(catMap.values()) : [];
+    let poolOfConcepts = (targetFamily !== 'all')
+      ? allConcepts.filter(group => group.variants.some(v => this.matchesExam(v, exam)))
+      : allConcepts;
+
+    // If selected category has no matching concepts for this exam, check other categories
+    if (poolOfConcepts.length === 0 && targetFamily !== 'all') {
+      for (const otherCat of categories) {
+        const otherMap = this.playableConcepts.get(otherCat);
+        if (!otherMap) continue;
+        const otherGroups = Array.from(otherMap.values()).filter(group =>
+          group.variants.some(v => this.matchesExam(v, exam))
+        );
+        if (otherGroups.length > 0) {
+          targetCategory = otherCat;
+          catMap = otherMap;
+          allConcepts = Array.from(otherMap.values());
+          poolOfConcepts = otherGroups;
+          break;
+        }
+      }
+    }
+
+    // If still no concepts found in playableConcepts, draw directly from all available questions
+    if (poolOfConcepts.length === 0) {
+      const allMatching = this.getAllAvailableQuestions().filter(q => exam === 'ALL' || this.matchesExam(q, exam));
+      if (allMatching.length > 0) {
+        const picked = allMatching[Math.floor(Math.random() * allMatching.length)];
+        const mKey = picked.memoryKey || buildMemoryKey(picked.category, picked.wordOrPhrase, picked.options, picked.correctIndex);
+        return {
+          ...picked,
+          memoryKey: mKey,
+          conceptKey: mKey,
+          reviewReason: 'fresh',
+        };
+      }
       return this.synonymsPool[0];
     }
 
@@ -1058,15 +1095,7 @@ export class QuestionBankEngine {
     ]);
 
     const recentQuestionIds = new Set(questionReviewScheduler.getRecentQuestionIds().slice(-100));
-
-    const allConcepts = Array.from(catMap.values());
     const now = Date.now();
-
-    const targetFamily = normalizeFilterToFamily(exam);
-    const conceptsMatchingExam = (targetFamily !== 'all')
-      ? allConcepts.filter(group => group.variants.some(v => this.matchesExam(v, exam)))
-      : allConcepts;
-    const poolOfConcepts = conceptsMatchingExam.length > 0 ? conceptsMatchingExam : allConcepts;
 
     // 1. Partition concepts
     const dueConcepts: ConceptGroup[] = [];
@@ -1142,29 +1171,60 @@ export class QuestionBankEngine {
     const matchingVariants = (targetFamily !== 'all')
       ? selectedGroup.variants.filter(v => this.matchesExam(v, exam))
       : selectedGroup.variants;
-    const variants = matchingVariants.length > 0 ? matchingVariants : selectedGroup.variants;
 
-    // Prefer unseen verified PYQ variant if available
-    const unseenVerified = selectedGroup.verifiedVariants.filter(
-      v => !recentQuestionIds.has(v.id) && (targetFamily === 'all' || this.matchesExam(v, exam))
-    );
-    const unseenGenerated = selectedGroup.generatedVariants.filter(
-      v => !recentQuestionIds.has(v.id) && (targetFamily === 'all' || this.matchesExam(v, exam))
-    );
+    // CRITICAL BUG FIX: Never fall back to unmatching variants across exam families
+    const candidateVariants = (targetFamily !== 'all')
+      ? matchingVariants
+      : (matchingVariants.length > 0 ? matchingVariants : selectedGroup.variants);
 
-    let chosenQuestion: Question;
-    if (unseenVerified.length > 0) {
-      chosenQuestion = unseenVerified[Math.floor(Math.random() * unseenVerified.length)];
-    } else if (unseenGenerated.length > 0) {
-      chosenQuestion = unseenGenerated[Math.floor(Math.random() * unseenGenerated.length)];
-    } else {
-      chosenQuestion = variants[Math.floor(Math.random() * variants.length)];
+    let chosenQuestion: Question | null = null;
+
+    if (candidateVariants.length > 0) {
+      const unseenVerified = candidateVariants.filter(
+        v => !recentQuestionIds.has(v.id) && (v.verified || v.sourceType === 'verified_pyq' || v.isPYQ)
+      );
+      const unseenCandidate = candidateVariants.filter(
+        v => !recentQuestionIds.has(v.id)
+      );
+
+      if (unseenVerified.length > 0) {
+        chosenQuestion = unseenVerified[Math.floor(Math.random() * unseenVerified.length)];
+      } else if (unseenCandidate.length > 0) {
+        chosenQuestion = unseenCandidate[Math.floor(Math.random() * unseenCandidate.length)];
+      } else {
+        chosenQuestion = candidateVariants[Math.floor(Math.random() * candidateVariants.length)];
+      }
+    }
+
+    // FINAL ELIGIBILITY CHECK: Enforce strictly that the chosen question passes the exam filter
+    if (targetFamily !== 'all' && (!chosenQuestion || !this.matchesExam(chosenQuestion, exam))) {
+      // Collect all matching variants from poolOfConcepts
+      const fallbackCandidates: Question[] = [];
+      for (const g of poolOfConcepts) {
+        for (const v of g.variants) {
+          if (this.matchesExam(v, exam)) {
+            fallbackCandidates.push(v);
+          }
+        }
+      }
+      if (fallbackCandidates.length > 0) {
+        chosenQuestion = fallbackCandidates[Math.floor(Math.random() * fallbackCandidates.length)];
+      } else {
+        const directMatch = this.getAllAvailableQuestions().filter(q => this.matchesExam(q, exam));
+        if (directMatch.length > 0) {
+          chosenQuestion = directMatch[Math.floor(Math.random() * directMatch.length)];
+        }
+      }
+    }
+
+    if (!chosenQuestion) {
+      chosenQuestion = this.synonymsPool[0];
     }
 
     return {
       ...chosenQuestion,
-      memoryKey: selectedGroup.memoryKey,
-      conceptKey: selectedGroup.conceptKey,
+      memoryKey: selectedGroup ? selectedGroup.memoryKey : chosenQuestion.id,
+      conceptKey: selectedGroup ? selectedGroup.conceptKey : chosenQuestion.id,
       reviewReason,
     };
   }
@@ -1205,14 +1265,16 @@ export class QuestionBankEngine {
 
         // Choose question variant that matches target exam
         const matchingVariants = group.variants.filter(v => exam === 'ALL' || this.matchesExam(v, exam));
-        const validVariants = (matchingVariants.length > 0 ? matchingVariants : group.variants).filter(
-          v => !usedQuestionIds.has(v.id)
-        );
+        // CRITICAL BUG FIX: NEVER fall back to group.variants if exam is filtered
+        const validVariants = (exam === 'ALL' ? (matchingVariants.length > 0 ? matchingVariants : group.variants) : matchingVariants)
+          .filter(v => !usedQuestionIds.has(v.id));
         if (validVariants.length === 0) continue;
 
         // Prioritize verified PYQ
-        const verified = validVariants.filter(v => v.sourceType === 'verified_pyq');
+        const verified = validVariants.filter(v => v.sourceType === 'verified_pyq' || v.verified || v.isPYQ);
         const chosen = verified.length > 0 ? verified[0] : validVariants[0];
+
+        if (exam !== 'ALL' && !this.matchesExam(chosen, exam)) continue;
 
         usedMemoryKeys.add(group.memoryKey);
         usedQuestionIds.add(chosen.id);
@@ -1225,7 +1287,7 @@ export class QuestionBankEngine {
       }
     }
 
-    // Fill remaining if needed
+    // Fill remaining if needed strictly from matching pool
     if (selectedQuestions.length < count) {
       const allPool = this.shuffle(
         this.getAllAvailableQuestions().filter(q => exam === 'ALL' || this.matchesExam(q, exam))
@@ -1241,7 +1303,9 @@ export class QuestionBankEngine {
       }
     }
 
-    return this.shuffle(selectedQuestions);
+    // Final safety filter: NO cross-family questions allowed
+    const strictlyFiltered = selectedQuestions.filter(q => exam === 'ALL' || this.matchesExam(q, exam));
+    return this.shuffle(strictlyFiltered);
   }
 
   public getQuestions(
@@ -1426,6 +1490,11 @@ export class QuestionBankEngine {
     if (Array.isArray(questions)) {
       for (const raw of questions) {
         if (!raw) continue;
+        // Ignore questions from other exam families
+        if (exam !== 'ALL' && !this.matchesExam(raw, exam)) {
+          continue;
+        }
+
         const qId = String(
           raw.id ||
           raw.canonicalQuestionId ||
@@ -1453,6 +1522,7 @@ export class QuestionBankEngine {
     const backfillCandidates = this.getSpeedBlitzSessionQuestions(category, exam, targetCount * 2);
     for (const cand of backfillCandidates) {
       if (validQuestions.length >= targetCount) break;
+      if (exam !== 'ALL' && !this.matchesExam(cand, exam)) continue;
       const candId = cand.id;
       const wordKey = (cand.wordOrPhrase || '').trim().toLowerCase();
       if (!seenIds.has(candId) && (!wordKey || !seenWords.has(wordKey))) {
@@ -1466,6 +1536,7 @@ export class QuestionBankEngine {
     if (validQuestions.length < targetCount) {
       for (const cand of backfillCandidates) {
         if (validQuestions.length >= targetCount) break;
+        if (exam !== 'ALL' && !this.matchesExam(cand, exam)) continue;
         if (!seenIds.has(cand.id)) {
           seenIds.add(cand.id);
           validQuestions.push(cand);
@@ -1473,7 +1544,8 @@ export class QuestionBankEngine {
       }
     }
 
-    return validQuestions;
+    const strictlyFiltered = validQuestions.filter(q => exam === 'ALL' || this.matchesExam(q, exam));
+    return strictlyFiltered.slice(0, targetCount);
   }
 
   // ==================== ADMIN HEALTH DIAGNOSTICS ====================

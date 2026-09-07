@@ -146,7 +146,8 @@ export function normalizeExamStringToFamily(raw: string | undefined | null): Can
     clean.includes('naval') ||
     clean.includes('navy') ||
     clean.includes('coast guard') ||
-    clean.includes('inet')
+    clean.includes('inet') ||
+    /\bna\b/.test(clean)
   ) {
     return 'defence';
   }
