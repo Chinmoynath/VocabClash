@@ -350,3 +350,27 @@ export function checkAndTrackQuestion10(totalQuestionsSolvedToday: number): void
     console.warn('[Analytics] checkAndTrackQuestion10 error:', err);
   }
 }
+
+/**
+ * 5. article_view
+ * Fired when a user views an individual educational article
+ */
+export function trackArticleView(articleSlug: string, articleCategory: string): void {
+  trackEvent('article_view', {
+    article_slug: articleSlug,
+    article_category: articleCategory,
+  });
+}
+
+/**
+ * 6. related_practice_click
+ * Fired when a reader clicks the related practice CTA in an article
+ */
+export function trackRelatedPracticeClick(articleSlug: string, practiceType: string, practiceRoute?: string): void {
+  trackEvent('related_practice_click', {
+    article_slug: articleSlug,
+    practice_type: practiceType,
+    practice_route: practiceRoute || ''
+  });
+}
+

@@ -7,12 +7,14 @@ interface SeoGuidesModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSelectGuide: (slug: string) => void;
+  onSelectArticlesIndex?: () => void;
 }
 
 export const SeoGuidesModal: React.FC<SeoGuidesModalProps> = ({
   isOpen,
   onClose,
   onSelectGuide,
+  onSelectArticlesIndex,
 }) => {
   if (!isOpen) return null;
 
@@ -48,6 +50,27 @@ export const SeoGuidesModal: React.FC<SeoGuidesModalProps> = ({
             <X className="w-4 h-4" />
           </button>
         </div>
+
+        {/* Explore Articles Banner */}
+        {onSelectArticlesIndex && (
+          <div className="px-4 py-2.5 bg-gradient-to-r from-amber-500/10 via-slate-800/80 to-slate-900 border-b border-slate-800 flex items-center justify-between">
+            <div className="text-xs text-slate-300 flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              <span>Looking for latest in-depth articles & exam updates?</span>
+            </div>
+            <button
+              onClick={() => {
+                soundManager.playTap();
+                onClose();
+                onSelectArticlesIndex();
+              }}
+              className="text-xs font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1 cursor-pointer transition"
+            >
+              <span>Explore /articles</span>
+              <ArrowRight className="w-3 h-3" />
+            </button>
+          </div>
+        )}
 
         {/* Guides List */}
         <div className="p-4 sm:p-5 overflow-y-auto space-y-3 no-scrollbar">

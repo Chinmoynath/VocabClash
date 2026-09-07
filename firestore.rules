@@ -7,7 +7,11 @@ service cloud.firestore {
     }
 
     function isPyqAdmin() {
-      return request.auth != null && request.auth.token.email == 'nathchinmoy777@gmail.com';
+      return request.auth != null && (
+        request.auth.token.email == 'nathchinmoy777@gmail.com' ||
+        request.auth.token.email == 'Nathchinmoy777@gmail.com' ||
+        (request.auth.token.email != null && request.auth.token.email.lower() == 'nathchinmoy777@gmail.com')
+      );
     }
 
     // User Profile Document and subcollections (Authenticated Owner access)
@@ -84,6 +88,13 @@ service cloud.firestore {
     match /ssc_vocab_frequency/{conceptKey} {
       allow read: if true;
       allow write: if isPyqAdmin();
+    }
+
+    // Articles / Blog Publishing System:
+    // Public can read only published articles; Admin can read all (including drafts) and create, update, delete
+    match /articles/{articleId} {
+      allow get, list: if resource.data.status == 'published' || isPyqAdmin();
+      allow create, update, delete: if isPyqAdmin();
     }
   }
 }

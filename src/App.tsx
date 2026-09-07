@@ -83,6 +83,12 @@ import { SEO_PAGES } from './data/seoContentData';
 import { updatePageSeo } from './utils/seoMetaManager';
 import { networkManager } from './utils/networkManager';
 import { recordQuestionAttempt } from './utils/userStatsManager';
+import { ArticlesDashboard } from './components/admin/ArticlesDashboard';
+import { ArticleEditor } from './components/admin/ArticleEditor';
+import { PublicArticlesIndex } from './components/public/PublicArticlesIndex';
+import { PublicArticleDetail } from './components/public/PublicArticleDetail';
+import { Article } from './types/article';
+import { isUserAdmin } from './services/pyqFirestoreService';
 import { 
   trackPageView, 
   trackPracticeStart, 
@@ -219,10 +225,34 @@ const INITIAL_SUBSCRIPTION: UserSubscription = {
 // Helper for virtual SPA route tracking in GA4
 function getVirtualRouteDetails(params: {
   activeSeoSlug: string | null;
+  activeArticleSlug?: string | null;
+  isViewingArticlesIndex?: boolean;
+  showAdminArticles?: boolean;
   matchState: MatchState | null;
   isMatchmaking: boolean;
   currentTab: TabType;
 }): { page_path: string; page_title: string } {
+  if (params.showAdminArticles) {
+    return {
+      page_path: '/admin/articles',
+      page_title: 'VocabClash Editorial Studio (Admin)',
+    };
+  }
+
+  if (params.activeArticleSlug) {
+    return {
+      page_path: `/articles/${params.activeArticleSlug}`,
+      page_title: `VocabClash Article: ${params.activeArticleSlug}`,
+    };
+  }
+
+  if (params.isViewingArticlesIndex) {
+    return {
+      page_path: '/articles',
+      page_title: 'VocabClash Articles & Editorial Hub',
+    };
+  }
+
   if (params.activeSeoSlug) {
     const slugKey = params.activeSeoSlug.replace(/^\//, '');
     const seoPage = SEO_PAGES[slugKey];
@@ -450,6 +480,37 @@ export default function App() {
   const [showFriendLobbyModal, setShowFriendLobbyModal] = useState<boolean>(false);
   const [showOfflineWarningModal, setShowOfflineWarningModal] = useState<boolean>(false);
   const [showSeoGuidesModal, setShowSeoGuidesModal] = useState<boolean>(false);
+
+  // Article Publishing System & Public Articles routing states
+  const [showAdminArticles, setShowAdminArticles] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const p = window.location.pathname.toLowerCase();
+      return p === '/admin/articles' || p === '/admin/articles/' || window.location.hash.includes('admin-articles');
+    }
+    return false;
+  });
+  const [adminArticleMode, setAdminArticleMode] = useState<'dashboard' | 'editor'>('dashboard');
+  const [editingArticle, setEditingArticle] = useState<Article | null>(null);
+
+  const [isViewingArticlesIndex, setIsViewingArticlesIndex] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const p = window.location.pathname.toLowerCase();
+      return p === '/articles' || p === '/articles/';
+    }
+    return false;
+  });
+
+  const [activeArticleSlug, setActiveArticleSlug] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      const p = window.location.pathname.toLowerCase();
+      if (p.startsWith('/articles/') && p !== '/articles/' && !p.startsWith('/articles/category')) {
+        const slug = p.replace(/^\/articles\/?/, '').split('/')[0].split('?')[0].trim();
+        return slug || null;
+      }
+    }
+    return null;
+  });
+
   const [activeSeoSlug, setActiveSeoSlug] = useState<string | null>(() => {
     if (typeof window !== 'undefined') {
       const rawPath = window.location.pathname.toLowerCase();
@@ -464,9 +525,12 @@ export default function App() {
   const [forfeitNotice, setForfeitNotice] = useState<string | null>(null);
   const [showAdminImporter, setShowAdminImporter] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
+      const p = window.location.pathname.toLowerCase();
+      if (p.includes('/admin/articles')) return false;
       return (
-        window.location.pathname.includes('/admin/pyq-import') ||
-        window.location.pathname.includes('/admin') ||
+        p.includes('/admin/pyq-import') ||
+        p === '/admin' ||
+        p === '/admin/' ||
         window.location.hash.includes('admin-pyq') ||
         window.location.search.includes('admin=pyq')
       );
@@ -474,18 +538,62 @@ export default function App() {
     return false;
   });
 
-  // Listen to hash / route changes for private admin portal and public SEO guides
+  // Listen to hash / route changes for private admin portal, public articles, and public SEO guides
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const handleHashOrPopState = () => {
+      const rawPath = window.location.pathname.toLowerCase();
+
+      // 1. Admin Articles Route (/admin/articles)
+      if (rawPath === '/admin/articles' || rawPath === '/admin/articles/' || window.location.hash.includes('admin-articles')) {
+        setShowAdminArticles(true);
+        setShowAdminImporter(false);
+        setIsViewingArticlesIndex(false);
+        setActiveArticleSlug(null);
+        setActiveSeoSlug(null);
+        return;
+      }
+      setShowAdminArticles(false);
+
+      // 2. Admin PYQ Import Route
       const isAdminRoute = 
-        window.location.pathname.includes('/admin/pyq-import') ||
-        window.location.pathname.includes('/admin') ||
+        rawPath.includes('/admin/pyq-import') ||
+        rawPath === '/admin' ||
+        rawPath === '/admin/' ||
         window.location.hash.includes('admin-pyq') ||
         window.location.search.includes('admin=pyq');
       setShowAdminImporter(isAdminRoute);
+      if (isAdminRoute) {
+        setIsViewingArticlesIndex(false);
+        setActiveArticleSlug(null);
+        setActiveSeoSlug(null);
+        return;
+      }
 
-      const rawPath = window.location.pathname.toLowerCase();
+      // 3. Public Articles Index Route (/articles)
+      if (rawPath === '/articles' || rawPath === '/articles/') {
+        setIsViewingArticlesIndex(true);
+        setActiveArticleSlug(null);
+        setActiveSeoSlug(null);
+        return;
+      }
+
+      // 4. Public Article Detail Route (/articles/:slug)
+      if (rawPath.startsWith('/articles/')) {
+        const slug = rawPath.replace(/^\/articles\/?/, '').split('/')[0].split('?')[0].trim();
+        if (slug) {
+          setActiveArticleSlug(slug);
+          setIsViewingArticlesIndex(false);
+          setActiveSeoSlug(null);
+          return;
+        }
+      }
+
+      // Clear article views if navigating away
+      setIsViewingArticlesIndex(false);
+      setActiveArticleSlug(null);
+
+      // 5. Existing SEO topic hubs and tab routes
       const key = rawPath.replace(/^\//, '').trim();
       if (key && SEO_PAGES[key]) {
         setActiveSeoSlug(`/${key}`);
@@ -520,13 +628,16 @@ export default function App() {
 
     const route = getVirtualRouteDetails({
       activeSeoSlug,
+      activeArticleSlug,
+      isViewingArticlesIndex,
+      showAdminArticles,
       matchState,
       isMatchmaking,
       currentTab,
     });
 
     // Synchronize browser history URL if switching views inside the SPA
-    if (!activeSeoSlug && window.location.pathname !== route.page_path) {
+    if (!activeSeoSlug && !activeArticleSlug && !isViewingArticlesIndex && !showAdminArticles && window.location.pathname !== route.page_path) {
       try {
         window.history.replaceState(null, '', route.page_path);
       } catch {
@@ -540,7 +651,7 @@ export default function App() {
       route.page_title,
       window.location.origin + route.page_path
     );
-  }, [currentTab, activeSeoSlug, Boolean(matchState), isMatchmaking]);
+  }, [currentTab, activeSeoSlug, activeArticleSlug, isViewingArticlesIndex, showAdminArticles, Boolean(matchState), isMatchmaking]);
 
   // Update default SEO meta tags when not on a specific SEO guide page
   useEffect(() => {
@@ -1330,7 +1441,136 @@ export default function App() {
   const activeMistakeCount = savedWords.filter(w => isItemMistake(w)).length;
   const activeSeoPage = activeSeoSlug ? SEO_PAGES[activeSeoSlug.replace(/^\//, '')] : null;
 
-  // 1. Render Public Crawlable SEO Page when URL matches any of the 8 SEO topic hubs
+  // Handler for practice CTAs originating from articles
+  const handleStartPracticeFromArticle = (route: string) => {
+    if (typeof window !== 'undefined') {
+      window.history.pushState(null, '', '/');
+    }
+    const r = (route || '').toLowerCase();
+    if (r.includes('mistake') || r.includes('vault')) {
+      setCurrentTab('mistakes');
+    } else if (r.includes('1v1') || r.includes('arena') || r.includes('duel')) {
+      setCurrentTab('arena');
+      setShowPlayModeModal(true);
+    } else {
+      setCurrentTab('practice');
+    }
+  };
+
+  // 1. Render Admin Article Studio (/admin/articles)
+  if (showAdminArticles) {
+    if (adminArticleMode === 'editor') {
+      return (
+        <ArticleEditor
+          initialArticle={editingArticle}
+          onBack={() => {
+            setAdminArticleMode('dashboard');
+            setEditingArticle(null);
+          }}
+          onSaved={() => {
+            setAdminArticleMode('dashboard');
+            setEditingArticle(null);
+          }}
+        />
+      );
+    }
+    return (
+      <ArticlesDashboard
+        onNewArticle={() => {
+          setEditingArticle(null);
+          setAdminArticleMode('editor');
+        }}
+        onEditArticle={(art) => {
+          setEditingArticle(art);
+          setAdminArticleMode('editor');
+        }}
+        onPreviewArticle={(art) => {
+          setShowAdminArticles(false);
+          setActiveArticleSlug(art.slug);
+          if (typeof window !== 'undefined') {
+            window.history.pushState(null, '', `/articles/${art.slug}`);
+          }
+        }}
+        onBackToApp={() => {
+          setShowAdminArticles(false);
+          if (typeof window !== 'undefined') {
+            window.history.pushState(null, '', '/');
+          }
+        }}
+        currentUserEmail={currentUser?.email || null}
+      />
+    );
+  }
+
+  // 2. Render Public Crawlable Article Detail Page (/articles/:slug)
+  if (activeArticleSlug) {
+    return (
+      <PublicArticleDetail
+        articleSlug={activeArticleSlug}
+        onNavigateHome={() => {
+          setActiveArticleSlug(null);
+          if (typeof window !== 'undefined') {
+            window.history.pushState(null, '', '/');
+          }
+          setCurrentTab('arena');
+        }}
+        onNavigateToArticles={() => {
+          setActiveArticleSlug(null);
+          setIsViewingArticlesIndex(true);
+          if (typeof window !== 'undefined') {
+            window.history.pushState(null, '', '/articles');
+          }
+        }}
+        onNavigateToSlug={(slug) => {
+          setActiveArticleSlug(slug);
+          if (typeof window !== 'undefined') {
+            window.history.pushState(null, '', `/articles/${slug}`);
+          }
+        }}
+        onStartPractice={(route) => {
+          setActiveArticleSlug(null);
+          handleStartPracticeFromArticle(route);
+        }}
+      />
+    );
+  }
+
+  // 3. Render Public Articles Index Listing (/articles)
+  if (isViewingArticlesIndex) {
+    return (
+      <PublicArticlesIndex
+        onSelectArticle={(slug) => {
+          setIsViewingArticlesIndex(false);
+          setActiveArticleSlug(slug);
+          if (typeof window !== 'undefined') {
+            window.history.pushState(null, '', `/articles/${slug}`);
+          }
+        }}
+        onNavigateHome={() => {
+          setIsViewingArticlesIndex(false);
+          if (typeof window !== 'undefined') {
+            window.history.pushState(null, '', '/');
+          }
+          setCurrentTab('arena');
+        }}
+        onStartPractice={(route) => {
+          setIsViewingArticlesIndex(false);
+          handleStartPracticeFromArticle(route);
+        }}
+        isAdmin={isUserAdmin(currentUser?.email)}
+        onNavigateToAdmin={() => {
+          setIsViewingArticlesIndex(false);
+          setShowAdminArticles(true);
+          setAdminArticleMode('dashboard');
+          if (typeof window !== 'undefined') {
+            window.history.pushState(null, '', '/admin/articles');
+          }
+        }}
+      />
+    );
+  }
+
+  // 4. Render Public Crawlable SEO Page when URL matches any of the 8 SEO topic hubs
   if (activeSeoPage) {
     return (
       <SeoPublicPage
@@ -1407,6 +1647,13 @@ export default function App() {
           onOpenGuides={() => {
             soundManager.playTap();
             setShowSeoGuidesModal(true);
+          }}
+          onOpenArticles={() => {
+            soundManager.playTap();
+            setIsViewingArticlesIndex(true);
+            if (typeof window !== 'undefined') {
+              window.history.pushState(null, '', '/articles');
+            }
           }}
         />
       )}
@@ -1931,6 +2178,14 @@ export default function App() {
               window.location.hash = '';
             }
           }}
+          onOpenArticles={() => {
+            setShowAdminImporter(false);
+            setShowAdminArticles(true);
+            setAdminArticleMode('dashboard');
+            if (typeof window !== 'undefined') {
+              window.history.pushState(null, '', '/admin/articles');
+            }
+          }}
         />
       )}
 
@@ -1945,6 +2200,13 @@ export default function App() {
               window.history.pushState(null, '', slug);
             }
             setActiveSeoSlug(slug);
+          }}
+          onSelectArticlesIndex={() => {
+            setShowSeoGuidesModal(false);
+            setIsViewingArticlesIndex(true);
+            if (typeof window !== 'undefined') {
+              window.history.pushState(null, '', '/articles');
+            }
           }}
         />
       )}

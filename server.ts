@@ -1348,6 +1348,24 @@ app.get('/sitemap.xml', (req, res) => {
     <priority>0.9</priority>
   </url>
   <url>
+    <loc>https://vocabclash.in/articles</loc>
+    <lastmod>2026-09-07</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://vocabclash.in/articles/top-50-ssc-cgl-repeated-synonyms</loc>
+    <lastmod>2026-09-07</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://vocabclash.in/articles/how-to-score-50-in-ssc-english-vocabulary</loc>
+    <lastmod>2026-09-07</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
     <loc>https://vocabclash.in/privacy.html</loc>
     <lastmod>2026-09-03</lastmod>
     <changefreq>monthly</changefreq>

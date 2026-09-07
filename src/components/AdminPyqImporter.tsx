@@ -31,7 +31,8 @@ import {
   Filter,
   Calendar,
   Tag,
-  Tv
+  Tv,
+  FileText
 } from 'lucide-react';
 import { ADS_ENABLED, ADSENSE_CLIENT_ID, ADSENSE_BANNER_SLOT, ADSENSE_INTERSTITIAL_SLOT } from '../services/adSenseService';
 import { ExtractedQuestion, ImportBatch, ReviewStatus } from '../types/pyqImport';
@@ -63,9 +64,10 @@ import {
 interface AdminPyqImporterProps {
   userEmail?: string | null;
   onClose: () => void;
+  onOpenArticles?: () => void;
 }
 
-export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, onClose }) => {
+export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, onClose, onOpenArticles }) => {
   const isAdmin = isUserAdmin(userEmail) || (typeof window !== 'undefined' && window.location.hostname === 'localhost');
 
   // Navigation mode
@@ -849,6 +851,17 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
             <PlayCircle className="w-3.5 h-3.5" />
             Repetition Simulator
           </button>
+
+          {onOpenArticles && (
+            <button
+              onClick={onOpenArticles}
+              className="px-3 py-1.5 bg-gradient-to-r from-orange-500 to-amber-500 text-slate-950 hover:brightness-110 font-bold text-xs rounded-xl flex items-center gap-1.5 transition shadow-md shadow-orange-950/40"
+              title="Open Article & Blog CMS Publisher"
+            >
+              <FileText className="w-3.5 h-3.5" />
+              Articles / Blog CMS
+            </button>
+          )}
 
           <button
             onClick={onClose}

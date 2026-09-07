@@ -35,6 +35,7 @@ interface DesktopSidebarProps {
   onOpenStats?: () => void;
   onOpenTour?: () => void;
   onOpenGuides?: () => void;
+  onOpenArticles?: () => void;
 }
 
 export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
@@ -51,6 +52,7 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
   onOpenStats,
   onOpenTour,
   onOpenGuides,
+  onOpenArticles,
 }) => {
   const navItems = [
     {
@@ -231,6 +233,35 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
             </button>
           ) : null}
         </div>
+
+        {/* Editorial Articles & Guides Hub Trigger */}
+        {onOpenArticles && (
+          <button
+            onClick={() => {
+              soundManager.playTap();
+              onOpenArticles();
+            }}
+            className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-slate-900/70 hover:bg-slate-850 border border-slate-800/80 hover:border-amber-500/40 text-left transition-all group cursor-pointer"
+            title="Read in-depth SSC vocab articles, PYQ trends & exam strategies"
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="p-1 rounded-lg bg-amber-500/10 text-amber-400 group-hover:scale-105 transition-transform">
+                <BookOpen className="w-3.5 h-3.5" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-xs font-bold text-slate-200 group-hover:text-amber-300 transition-colors truncate">
+                  Articles & Guides
+                </div>
+                <div className="text-[10px] text-slate-500 truncate">
+                  SSC preparation blog
+                </div>
+              </div>
+            </div>
+            <span className="text-[10px] font-bold text-amber-400/80 group-hover:text-amber-300 shrink-0">
+              /articles →
+            </span>
+          </button>
+        )}
 
         {/* Premium VIP Banner if not VIP */}
         {!subscription.isPremium ? (

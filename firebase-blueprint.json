@@ -220,6 +220,30 @@
         "lastAttemptAt": { "type": "number", "description": "Timestamp of last attempt" }
       },
       "required": ["category", "completedQuestionIds", "solvedCount", "lastAttemptAt"]
+    },
+    "Article": {
+      "title": "Article",
+      "description": "Educational article, blog post, and SEO guide document for competitive exam aspirants",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique article document ID" },
+        "title": { "type": "string", "description": "Article title" },
+        "slug": { "type": "string", "description": "URL slug for routing (/articles/{slug})" },
+        "excerpt": { "type": "string", "description": "Short excerpt/summary for previews and meta descriptions" },
+        "content": { "type": "string", "description": "Semantic rich HTML content with headings, lists, tables, images, callouts" },
+        "category": { "type": "string", "description": "ssc, banking, defence, vocabulary, pyqs, strategy, or general" },
+        "tags": { "type": "array", "description": "Keyword tags for categorization and search" },
+        "featuredImage": { "type": "object", "description": "Featured header image object with url, alt, caption" },
+        "seo": { "type": "object", "description": "SEO metadata overrides (title, description, canonical)" },
+        "relatedPractice": { "type": "object", "description": "Integrated VocabClash practice CTA mapping" },
+        "status": { "type": "string", "description": "Publication status: draft or published" },
+        "publishedAt": { "type": "string", "description": "ISO timestamp of public release" },
+        "createdAt": { "type": "string", "description": "ISO timestamp of creation" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp of last modification" },
+        "author": { "type": "object", "description": "Author metadata (name, email)" },
+        "readingTimeMinutes": { "type": "number", "description": "Estimated reading duration in minutes" }
+      },
+      "required": ["title", "slug", "content", "category", "status", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -274,6 +298,10 @@
     "/users/{userId}/ssc_top100_progress/{category}": {
       "schema": "SscTop100UserProgressDoc",
       "description": "User progress on SSC Top 100 drills"
+    },
+    "/articles/{articleId}": {
+      "schema": "Article",
+      "description": "Public educational articles and SEO guide posts with draft and published states"
     }
   }
 }
