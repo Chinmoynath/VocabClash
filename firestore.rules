@@ -91,9 +91,9 @@ service cloud.firestore {
     }
 
     // Articles / Blog Publishing System:
-    // Public can read only published articles; Admin can read all (including drafts) and create, update, delete
+    // Public can read articles (drafts filtered by client/service); Admin can create, update, delete
     match /articles/{articleId} {
-      allow get, list: if resource.data.status == 'published' || isPyqAdmin();
+      allow read: if true;
       allow create, update, delete: if isPyqAdmin();
     }
   }

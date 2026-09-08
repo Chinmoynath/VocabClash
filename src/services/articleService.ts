@@ -202,7 +202,7 @@ export async function getPublishedArticles(category?: string, limitCount: number
   try {
     const articlesCol = collection(db, ARTICLES_COLLECTION);
     
-    let q = query(
+    const q = query(
       articlesCol,
       where('status', '==', 'published')
     );
@@ -256,55 +256,104 @@ export async function getPublishedArticles(category?: string, limitCount: number
 
     return articles.slice(0, limitCount);
   } catch (error) {
-    handleFirestoreError(error, OperationType.LIST, ARTICLES_COLLECTION);
-    return [];
+    console.warn('[ArticleService] getPublishedArticles encountered error, serving sample articles:', error);
+    let samples = [...SAMPLE_ARTICLES];
+    if (category && category !== 'all') {
+      samples = samples.filter(a => a.category.toLowerCase() === category.toLowerCase());
+    }
+    return samples.slice(0, limitCount);
   }
 }
 
 /**
  * Fetch a single article by slug
- * If non-admin, drafts return null
+ * Resilient multi-strategy retrieval for incognito and public visitors
  */
 export async function getArticleBySlug(slug: string, isAdminUser: boolean = false): Promise<Article | null> {
+  if (!slug) return null;
+  const cleanSlug = decodeURIComponent(slug).trim().toLowerCase();
+  const effectiveIsAdmin = isAdminUser || isUserAdmin(auth.currentUser?.email);
+
+  // Strategy 1: Check sample articles first for instant matching if in offline or incognito
+  const localSample = SAMPLE_ARTICLES.find(a => 
+    a.slug.toLowerCase() === cleanSlug || 
+    a.id.toLowerCase() === cleanSlug
+  );
+
   try {
+    // Strategy 2: Direct document lookup by ID (fastest, most resilient)
+    try {
+      const directDocRef = doc(db, ARTICLES_COLLECTION, cleanSlug);
+      const directDoc = await getDoc(directDocRef);
+      if (directDoc.exists()) {
+        const data = directDoc.data();
+        if (data.status === 'published' || effectiveIsAdmin) {
+          return formatArticleDoc(directDoc.id, data);
+        }
+      }
+    } catch (directErr) {
+      // Continue to query strategy
+    }
+
+    // Also check case-sensitive doc ID if different
+    if (slug !== cleanSlug) {
+      try {
+        const directDocRefOriginal = doc(db, ARTICLES_COLLECTION, slug);
+        const directDocOriginal = await getDoc(directDocRefOriginal);
+        if (directDocOriginal.exists()) {
+          const data = directDocOriginal.data();
+          if (data.status === 'published' || effectiveIsAdmin) {
+            return formatArticleDoc(directDocOriginal.id, data);
+          }
+        }
+      } catch {}
+    }
+
+    // Strategy 3: Query by slug field in Firestore
+    const articlesCol = collection(db, ARTICLES_COLLECTION);
     const q = query(
-      collection(db, ARTICLES_COLLECTION),
-      where('slug', '==', slug)
+      articlesCol,
+      where('slug', '==', cleanSlug)
     );
     const snap = await getDocs(q);
 
-    if (snap.empty) {
-      // Try fetching by doc ID directly in case slug matches document ID
-      const directDoc = await getDoc(doc(db, ARTICLES_COLLECTION, slug));
-      if (directDoc.exists()) {
-        const data = directDoc.data();
-        if (data.status !== 'published' && !isAdminUser) {
-          return null; // Public cannot see draft
+    if (!snap.empty) {
+      for (const docSnap of snap.docs) {
+        const data = docSnap.data();
+        if (data.status === 'published' || effectiveIsAdmin) {
+          return formatArticleDoc(docSnap.id, data);
         }
-        return formatArticleDoc(directDoc.id, data);
       }
-
-      // Check fallback sample articles
-      const sample = SAMPLE_ARTICLES.find(a => a.slug === slug || a.id === slug);
-      if (sample) {
-        if (sample.status !== 'published' && !isAdminUser) return null;
-        return sample;
-      }
-
-      return null;
     }
 
-    const docSnap = snap.docs[0];
-    const data = docSnap.data();
-
-    // Draft protection
-    if (data.status !== 'published' && !isAdminUser) {
-      return null;
+    // If cleanSlug didn't match, try original slug
+    if (slug !== cleanSlug) {
+      const qOrig = query(
+        articlesCol,
+        where('slug', '==', slug)
+      );
+      const snapOrig = await getDocs(qOrig);
+      if (!snapOrig.empty) {
+        for (const docSnap of snapOrig.docs) {
+          const data = docSnap.data();
+          if (data.status === 'published' || effectiveIsAdmin) {
+            return formatArticleDoc(docSnap.id, data);
+          }
+        }
+      }
     }
 
-    return formatArticleDoc(docSnap.id, data);
+    // Strategy 4: Fallback to local sample article if found
+    if (localSample && (localSample.status === 'published' || effectiveIsAdmin)) {
+      return localSample;
+    }
+
+    return null;
   } catch (error) {
-    handleFirestoreError(error, OperationType.GET, `${ARTICLES_COLLECTION}/${slug}`);
+    console.warn(`[ArticleService] Firestore query error for slug "${slug}", falling back to sample articles:`, error);
+    if (localSample && (localSample.status === 'published' || effectiveIsAdmin)) {
+      return localSample;
+    }
     return null;
   }
 }

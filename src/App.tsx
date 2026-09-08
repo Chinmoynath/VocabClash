@@ -495,7 +495,8 @@ export default function App() {
   const [isViewingArticlesIndex, setIsViewingArticlesIndex] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       const p = window.location.pathname.toLowerCase();
-      return p === '/articles' || p === '/articles/';
+      const hash = window.location.hash.toLowerCase();
+      return p === '/articles' || p === '/articles/' || hash === '#/articles' || hash === '#/articles/';
     }
     return false;
   });
@@ -505,8 +506,16 @@ export default function App() {
       const p = window.location.pathname.toLowerCase();
       if (p.startsWith('/articles/') && p !== '/articles/' && !p.startsWith('/articles/category')) {
         const slug = p.replace(/^\/articles\/?/, '').split('/')[0].split('?')[0].trim();
-        return slug || null;
+        return decodeURIComponent(slug) || null;
       }
+      const hash = window.location.hash.toLowerCase();
+      if (hash.startsWith('#/articles/')) {
+        const hashSlug = hash.replace(/^#\/articles\/?/, '').split('/')[0].split('?')[0].trim();
+        return decodeURIComponent(hashSlug) || null;
+      }
+      const params = new URLSearchParams(window.location.search);
+      const qSlug = params.get('article') || params.get('slug');
+      if (qSlug) return decodeURIComponent(qSlug);
     }
     return null;
   });
@@ -570,23 +579,41 @@ export default function App() {
         return;
       }
 
-      // 3. Public Articles Index Route (/articles)
-      if (rawPath === '/articles' || rawPath === '/articles/') {
+      // 3. Public Articles Index Route (/articles or #/articles)
+      const hash = window.location.hash.toLowerCase();
+      if (rawPath === '/articles' || rawPath === '/articles/' || hash === '#/articles' || hash === '#/articles/') {
         setIsViewingArticlesIndex(true);
         setActiveArticleSlug(null);
         setActiveSeoSlug(null);
         return;
       }
 
-      // 4. Public Article Detail Route (/articles/:slug)
+      // 4. Public Article Detail Route (/articles/:slug or #/articles/:slug or ?article=:slug)
       if (rawPath.startsWith('/articles/')) {
         const slug = rawPath.replace(/^\/articles\/?/, '').split('/')[0].split('?')[0].trim();
         if (slug) {
-          setActiveArticleSlug(slug);
+          setActiveArticleSlug(decodeURIComponent(slug));
           setIsViewingArticlesIndex(false);
           setActiveSeoSlug(null);
           return;
         }
+      }
+      if (hash.startsWith('#/articles/')) {
+        const hashSlug = hash.replace(/^#\/articles\/?/, '').split('/')[0].split('?')[0].trim();
+        if (hashSlug) {
+          setActiveArticleSlug(decodeURIComponent(hashSlug));
+          setIsViewingArticlesIndex(false);
+          setActiveSeoSlug(null);
+          return;
+        }
+      }
+      const searchParams = new URLSearchParams(window.location.search);
+      const queryArticle = searchParams.get('article') || searchParams.get('slug');
+      if (queryArticle) {
+        setActiveArticleSlug(decodeURIComponent(queryArticle));
+        setIsViewingArticlesIndex(false);
+        setActiveSeoSlug(null);
+        return;
       }
 
       // Clear article views if navigating away
