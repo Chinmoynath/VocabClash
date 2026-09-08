@@ -25,6 +25,9 @@ body {
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
+  .font-handwritten {
+    font-family: 'Caveat', 'Segoe Print', 'Bradley Hand', 'Comic Sans MS', cursive, sans-serif;
+  }
 }
 
 @keyframes shake {

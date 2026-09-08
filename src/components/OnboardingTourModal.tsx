@@ -1,17 +1,21 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   Swords, 
   BookOpen, 
-  Bot, 
   Brain, 
   Lightbulb, 
   RotateCcw, 
-  X, 
   ChevronRight, 
-  Sparkles,
   Zap,
   CheckCircle2,
-  Shield
+  ShieldAlert,
+  Menu,
+  X,
+  ChevronDown,
+  Sparkles,
+  LogIn,
+  Trophy,
+  Compass
 } from 'lucide-react';
 import { soundManager } from '../utils/audio';
 import { VocabClashLogo } from './VocabClashLogo';
@@ -21,6 +25,8 @@ interface OnboardingTourModalProps {
   onClose: () => void;
   onStartBattle?: () => void;
   onStartFirstMatch?: () => void;
+  onOpenLogin?: () => void;
+  onExploreApp?: () => void;
 }
 
 export const OnboardingTourModal: React.FC<OnboardingTourModalProps> = ({
@@ -28,7 +34,11 @@ export const OnboardingTourModal: React.FC<OnboardingTourModalProps> = ({
   onClose,
   onStartBattle,
   onStartFirstMatch,
+  onOpenLogin,
+  onExploreApp,
 }) => {
+  const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
+
   if (!isOpen) return null;
 
   const markSeenAndDismiss = () => {
@@ -56,226 +66,328 @@ export const OnboardingTourModal: React.FC<OnboardingTourModalProps> = ({
   const handleSkip = () => {
     soundManager.playTap();
     markSeenAndDismiss();
-    onClose();
+    if (onExploreApp) {
+      onExploreApp();
+    } else {
+      onClose();
+    }
   };
 
-  const features = [
-    {
-      icon: <Swords className="w-3.5 h-3.5 text-amber-400 shrink-0" />,
-      title: '1v1 Vocab Duels',
-      subtitle: 'Challenge real players',
-      bgGlow: 'from-amber-500/10 to-transparent border-amber-500/30 text-amber-300',
-    },
-    {
-      icon: <BookOpen className="w-3.5 h-3.5 text-sky-400 shrink-0" />,
-      title: '24,000+ PYQs',
-      subtitle: 'Practice exam-level questions',
-      bgGlow: 'from-sky-500/10 to-transparent border-sky-500/30 text-sky-300',
-    },
-    {
-      icon: <Bot className="w-3.5 h-3.5 text-indigo-400 shrink-0" />,
-      title: 'AI Tutor',
-      subtitle: 'Instant explanations & guidance',
-      bgGlow: 'from-indigo-500/10 to-transparent border-indigo-500/30 text-indigo-300',
-    },
-    {
-      icon: <Brain className="w-3.5 h-3.5 text-rose-400 shrink-0" />,
-      title: 'Mistake Vault',
-      subtitle: 'Never repeat the same mistake',
-      bgGlow: 'from-rose-500/10 to-transparent border-rose-500/30 text-rose-300',
-    },
-    {
-      icon: <Lightbulb className="w-3.5 h-3.5 text-emerald-400 shrink-0" />,
-      title: 'Mnemonic Hooks',
-      subtitle: 'Remember difficult words easily',
-      bgGlow: 'from-emerald-500/10 to-transparent border-emerald-500/30 text-emerald-300',
-    },
-    {
-      icon: <RotateCcw className="w-3.5 h-3.5 text-purple-400 shrink-0" />,
-      title: 'Spaced Repetition',
-      subtitle: 'Revise at the right time',
-      bgGlow: 'from-purple-500/10 to-transparent border-purple-500/30 text-purple-300',
-    },
-  ];
+  const handleLoginClick = () => {
+    soundManager.playTap();
+    markSeenAndDismiss();
+    if (onOpenLogin) {
+      onOpenLogin();
+    } else {
+      onClose();
+    }
+  };
 
   return (
     <div 
-      id="vocabclash-onboarding-overlay"
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-in fade-in duration-200"
+      id="vocabclash-first-time-landing"
+      className="fixed inset-0 z-50 overflow-y-auto bg-[#050714] text-slate-100 flex flex-col justify-between selection:bg-orange-500/30 selection:text-white"
     >
-      <div 
-        id="vocabclash-onboarding-card"
-        className="relative w-full max-w-md bg-gradient-to-b from-[#131629] via-[#0d1021] to-[#090b17] border border-indigo-500/30 rounded-3xl shadow-[0_0_50px_rgba(79,70,229,0.2)] overflow-hidden flex flex-col max-h-[95vh] text-slate-100"
-      >
-        {/* Subtle Ambient Top Glow */}
-        <div className="absolute -top-20 left-1/2 -translate-x-1/2 w-64 h-32 bg-indigo-600/20 blur-3xl pointer-events-none rounded-full" />
-        <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/10 blur-2xl pointer-events-none rounded-full" />
+      {/* Ambient background glows matching pic 2 */}
+      <div className="fixed top-0 right-0 w-72 sm:w-96 h-72 sm:h-96 bg-blue-600/10 blur-3xl pointer-events-none rounded-full" />
+      <div className="fixed -top-10 left-0 w-80 h-80 bg-indigo-600/10 blur-3xl pointer-events-none rounded-full" />
+      <div className="fixed bottom-0 right-1/4 w-80 h-80 bg-amber-500/5 blur-3xl pointer-events-none rounded-full" />
 
-        {/* Top Floating Close Button */}
-        <button
-          id="btn-onboarding-close"
-          onClick={handleSkip}
-          aria-label="Close intro"
-          className="absolute top-3 right-3 z-20 w-8 h-8 rounded-full bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-colors border border-slate-700/60 shadow-sm"
-        >
-          <X className="w-4 h-4" />
-        </button>
-
-        {/* Scrollable / Flexible Content Area */}
-        <div className="p-4 sm:p-5 overflow-y-auto no-scrollbar space-y-3.5">
-          
-          {/* Header & Main Message */}
-          <div className="text-center space-y-1.5 pt-1">
-            {/* Mini Brand Badge */}
-            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-indigo-950/70 border border-indigo-500/40 text-[10px] font-semibold text-indigo-300 tracking-wide uppercase shadow-sm">
-              <VocabClashLogo size="sm" className="w-3.5 h-3.5 rounded-md" />
-              <span>VocabClash • Govt Exam Arena</span>
+      {/* TOP HEADER BAR (Logo on left, Login + Hamburger Menu on right) */}
+      <header className="relative z-20 w-full border-b border-blue-950/40 bg-[#050714]/80 backdrop-blur-md">
+        <div className="max-w-xl md:max-w-2xl mx-auto px-4 sm:px-6 py-3 sm:py-3.5 flex items-center justify-between">
+          {/* VocabClash Logo (Brand untouched as instructed: "don't change the logo") */}
+          <div 
+            onClick={handleSkip}
+            className="flex items-center gap-2.5 sm:gap-3 cursor-pointer select-none group"
+            title="VocabClash • Govt Exam Arena"
+          >
+            <VocabClashLogo size="sm" className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl shadow-md shrink-0 ring-1 ring-blue-500/30 group-hover:ring-blue-400/60 transition-all" />
+            <div className="flex flex-col">
+              <span className="font-black text-lg sm:text-xl tracking-wider text-sky-400 group-hover:text-sky-300 transition-colors leading-none">
+                VOCABCLASH
+              </span>
+              <span className="text-[9px] sm:text-[10px] tracking-widest text-slate-400 font-bold leading-tight uppercase mt-0.5">
+                GOVT EXAM ARENA
+              </span>
             </div>
+          </div>
 
-            {/* Main Headline */}
-            <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight leading-tight pt-0.5">
-              Master English. <br className="hidden xs:inline" />
-              <span className="bg-gradient-to-r from-amber-300 via-amber-200 to-orange-400 bg-clip-text text-transparent">
+          {/* Action buttons on right (Login + Hamburger Menu) */}
+          <div className="flex items-center gap-2 sm:gap-3">
+            <button
+              id="btn-landing-login"
+              onClick={handleLoginClick}
+              className="px-3.5 sm:px-4 py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-200 hover:text-white text-xs sm:text-sm font-semibold border border-slate-700/70 shadow-sm transition-all cursor-pointer"
+            >
+              Login
+            </button>
+            <button
+              id="btn-landing-menu"
+              onClick={() => {
+                soundManager.playTap();
+                setIsMenuOpen(!isMenuOpen);
+              }}
+              aria-label="Navigation Menu"
+              className="p-1.5 sm:p-2 text-slate-300 hover:text-white rounded-xl hover:bg-slate-800/60 transition-colors cursor-pointer"
+            >
+              {isMenuOpen ? (
+                <X className="w-5 h-5 sm:w-6 sm:h-6 stroke-[2.2]" />
+              ) : (
+                <Menu className="w-5 h-5 sm:w-6 sm:h-6 stroke-[2.2]" />
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Slide-down Hamburger Menu */}
+        {isMenuOpen && (
+          <div className="w-full bg-[#090D24] border-b border-blue-900/50 shadow-2xl animate-in fade-in slide-in-from-top-2 duration-200">
+            <div className="max-w-xl md:max-w-2xl mx-auto px-4 py-3 space-y-1.5 text-sm">
+              <button
+                onClick={handleStart}
+                className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-800/70 text-slate-200 hover:text-amber-300 transition-colors font-semibold cursor-pointer text-left"
+              >
+                <span className="flex items-center gap-2.5">
+                  <Swords className="w-4 h-4 text-amber-400" />
+                  Play 1v1 Battle
+                </span>
+                <ChevronRight className="w-4 h-4 text-slate-500" />
+              </button>
+              <button
+                onClick={handleSkip}
+                className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-800/70 text-slate-200 hover:text-sky-300 transition-colors font-semibold cursor-pointer text-left"
+              >
+                <span className="flex items-center gap-2.5">
+                  <BookOpen className="w-4 h-4 text-sky-400" />
+                  Practice 24,000+ PYQs
+                </span>
+                <ChevronRight className="w-4 h-4 text-slate-500" />
+              </button>
+              <button
+                onClick={handleSkip}
+                className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-800/70 text-slate-200 hover:text-purple-300 transition-colors font-semibold cursor-pointer text-left"
+              >
+                <span className="flex items-center gap-2.5">
+                  <ShieldAlert className="w-4 h-4 text-purple-400" />
+                  Mistake Vault
+                </span>
+                <ChevronRight className="w-4 h-4 text-slate-500" />
+              </button>
+              <button
+                onClick={handleLoginClick}
+                className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-800/70 text-slate-200 hover:text-white transition-colors font-semibold cursor-pointer text-left"
+              >
+                <span className="flex items-center gap-2.5">
+                  <LogIn className="w-4 h-4 text-emerald-400" />
+                  Login / Cloud Sync
+                </span>
+                <ChevronRight className="w-4 h-4 text-slate-500" />
+              </button>
+              <button
+                onClick={handleSkip}
+                className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-800/70 text-slate-300 hover:text-white transition-colors font-medium cursor-pointer text-left border-t border-slate-800/80 pt-2.5 mt-1"
+              >
+                <span className="flex items-center gap-2.5">
+                  <Compass className="w-4 h-4 text-slate-400" />
+                  Explore Full App
+                </span>
+                <span className="text-xs text-sky-400 font-semibold">Enter →</span>
+              </button>
+            </div>
+          </div>
+        )}
+      </header>
+
+      {/* MAIN HERO & CENTRAL DUEL SECTION */}
+      <main className="relative z-10 flex-1 max-w-xl md:max-w-2xl mx-auto w-full px-4 sm:px-6 pt-5 sm:pt-7 pb-4 flex flex-col justify-center">
+        
+        {/* HERO TITLE & CALLOUT HEADER (Two-column layout matching Pic 2) */}
+        <div className="flex items-start justify-between gap-3">
+          {/* Left Column: Heading + Subtitle + Category Pills */}
+          <div className="space-y-1.5 flex-1 min-w-0">
+            <h1 className="text-2xl xs:text-3xl sm:text-4xl font-black text-white tracking-tight leading-[1.15]">
+              Master English.
+              <span className="block text-[#FF7A29] bg-gradient-to-r from-amber-400 via-orange-500 to-[#FF7A29] bg-clip-text text-transparent">
                 One Duel at a Time.
               </span>
             </h1>
 
-            {/* Subheadline */}
-            <p className="text-xs text-slate-300/90 font-medium leading-relaxed max-w-xs mx-auto">
-              Learn smarter. Practice with purpose. Remember what you learn.
+            <p className="text-xs sm:text-sm text-slate-400 font-normal leading-relaxed pt-0.5">
+              Practice. Compete. Remember. Crack your exams.
             </p>
-          </div>
 
-          {/* HERO VISUAL: 1v1 Vocab Duel Arena Card */}
-          <div 
-            id="onboarding-hero-duel"
-            className="relative bg-slate-950/80 border border-indigo-500/30 rounded-2xl p-3 shadow-inner overflow-hidden space-y-2.5"
-          >
-            {/* Top Match Bar with Two Opponents & VS */}
-            <div className="flex items-center justify-between text-[11px] font-semibold px-1">
-              {/* Player 1 (You) */}
-              <div className="flex items-center gap-1.5 text-amber-400 min-w-0">
-                <div className="w-5 h-5 rounded-full bg-amber-500/20 border border-amber-400/40 flex items-center justify-center text-[11px] shrink-0">
-                  👨‍💼
-                </div>
-                <div className="truncate">
-                  <span className="font-bold">You</span>
-                  <span className="text-[9px] text-amber-300/70 ml-1 font-mono">1,840 LP</span>
-                </div>
-              </div>
-
-              {/* VS & Round Badge */}
-              <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-500/20 via-indigo-500/20 to-sky-500/20 border border-indigo-400/30 text-[10px] font-black tracking-wider text-indigo-200 shrink-0">
-                <span className="text-amber-400">⚔️</span>
-                <span className="font-mono">VS</span>
-                <span className="text-[9px] text-slate-400 font-normal">• 9s left</span>
-              </div>
-
-              {/* Player 2 (Rival) */}
-              <div className="flex items-center gap-1.5 text-sky-400 min-w-0 justify-end">
-                <div className="truncate text-right">
-                  <span className="font-bold">Rival Aspirant</span>
-                  <span className="text-[9px] text-sky-300/70 ml-1 font-mono">1,815 LP</span>
-                </div>
-                <div className="w-5 h-5 rounded-full bg-sky-500/20 border border-sky-400/40 flex items-center justify-center text-[11px] shrink-0">
-                  🎯
-                </div>
-              </div>
-            </div>
-
-            {/* Question Snippet Tile */}
-            <div className="bg-slate-900/90 rounded-xl p-2.5 border border-slate-800 text-center relative">
-              <div className="flex items-center justify-center gap-1.5 text-[9px] font-semibold uppercase tracking-wider text-amber-400/90 mb-1">
-                <span className="px-1.5 py-0.2 rounded bg-amber-500/10 border border-amber-500/20">SSC CGL PYQ</span>
-                <span>Select ANTONYM</span>
-              </div>
-              <div className="text-sm sm:text-base font-black text-white tracking-wide">
-                METICULOUS
-              </div>
-              <div className="text-[10px] text-slate-400 mt-0.5">
-                Meaning: अति सावधान / सतर्क (Careful & precise)
-              </div>
-
-              {/* 2x2 Mini Options Grid Preview */}
-              <div className="grid grid-cols-2 gap-1.5 mt-2 text-[10px] font-medium text-left">
-                <div className="bg-slate-800/50 border border-slate-700/60 rounded-lg px-2 py-1 text-slate-400">
-                  A. Accurate
-                </div>
-                <div className="bg-emerald-950/70 border border-emerald-500/60 rounded-lg px-2 py-1 text-emerald-300 font-bold flex items-center justify-between shadow-sm">
-                  <span>B. Careless</span>
-                  <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                </div>
-                <div className="bg-slate-800/50 border border-slate-700/60 rounded-lg px-2 py-1 text-slate-400">
-                  C. Detailed
-                </div>
-                <div className="bg-slate-800/50 border border-slate-700/60 rounded-lg px-2 py-1 text-slate-400">
-                  D. Strict
-                </div>
-              </div>
-            </div>
-
-            {/* Mini Progress & Combo Status */}
-            <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono px-1">
-              <span className="text-emerald-400 font-bold flex items-center gap-1">
-                <Zap className="w-3 h-3 text-amber-400 fill-amber-400" />
-                +120 LP (2x Combo Streak)
+            {/* Exam Category Pills */}
+            <div className="flex items-center gap-1.5 sm:gap-2 pt-2 flex-wrap">
+              <span className="px-3 py-1 rounded-full bg-blue-950/70 border border-blue-500/30 text-blue-200 text-xs font-semibold shadow-sm hover:border-blue-400 transition-colors">
+                SSC
               </span>
-              <span className="text-slate-400">Score: 480 vs 360</span>
+              <span className="px-3 py-1 rounded-full bg-blue-950/70 border border-blue-500/30 text-blue-200 text-xs font-semibold shadow-sm hover:border-blue-400 transition-colors">
+                Banking
+              </span>
+              <span className="px-3 py-1 rounded-full bg-blue-950/70 border border-blue-500/30 text-blue-200 text-xs font-semibold shadow-sm hover:border-blue-400 transition-colors">
+                Railways
+              </span>
+              <span className="px-2.5 py-1 rounded-full bg-blue-950/40 border border-blue-800/40 text-blue-300/80 text-xs font-medium hover:border-blue-400 transition-colors">
+                + more
+              </span>
             </div>
           </div>
 
-          {/* CORE FEATURES GRID: Compact, minimal, elegant cards */}
-          <div className="space-y-1.5">
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-              {features.map((feat, idx) => (
-                <div
-                  key={idx}
-                  className={`bg-slate-900/60 hover:bg-slate-850/80 border rounded-xl p-2 transition-all flex flex-col justify-between ${feat.bgGlow}`}
-                >
-                  <div className="flex items-center gap-1.5 mb-1">
-                    <div className="p-1 rounded-md bg-slate-800/80 border border-slate-700/60">
-                      {feat.icon}
-                    </div>
-                    <span className="text-[11px] font-bold text-white leading-tight truncate">
-                      {feat.title}
-                    </span>
-                  </div>
-                  <p className="text-[10px] text-slate-400 leading-tight">
-                    {feat.subtitle}
-                  </p>
-                </div>
-              ))}
-            </div>
+          {/* Right Column: Handwritten/Cursive script "Same Words. Stronger You." (Matching Pic 2) */}
+          <div className="shrink-0 flex flex-col items-end justify-center font-handwritten text-sky-400 text-lg xs:text-xl sm:text-2xl font-bold leading-tight -rotate-3 select-none pr-1 drop-shadow-[0_2px_8px_rgba(56,189,248,0.25)]">
+            <span>Same</span>
+            <span>Words.</span>
+            <span className="mt-0.5">Stronger</span>
+            <span>You.</span>
           </div>
-
-          {/* CTA SECTION: Bottom action */}
-          <div className="pt-1 text-center space-y-2">
-            <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-              Ready to start?
-            </div>
-
-            {/* Primary Action Button */}
-            <button
-              id="btn-onboarding-start-learning"
-              onClick={handleStart}
-              className="w-full py-3.5 px-5 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-400 to-orange-500 text-slate-950 font-black text-sm sm:text-base flex items-center justify-center gap-2 shadow-lg shadow-amber-500/25 hover:brightness-105 active:scale-[0.98] transition-all cursor-pointer"
-            >
-              <span>Play First Duel (10 Qs)</span>
-              <ChevronRight className="w-4 h-4 text-slate-950 stroke-[3]" />
-            </button>
-
-            {/* Secondary Skip Option */}
-            <button
-              id="btn-onboarding-skip"
-              onClick={handleSkip}
-              className="text-xs text-slate-400 hover:text-slate-200 transition-colors font-medium py-1 px-4 rounded-lg"
-            >
-              Skip
-            </button>
-          </div>
-
         </div>
-      </div>
+
+        {/* CENTRAL DUEL ARENA CARD MOCKUP (Pixel-perfect fidelity to Pic 2) */}
+        <div 
+          id="landing-hero-duel-card"
+          className="relative rounded-2xl bg-[#090D22] border border-blue-900/40 p-3 sm:p-4 shadow-[0_12px_45px_rgba(0,0,0,0.6)] mt-4 space-y-2.5 ring-1 ring-blue-500/15"
+        >
+          {/* Top Player vs Rival Bar */}
+          <div className="flex items-center justify-between text-xs sm:text-sm font-semibold px-1">
+            {/* Player You (Amber) */}
+            <div className="flex items-center gap-1.5 text-amber-400">
+              <div className="w-5 h-5 rounded-full bg-amber-500/20 border border-amber-400/40 flex items-center justify-center text-[11px] shrink-0">
+                👨‍💼
+              </div>
+              <span className="font-bold">You</span>
+              <span className="text-[10px] sm:text-xs text-amber-300/80 font-mono">1,840 LP</span>
+            </div>
+
+            {/* Central VS Badge */}
+            <div className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-gradient-to-r from-amber-500/20 via-indigo-500/20 to-sky-500/20 border border-indigo-400/30 text-[11px] font-black tracking-wider text-indigo-100 shrink-0">
+              <span className="text-amber-400">⚔️</span>
+              <span className="font-mono">VS</span>
+            </div>
+
+            {/* Rival Aspirant (Sky Blue) */}
+            <div className="flex items-center gap-1.5 text-sky-400">
+              <span className="font-bold">Rival Aspirant</span>
+              <span className="text-[10px] sm:text-xs text-sky-300/80 font-mono">1,815 LP</span>
+              <div className="w-5 h-5 rounded-full bg-sky-500/20 border border-sky-400/40 flex items-center justify-center text-[11px] shrink-0">
+                👤
+              </div>
+            </div>
+          </div>
+
+          {/* Central Question Box */}
+          <div className="bg-[#0B1021] rounded-xl p-3 border border-blue-900/30 text-center space-y-1.5 shadow-inner">
+            {/* Question Exam Tags */}
+            <div className="flex items-center justify-center gap-1.5 text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-amber-400">
+              <span className="px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-300">
+                SSC CGL PYQ
+              </span>
+              <span className="text-amber-300 tracking-wider">
+                SELECT ANTONYM
+              </span>
+            </div>
+
+            {/* Target Vocabulary Word */}
+            <div className="text-base sm:text-lg font-black text-white tracking-wider pt-0.5">
+              METICULOUS
+            </div>
+
+            {/* Hindi & English Meaning */}
+            <div className="text-[11px] sm:text-xs text-slate-300 font-medium">
+              Meaning: अति सावधान / सतर्क (Careful & precise)
+            </div>
+
+            {/* 4 Option Buttons (2x2 Grid) */}
+            <div className="grid grid-cols-2 gap-2 mt-2 text-[11px] sm:text-xs font-medium text-left">
+              <div className="bg-[#11162B] border border-slate-800 text-slate-300 rounded-lg px-2.5 py-1.5">
+                A. Accurate
+              </div>
+              <div className="bg-emerald-950/80 border border-emerald-500 text-emerald-300 rounded-lg px-2.5 py-1.5 font-bold flex items-center justify-between shadow-sm">
+                <span>B. Careless</span>
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              </div>
+              <div className="bg-[#11162B] border border-slate-800 text-slate-300 rounded-lg px-2.5 py-1.5">
+                C. Detailed
+              </div>
+              <div className="bg-[#11162B] border border-slate-800 text-slate-300 rounded-lg px-2.5 py-1.5">
+                D. Strict
+              </div>
+            </div>
+          </div>
+
+          {/* Footer of Duel Card: LP Combo & Score Status */}
+          <div className="flex items-center justify-between text-xs text-slate-400 font-mono px-1">
+            <span className="text-emerald-400 font-bold flex items-center gap-1">
+              <Zap className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
+              +120 LP (2x Combo Streak)
+            </span>
+            <span className="text-slate-400">Score: 480 vs 360</span>
+          </div>
+        </div>
+
+        {/* PRIMARY CTA ACTION BUTTON (Vibrant rich orange gradient matching Pic 2) */}
+        <div className="mt-4 sm:mt-5 space-y-2 text-center">
+          <button
+            id="btn-landing-play-first-duel"
+            onClick={handleStart}
+            className="w-full py-3.5 sm:py-4 px-6 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-amber-500 text-slate-950 font-black text-base sm:text-lg flex items-center justify-center gap-2.5 shadow-xl shadow-orange-500/25 hover:brightness-105 active:scale-[0.98] transition-all cursor-pointer"
+          >
+            <Swords className="w-5 h-5 text-slate-950 stroke-[2.5]" />
+            <span>Play Your First Duel</span>
+            <ChevronRight className="w-5 h-5 text-slate-950 stroke-[3]" />
+          </button>
+
+          {/* Microcopy Trust Subtext directly under button */}
+          <p className="text-xs sm:text-sm text-slate-400 font-normal">
+            10 questions • ~2 minutes • No signup required
+          </p>
+        </div>
+
+        {/* HORIZONTAL 4-COLUMN FEATURE ROW (Matching Pic 2) */}
+        <div className="grid grid-cols-4 gap-2 text-center mt-5 sm:mt-6 pt-3 sm:pt-4 border-t border-slate-800/60">
+          {/* 1. 24,000+ PYQs */}
+          <div className="flex flex-col items-center">
+            <BookOpen className="w-5 h-5 text-blue-400 mb-1" />
+            <span className="font-bold text-xs sm:text-sm text-white leading-tight">24,000+</span>
+            <span className="text-[10px] sm:text-xs text-slate-400">PYQs</span>
+          </div>
+
+          {/* 2. Mnemonic Hooks */}
+          <div className="flex flex-col items-center">
+            <Lightbulb className="w-5 h-5 text-emerald-400 mb-1" />
+            <span className="font-bold text-xs sm:text-sm text-white leading-tight">Mnemonic</span>
+            <span className="text-[10px] sm:text-xs text-slate-400">Hooks</span>
+          </div>
+
+          {/* 3. Mistake Vault */}
+          <div className="flex flex-col items-center">
+            <ShieldAlert className="w-5 h-5 text-purple-400 mb-1" />
+            <span className="font-bold text-xs sm:text-sm text-white leading-tight">Mistake</span>
+            <span className="text-[10px] sm:text-xs text-slate-400">Vault</span>
+          </div>
+
+          {/* 4. Spaced Repetition */}
+          <div className="flex flex-col items-center">
+            <RotateCcw className="w-5 h-5 text-indigo-400 mb-1" />
+            <span className="font-bold text-xs sm:text-sm text-white leading-tight">Spaced</span>
+            <span className="text-[10px] sm:text-xs text-slate-400">Repetition</span>
+          </div>
+        </div>
+      </main>
+
+      {/* BOTTOM "EXPLORE MORE" SECTION WITH DOWN CHEVRON (Matching Pic 2) */}
+      <footer className="relative z-10 w-full text-center py-3 pb-4 sm:pb-6">
+        <button
+          id="btn-landing-explore-more"
+          onClick={handleSkip}
+          className="inline-flex flex-col items-center justify-center gap-1 text-sky-400/90 hover:text-sky-300 transition-colors cursor-pointer group"
+        >
+          <ChevronDown className="w-4 h-4 text-sky-400 group-hover:translate-y-0.5 transition-transform animate-bounce" />
+          <span className="text-[10px] sm:text-xs font-bold tracking-widest uppercase">
+            EXPLORE MORE
+          </span>
+        </button>
+      </footer>
     </div>
   );
 };

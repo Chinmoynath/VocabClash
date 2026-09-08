@@ -2175,6 +2175,13 @@ export default function App() {
           setShowTourModal(false);
           handleStartMatchmaking('1v1_ranked');
         }}
+        onOpenLogin={() => {
+          setShowTourModal(false);
+          setShowProfileModal(true);
+        }}
+        onExploreApp={() => {
+          setShowTourModal(false);
+        }}
       />
 
       {/* VIP Premium Subscription Modal */}
