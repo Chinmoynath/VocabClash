@@ -147,7 +147,7 @@ export const PublicArticleDetail: React.FC<PublicArticleDetailProps> = ({
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
+      <div className="min-h-screen w-full bg-slate-950 text-slate-100 flex flex-col overflow-y-auto">
         <header className="border-b border-slate-800 bg-slate-900/80 px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-amber-400 font-black tracking-wider text-lg">VOCAB<span className="text-white">CLASH</span></span>
@@ -165,7 +165,7 @@ export const PublicArticleDetail: React.FC<PublicArticleDetailProps> = ({
 
   if (error || !article) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
+      <div className="min-h-screen w-full bg-slate-950 text-slate-100 flex flex-col overflow-y-auto">
         <header className="border-b border-slate-800 bg-slate-900 px-4 py-3">
           <button
             onClick={onNavigateToArticles}
@@ -203,7 +203,7 @@ export const PublicArticleDetail: React.FC<PublicArticleDetailProps> = ({
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-amber-500 selection:text-slate-950">
+    <div className="min-h-screen w-full bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-amber-500 selection:text-slate-950 overflow-y-auto">
       {/* Top Header Bar */}
       <header className="sticky top-0 z-30 bg-slate-900/90 backdrop-blur-md border-b border-slate-800/80 px-4 py-3 sm:px-6">
         <div className="max-w-4xl mx-auto flex items-center justify-between gap-4">

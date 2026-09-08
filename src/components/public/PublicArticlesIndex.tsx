@@ -100,7 +100,7 @@ export const PublicArticlesIndex: React.FC<PublicArticlesIndexProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-amber-500 selection:text-slate-950">
+    <div className="min-h-screen w-full bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-amber-500 selection:text-slate-950 overflow-y-auto">
       {/* Top Header Bar */}
       <header className="sticky top-0 z-30 bg-slate-900/90 backdrop-blur-md border-b border-slate-800/80 px-4 py-3 sm:px-6">
         <div className="max-w-6xl mx-auto flex items-center justify-between gap-4">

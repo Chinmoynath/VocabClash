@@ -783,97 +783,115 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-slate-950 text-slate-100 overflow-hidden">
-      {/* Top Admin Navigation Bar */}
-      <div className="bg-slate-900 border-b border-slate-800 px-6 py-4 flex items-center justify-between shadow-md shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-xl">
-            <Database className="w-5 h-5" />
-          </div>
-          <div>
-            <h1 className="text-base font-extrabold text-white flex items-center gap-2">
-              VocabClash Admin Question Engine V3
-              <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-500/40">
-                Production Engine
-              </span>
-            </h1>
-            <p className="text-xs text-slate-400">
-              Deterministic 4-Category Filter • Firestore Cloud Synchronization • Adaptive Repetition Diagnostics
-            </p>
-          </div>
-        </div>
+      {/* Top Admin Navigation Bar - Slidable on mobile and smaller viewports */}
+      <header className="bg-slate-900 border-b border-slate-800 px-4 sm:px-6 py-3 sm:py-4 shadow-md shrink-0 sticky top-0 z-20">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+          {/* Engine Title and Quick Exit Header Bar */}
+          <div className="flex items-center justify-between gap-3 min-w-0">
+            <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+              <div className="p-2 bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-xl shrink-0">
+                <Database className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <h1 className="text-sm sm:text-base font-extrabold text-white flex items-center gap-2 truncate">
+                  <span className="truncate">VocabClash Admin Question Engine V3</span>
+                  <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-500/40 shrink-0 font-medium">
+                    Production Engine
+                  </span>
+                </h1>
+                <p className="text-[11px] text-slate-400 truncate hidden sm:block">
+                  Deterministic 4-Category Filter • Firestore Cloud Synchronization • Adaptive Repetition Diagnostics
+                </p>
+              </div>
+            </div>
 
-        {/* View Switcher Pills */}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setAdminView('importer')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
-              adminView === 'importer'
-                ? 'bg-amber-500 text-slate-950 shadow-md'
-                : 'bg-slate-800 text-slate-300 hover:text-white'
-            }`}
-          >
-            <Upload className="w-3.5 h-3.5" />
-            JSON Ingest & Publisher
-          </button>
-
-          <button
-            onClick={() => setAdminView('health')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
-              adminView === 'health'
-                ? 'bg-sky-500 text-slate-950 shadow-md'
-                : 'bg-slate-800 text-slate-300 hover:text-white'
-            }`}
-          >
-            <Activity className="w-3.5 h-3.5" />
-            Question Bank Health ({healthData.totalCloud} Cloud)
-          </button>
-
-          <button
-            onClick={() => setAdminView('explorer')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
-              adminView === 'explorer'
-                ? 'bg-emerald-500 text-slate-950 shadow-md'
-                : 'bg-slate-800 text-slate-300 hover:text-white'
-            }`}
-          >
-            <BookOpen className="w-3.5 h-3.5" />
-            Exam & Year Explorer ({explorerQuestions.length})
-          </button>
-
-          <button
-            onClick={() => setAdminView('simulation')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
-              adminView === 'simulation'
-                ? 'bg-purple-500 text-slate-950 shadow-md'
-                : 'bg-slate-800 text-slate-300 hover:text-white'
-            }`}
-          >
-            <PlayCircle className="w-3.5 h-3.5" />
-            Repetition Simulator
-          </button>
-
-          {onOpenArticles && (
+            {/* Quick Exit Button (Always visible on phone header without needing to slide) */}
             <button
-              onClick={onOpenArticles}
-              className="px-3 py-1.5 bg-gradient-to-r from-orange-500 to-amber-500 text-slate-950 hover:brightness-110 font-bold text-xs rounded-xl flex items-center gap-1.5 transition shadow-md shadow-orange-950/40"
-              title="Open Article & Blog CMS Publisher"
+              onClick={onClose}
+              className="lg:hidden px-3 py-1.5 bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 hover:text-white text-xs font-bold rounded-xl border border-rose-800/60 transition flex items-center gap-1.5 shrink-0"
+              title="Exit Admin Mode"
             >
-              <FileText className="w-3.5 h-3.5" />
-              Articles / Blog CMS
+              <span>Exit Admin</span>
+              <span className="text-xs font-mono">✕</span>
             </button>
-          )}
+          </div>
 
-          <button
-            onClick={onClose}
-            className="ml-2 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-xl border border-slate-700 transition"
-          >
-            Exit Admin Mode
-          </button>
+          {/* Horizontally Slidable Navigation Pills Track */}
+          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar scrollbar-thin py-1 -mx-4 px-4 sm:mx-0 sm:px-0 touch-pan-x scroll-smooth">
+            <button
+              onClick={() => setAdminView('importer')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 whitespace-nowrap ${
+                adminView === 'importer'
+                  ? 'bg-amber-500 text-slate-950 shadow-md'
+                  : 'bg-slate-800 text-slate-300 hover:text-white'
+              }`}
+            >
+              <Upload className="w-3.5 h-3.5" />
+              JSON Ingest & Publisher
+            </button>
+
+            <button
+              onClick={() => setAdminView('health')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 whitespace-nowrap ${
+                adminView === 'health'
+                  ? 'bg-sky-500 text-slate-950 shadow-md'
+                  : 'bg-slate-800 text-slate-300 hover:text-white'
+              }`}
+            >
+              <Activity className="w-3.5 h-3.5" />
+              Question Bank Health ({healthData.totalCloud} Cloud)
+            </button>
+
+            <button
+              onClick={() => setAdminView('explorer')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 whitespace-nowrap ${
+                adminView === 'explorer'
+                  ? 'bg-emerald-500 text-slate-950 shadow-md'
+                  : 'bg-slate-800 text-slate-300 hover:text-white'
+              }`}
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              Exam & Year Explorer ({explorerQuestions.length})
+            </button>
+
+            <button
+              onClick={() => setAdminView('simulation')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 whitespace-nowrap ${
+                adminView === 'simulation'
+                  ? 'bg-purple-500 text-slate-950 shadow-md'
+                  : 'bg-slate-800 text-slate-300 hover:text-white'
+              }`}
+            >
+              <PlayCircle className="w-3.5 h-3.5" />
+              Repetition Simulator
+            </button>
+
+            {onOpenArticles && (
+              <button
+                onClick={onOpenArticles}
+                className="px-3 py-1.5 bg-gradient-to-r from-orange-500 to-amber-500 text-slate-950 hover:brightness-110 font-bold text-xs rounded-xl flex items-center gap-1.5 transition shadow-md shadow-orange-950/40 shrink-0 whitespace-nowrap"
+                title="Open Article & Blog CMS Publisher"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                Articles / Blog CMS
+              </button>
+            )}
+
+            {/* Slidable Exit Admin Mode Pill */}
+            <button
+              onClick={onClose}
+              className="px-3.5 py-1.5 bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 hover:text-rose-100 text-xs font-bold rounded-xl border border-rose-800/60 transition flex items-center gap-1.5 shrink-0 whitespace-nowrap ml-1"
+              title="Close Admin Panel"
+            >
+              <span>Exit Admin Mode</span>
+              <span className="text-xs font-mono">✕</span>
+            </button>
+          </div>
         </div>
-      </div>
+      </header>
 
       {/* Main Content Area */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6 max-w-7xl w-full mx-auto">
+      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 max-w-7xl w-full mx-auto">
         {/* Error Alert */}
         {errorMessage && (
           <div className="bg-rose-500/10 border border-rose-500/40 p-4 rounded-xl text-rose-200 text-sm flex items-center gap-2">

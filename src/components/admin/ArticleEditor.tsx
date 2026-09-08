@@ -374,9 +374,9 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
+    <div className="min-h-screen w-full bg-slate-950 text-slate-100 flex flex-col font-sans overflow-y-auto">
       {/* Top Navigation & Action Bar */}
-      <header className="sticky top-0 z-30 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 px-4 py-3 sm:px-6 flex items-center justify-between gap-4">
+      <header className="sticky top-0 z-30 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 px-4 py-3 sm:px-6 flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3">
           <button
             onClick={onBack}
@@ -403,10 +403,10 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
           <button
             onClick={() => setShowFullPreviewModal(true)}
-            className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white text-sm font-medium transition flex items-center gap-2"
+            className="px-3 sm:px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white text-xs sm:text-sm font-medium transition flex items-center gap-1.5 sm:gap-2"
             title="Preview how article appears to readers"
           >
             <Eye className="w-4 h-4 text-cyan-400" />
@@ -415,7 +415,7 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
 
           <button
             onClick={() => setShowSettingsDrawer(!showSettingsDrawer)}
-            className={`px-3.5 py-2 rounded-xl text-sm font-medium transition flex items-center gap-2 border ${
+            className={`px-3 sm:px-3.5 py-2 rounded-xl text-xs sm:text-sm font-medium transition flex items-center gap-1.5 sm:gap-2 border ${
               showSettingsDrawer 
                 ? 'bg-amber-500/20 text-amber-300 border-amber-500/50' 
                 : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
@@ -423,12 +423,13 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
           >
             <Settings className="w-4 h-4 text-amber-400" />
             <span className="hidden md:inline">SEO & Practice Settings</span>
+            <span className="md:hidden">Settings</span>
           </button>
 
           <button
             disabled={isSaving}
             onClick={() => handleSave('draft')}
-            className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white text-sm font-medium transition flex items-center gap-2 disabled:opacity-50"
+            className="px-3 sm:px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white text-xs sm:text-sm font-medium transition flex items-center gap-1.5 sm:gap-2 disabled:opacity-50"
           >
             <Save className="w-4 h-4 text-slate-400" />
             <span className="hidden sm:inline">Save Draft</span>
@@ -437,14 +438,14 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
           <button
             disabled={isSaving}
             onClick={() => handleSave('published')}
-            className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-semibold text-sm shadow-lg shadow-emerald-950/40 transition flex items-center gap-2 disabled:opacity-50"
+            className="px-3.5 sm:px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-semibold text-xs sm:text-sm shadow-lg shadow-emerald-950/40 transition flex items-center gap-1.5 sm:gap-2 disabled:opacity-50"
           >
             {isSaving ? (
               <RefreshCw className="w-4 h-4 animate-spin" />
             ) : (
               <Sparkles className="w-4 h-4" />
             )}
-            <span>{initialArticle?.status === 'published' ? 'Update & Keep Live' : 'Publish Article'}</span>
+            <span>{initialArticle?.status === 'published' ? 'Update Live' : 'Publish'}</span>
           </button>
         </div>
       </header>
@@ -471,9 +472,9 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
       )}
 
       {/* Main Workspace Layout */}
-      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
+      <div className="flex-1 flex flex-col lg:flex-row w-full min-h-0">
         {/* Left / Center Content Editor */}
-        <div className="flex-1 flex flex-col p-4 sm:p-6 max-w-5xl mx-auto w-full space-y-6 overflow-y-auto">
+        <div className="flex-1 flex flex-col p-4 sm:p-6 max-w-5xl mx-auto w-full space-y-6 pb-24">
           {/* Article Title Input */}
           <div className="space-y-2">
             <input
@@ -748,20 +749,57 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
               </div>
             )}
           </div>
+
+          {/* Quick Footer Action Bar for Mobile & Desktop convenience */}
+          <div className="pt-6 border-t border-slate-800/80 flex items-center justify-between gap-3 flex-wrap">
+            <button
+              type="button"
+              onClick={() => setShowSettingsDrawer(true)}
+              className="px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 hover:border-amber-500/50 text-slate-200 text-xs font-semibold flex items-center gap-2 transition"
+            >
+              <Settings className="w-4 h-4 text-amber-400" />
+              <span>Configure SEO, Category & Practice CTA</span>
+            </button>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={isSaving}
+                onClick={() => handleSave('draft')}
+                className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition flex items-center gap-1.5 disabled:opacity-50"
+              >
+                <Save className="w-4 h-4 text-slate-400" />
+                <span>Save Draft</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={isSaving}
+                onClick={() => handleSave('published')}
+                className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-semibold text-xs shadow-md transition flex items-center gap-1.5 disabled:opacity-50"
+              >
+                <Sparkles className="w-4 h-4" />
+                <span>{initialArticle?.status === 'published' ? 'Update Live' : 'Publish Article'}</span>
+              </button>
+            </div>
+          </div>
         </div>
 
-        {/* Right Settings Drawer / Panel */}
+        {/* Right Settings Drawer / Panel: Full slide-over modal on mobile, docked sidebar on desktop */}
         <aside className={`${
-          showSettingsDrawer ? 'block' : 'hidden lg:block'
-        } w-full lg:w-96 bg-slate-900 border-l border-slate-800 p-5 space-y-6 overflow-y-auto`}>
-          <div className="flex items-center justify-between">
+          showSettingsDrawer 
+            ? 'fixed inset-0 z-50 bg-slate-900/98 backdrop-blur-xl p-5 space-y-6 overflow-y-auto w-full' 
+            : 'hidden lg:block lg:w-96 lg:shrink-0 lg:bg-slate-900 lg:border-l lg:border-slate-800 lg:p-5 lg:space-y-6 lg:overflow-y-auto'
+        }`}>
+          <div className="flex items-center justify-between pb-3 border-b border-slate-800">
             <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
               <Settings className="w-4 h-4 text-amber-400" />
               Article Configuration
             </h3>
             <button
               onClick={() => setShowSettingsDrawer(false)}
-              className="lg:hidden p-1 text-slate-400 hover:text-white"
+              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition"
+              title="Close settings"
             >
               <X className="w-4 h-4" />
             </button>
