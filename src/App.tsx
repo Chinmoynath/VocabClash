@@ -1137,6 +1137,9 @@ export default function App() {
         responseTimeMs: playerAns.timeTakenMs,
         category: currentQ.category,
         pyqPoints: playerAns.isCorrect ? 10 : 0,
+        questionId: currentQ.id,
+        conceptKey: currentQ.wordOrPhrase || currentQ.memoryKey || currentQ.question,
+        source: 'battle',
       });
 
       // GA4: question_answered for 1v1 Arena duel round
@@ -1682,6 +1685,19 @@ export default function App() {
               window.history.pushState(null, '', '/articles');
             }
           }}
+          isAdmin={(currentUser?.email?.toLowerCase() === 'nathchinmoy777@gmail.com' || (currentUser?.email && currentUser.email.toLowerCase().includes('admin')))}
+          onOpenAdminArticles={() => {
+            soundManager.playTap();
+            setShowAdminArticles(true);
+            setAdminArticleMode('dashboard');
+            if (typeof window !== 'undefined') {
+              window.history.pushState(null, '', '/admin/articles');
+            }
+          }}
+          onOpenAdminImporter={() => {
+            soundManager.playTap();
+            setShowAdminImporter(true);
+          }}
         />
       )}
 
@@ -1715,6 +1731,14 @@ export default function App() {
             setShowTourModal(true);
           }}
           isAdmin={(currentUser?.email?.toLowerCase() === 'nathchinmoy777@gmail.com' || (currentUser?.email && currentUser.email.toLowerCase().includes('admin')))}
+          onOpenAdminArticles={() => {
+            soundManager.playTap();
+            setShowAdminArticles(true);
+            setAdminArticleMode('dashboard');
+            if (typeof window !== 'undefined') {
+              window.history.pushState(null, '', '/admin/articles');
+            }
+          }}
           onOpenAdminImporter={() => {
             soundManager.playTap();
             setShowAdminImporter(true);

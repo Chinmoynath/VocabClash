@@ -211,15 +211,27 @@ export function buildMentorAnalytics(
     else trend = 'stable';
   }
 
-  // 6. Repeated Mistakes (Concepts answered incorrectly 2+ times)
+  // 6. Repeated Mistakes (Concepts answered incorrectly 3+ times)
   // Group incorrect attempts by conceptKey from authoritative attempts
   const mistakeCounts = new Map<string, { concept: string; category: QuestionCategory; wrongCount: number; lastMissedAt: number }>();
   
   // Use period attempts if enough data, or fallback to all attempts to ensure user sees high-yield traps
   const attemptsForMistakes = period === 'all_time' ? allAttempts : (periodAttempts.length >= 10 ? periodAttempts : allAttempts);
 
+  const isPlaceholderConcept = (str: string) => {
+    if (!str) return true;
+    const s = str.toLowerCase().trim();
+    if (s === 'concept' || s === 'uncategorized' || s === 'question') return true;
+    if (/^(?:synonyms?|antonyms?|ows|idioms?)_question(?:_\d+)?$/i.test(s)) return true;
+    if (/^(?:synonyms?|antonyms?|ows|idioms?)_historical(?:_\d+)?$/i.test(s)) return true;
+    if (/^historical_(?:attempt|summary)?(?:_\d+)?$/i.test(s)) return true;
+    if (/^(?:synonym|antonym|ows|idiom)\s+question$/i.test(s)) return true;
+    return false;
+  };
+
   for (const att of attemptsForMistakes) {
     if (!att.correct && att.conceptKey) {
+      if (isPlaceholderConcept(att.conceptKey)) continue;
       const key = att.conceptKey.toLowerCase().trim();
       const existing = mistakeCounts.get(key);
       const cat = att.category !== 'uncategorized' ? att.category : 'synonyms';
@@ -243,7 +255,7 @@ export function buildMentorAnalytics(
   const unresolvedMistakes = (savedWords || []).filter(isItemMistake);
   for (const v of unresolvedMistakes) {
     const q = v.question;
-    if (q && q.wordOrPhrase) {
+    if (q && q.wordOrPhrase && !isPlaceholderConcept(q.wordOrPhrase)) {
       const key = (q.memoryKey || q.wordOrPhrase).toLowerCase().trim();
       const existing = mistakeCounts.get(key);
       const cat = (q.category as QuestionCategory) || 'synonyms';
@@ -257,11 +269,11 @@ export function buildMentorAnalytics(
     }
   }
 
-  // Filter only genuine repeated mistakes (wrongCount >= 2)
+  // Filter only genuine repeated mistakes (user directive: wrongCount >= 3)
   const repeatedMistakes: RepeatedMistakeItem[] = Array.from(mistakeCounts.values())
-    .filter(m => m.wrongCount >= 2)
+    .filter(m => m.wrongCount >= 3 && !isPlaceholderConcept(m.concept))
     .sort((a, b) => b.wrongCount - a.wrongCount)
-    .slice(0, 20)
+    .slice(0, 30)
     .map(m => {
       // Find matching metadata from savedWords if available
       const matchedSaved = savedWords.find(

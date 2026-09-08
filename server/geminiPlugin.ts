@@ -115,7 +115,7 @@ Respond strictly with a JSON object in this exact schema without markdown format
 
               try {
                 const response = await ai.models.generateContent({
-                  model: 'gemini-2.5-flash',
+                  model: 'gemini-3.1-flash-lite',
                   contents: prompt,
                   config: {
                     responseMimeType: 'application/json',
@@ -177,7 +177,7 @@ Respond strictly with a JSON object in this exact schema without markdown format
 Include accurate Hindi meanings, realistic 4 options, exact correct answer index, exam repeat count, and a memory mnemonic.`;
 
               const response = await ai.models.generateContent({
-                model: 'gemini-3.7-flash',
+                model: 'gemini-3.1-flash-lite',
                 contents: prompt,
                 config: {
                   responseMimeType: 'application/json',

@@ -1002,7 +1002,7 @@ Respond strictly with a JSON object in this exact schema without markdown format
   }
 
   // Model candidates with fallback if a model experiences high traffic (503)
-  const modelCandidates = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest'];
+  const modelCandidates = ['gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest'];
   let lastErrorStatus = 500;
   let lastErrorMessage = 'Gemini AI unavailable';
 
@@ -1171,7 +1171,7 @@ STRICT GROUNDING RULES:
 
   const ai = getGenAI();
   if (ai) {
-    const modelCandidates = ['gemini-3.1-flash-lite', 'gemini-3.7-flash', 'gemini-flash-latest'];
+    const modelCandidates = ['gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest'];
     for (const modelName of modelCandidates) {
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {

@@ -342,9 +342,9 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
             </div>
           )}
 
-          <div className="text-xs font-semibold text-amber-400 flex items-center justify-center gap-1">
-            <Shield className="w-3.5 h-3.5" />
-            <span>{player.tierTitle}</span>
+          <div className="text-xs font-semibold text-amber-400 flex items-center justify-center gap-1.5 max-w-full px-2">
+            <Shield className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">{player.tierTitle}</span>
           </div>
 
           {isEditing ? (
@@ -377,9 +377,9 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
               </select>
             </div>
           ) : (
-            <div className="text-xs text-slate-300 bg-slate-900/60 px-3 py-1.5 rounded-xl border border-slate-800/80 inline-block max-w-full">
-              Target:{' '}
-              <span className="text-emerald-400 font-semibold truncate">
+            <div className="w-full max-w-full bg-slate-900/70 border border-slate-800/80 px-3 py-2 rounded-xl text-xs text-center leading-relaxed">
+              <span className="text-slate-400 font-medium">Target: </span>
+              <span className="text-emerald-400 font-semibold break-words">
                 {player.targetExam}
               </span>
             </div>

@@ -80,33 +80,98 @@ export async function checkSlugAvailability(slug: string, excludeId?: string): P
 }
 
 /**
+ * Compress an image file in the browser using HTML Canvas
+ * Resizes to max width/height 1200px and compresses to JPEG with 0.8 quality
+ */
+async function compressImage(file: File, maxWidth = 1200, quality = 0.8): Promise<{ blob: Blob; dataUrl: string }> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = reject;
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = reject;
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+
+        if (width > maxWidth || height > maxWidth) {
+          if (width > height) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          } else {
+            width = Math.round((width * maxWidth) / height);
+            height = maxWidth;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve({ blob: file, dataUrl: reader.result as string });
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, width, height);
+        const dataUrl = canvas.toDataURL('image/jpeg', quality);
+        canvas.toBlob(
+          (blob) => {
+            if (blob) {
+              resolve({ blob, dataUrl });
+            } else {
+              resolve({ blob: file, dataUrl });
+            }
+          },
+          'image/jpeg',
+          quality
+        );
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
  * Upload an image for an article (featured image or inline)
- * Uses Firebase Storage with robust compression & fallback
+ * Uses client-side compression, Firebase Storage, and graceful fallback
  */
 export async function uploadArticleImage(file: File, altText?: string): Promise<{ url: string; alt: string }> {
-  const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+  const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_').replace(/\.[^/.]+$/, '') + '.jpg';
   const timestamp = Date.now();
   const storagePath = `article-images/${timestamp}_${sanitizedName}`;
+  const defaultAlt = altText || file.name.replace(/\.[^/.]+$/, '');
+
+  // Compress image client-side first for fast upload and small footprint
+  let compressedBlob: Blob = file;
+  let fallbackDataUrl: string = '';
+  try {
+    const comp = await compressImage(file, 1200, 0.82);
+    compressedBlob = comp.blob;
+    fallbackDataUrl = comp.dataUrl;
+  } catch (compErr) {
+    console.warn('[ArticleService] Canvas compression error, proceeding with original file:', compErr);
+  }
 
   try {
     const storage = getStorage();
     const storageRef = ref(storage, storagePath);
     
-    // Metadata
     const metadata = {
-      contentType: file.type || 'image/jpeg',
+      contentType: 'image/jpeg',
       customMetadata: {
-        altText: altText || '',
+        altText: defaultAlt,
         uploadedBy: auth.currentUser?.email || 'admin'
       }
     };
 
-    const snapshot = await uploadBytes(storageRef, file, metadata);
+    const snapshot = await uploadBytes(storageRef, compressedBlob, metadata);
     const downloadUrl = await getDownloadURL(snapshot.ref);
 
     return {
       url: downloadUrl,
-      alt: altText || file.name.replace(/\.[^/.]+$/, '')
+      alt: defaultAlt
     };
   } catch (primaryError) {
     console.warn('[ArticleService] Direct Firebase Storage upload error, trying fallback:', primaryError);
@@ -114,8 +179,8 @@ export async function uploadArticleImage(file: File, altText?: string): Promise<
     // Fallback: Try server-side upload endpoint if available
     try {
       const formData = new FormData();
-      formData.append('image', file);
-      if (altText) formData.append('altText', altText);
+      formData.append('image', compressedBlob, sanitizedName);
+      if (defaultAlt) formData.append('altText', defaultAlt);
 
       const res = await fetch('/api/articles/upload-image', {
         method: 'POST',
@@ -125,29 +190,22 @@ export async function uploadArticleImage(file: File, altText?: string): Promise<
       if (res.ok) {
         const json = await res.json();
         if (json.url) {
-          return { url: json.url, alt: json.alt || altText || '' };
+          return { url: json.url, alt: json.alt || defaultAlt };
         }
       }
     } catch (fallbackError) {
       console.warn('[ArticleService] Fallback upload failed:', fallbackError);
     }
 
-    // Secondary fallback: Convert to optimized data URL if image is small (<350KB)
-    if (file.size <= 350 * 1024) {
-      return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          resolve({
-            url: reader.result as string,
-            alt: altText || file.name.replace(/\.[^/.]+$/, '')
-          });
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
+    // Secondary fallback: Return the high-quality compressed Data URL
+    if (fallbackDataUrl) {
+      return {
+        url: fallbackDataUrl,
+        alt: defaultAlt
+      };
     }
 
-    throw new Error('Could not upload image. Please verify your connection or use an external image URL.');
+    throw new Error('Could not process image. Please verify your connection or use an external image URL.');
   }
 }
 
@@ -464,31 +522,41 @@ export async function saveArticle(input: ArticleInput): Promise<Article> {
  * Publish an article
  */
 export async function publishArticle(id: string): Promise<void> {
-  const docRef = doc(db, ARTICLES_COLLECTION, id);
-  const snap = await getDoc(docRef);
-  if (!snap.exists()) throw new Error('Article not found');
+  try {
+    const docRef = doc(db, ARTICLES_COLLECTION, id);
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) throw new Error('Article not found');
 
-  const data = snap.data();
-  const now = new Date().toISOString();
+    const data = snap.data();
+    const now = new Date().toISOString();
 
-  await setDoc(docRef, {
-    status: 'published',
-    publishedAt: data.publishedAt || now,
-    updatedAt: now
-  }, { merge: true });
+    await setDoc(docRef, {
+      status: 'published',
+      publishedAt: data.publishedAt || now,
+      updatedAt: now
+    }, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `${ARTICLES_COLLECTION}/${id}`);
+    throw error;
+  }
 }
 
 /**
  * Unpublish an article (reverts to draft)
  */
 export async function unpublishArticle(id: string): Promise<void> {
-  const docRef = doc(db, ARTICLES_COLLECTION, id);
-  const now = new Date().toISOString();
+  try {
+    const docRef = doc(db, ARTICLES_COLLECTION, id);
+    const now = new Date().toISOString();
 
-  await setDoc(docRef, {
-    status: 'draft',
-    updatedAt: now
-  }, { merge: true });
+    await setDoc(docRef, {
+      status: 'draft',
+      updatedAt: now
+    }, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `${ARTICLES_COLLECTION}/${id}`);
+    throw error;
+  }
 }
 
 /**

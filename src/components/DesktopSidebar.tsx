@@ -36,6 +36,9 @@ interface DesktopSidebarProps {
   onOpenTour?: () => void;
   onOpenGuides?: () => void;
   onOpenArticles?: () => void;
+  isAdmin?: boolean;
+  onOpenAdminArticles?: () => void;
+  onOpenAdminImporter?: () => void;
 }
 
 export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
@@ -53,6 +56,9 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
   onOpenTour,
   onOpenGuides,
   onOpenArticles,
+  isAdmin = false,
+  onOpenAdminArticles,
+  onOpenAdminImporter,
 }) => {
   const navItems = [
     {
@@ -261,6 +267,42 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
               /articles →
             </span>
           </button>
+        )}
+
+        {/* Admin Quick Access Trigger (Visible only for admin users) */}
+        {isAdmin && (
+          <div className="p-2.5 rounded-xl bg-purple-950/40 border border-purple-500/30 space-y-1.5">
+            <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-wider text-purple-300">
+              <span>Admin Studio</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" />
+            </div>
+            <div className="grid grid-cols-2 gap-1.5 pt-0.5">
+              {onOpenAdminArticles && (
+                <button
+                  onClick={() => {
+                    soundManager.playTap();
+                    onOpenAdminArticles();
+                  }}
+                  className="px-2 py-1.5 rounded-lg bg-purple-900/60 hover:bg-purple-800 text-purple-200 text-[11px] font-bold transition flex items-center justify-center gap-1 border border-purple-500/40"
+                  title="Open Article Publishing Studio"
+                >
+                  <span>✍️</span> Articles
+                </button>
+              )}
+              {onOpenAdminImporter && (
+                <button
+                  onClick={() => {
+                    soundManager.playTap();
+                    onOpenAdminImporter();
+                  }}
+                  className="px-2 py-1.5 rounded-lg bg-amber-900/40 hover:bg-amber-800/60 text-amber-300 text-[11px] font-bold transition flex items-center justify-center gap-1 border border-amber-500/40"
+                  title="Open PYQ Importer"
+                >
+                  <span>📁</span> PYQ
+                </button>
+              )}
+            </div>
+          </div>
         )}
 
         {/* Premium VIP Banner if not VIP */}

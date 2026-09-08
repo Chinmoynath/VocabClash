@@ -266,11 +266,6 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
                       Play Online / Friend
                     </span>
                   </div>
-                  <div className="text-xs text-slate-950/85 font-bold mt-1">
-                    {player.matchesPlayed === 0
-                      ? 'Ranked Matchmaking or Custom 6-Digit Friend Room'
-                      : 'Play Online Ranked or Create 6-Digit Room with Friend'}
-                  </div>
                 </div>
               </div>
 

@@ -1225,23 +1225,44 @@ export function resolveQuestionMeaningsBreakdown(question: {
     categoryLabelHindi = 'विलोमार्थी';
   }
 
-  // 7. Format combined strings cleanly without nested parentheses
+  // 7. Format combined strings cleanly without nested parentheses or repetitive prefixes
   const cleanTargetDisplay = targetWord || 'Word';
-  const targetLineEnglish = `${cleanTargetDisplay} – ${targetMeaning}`;
-  const targetLineHindi = `${cleanTargetDisplay}: ${targetHindi}`;
+
+  // Strip redundant self-prefixes if targetWord is already present
+  let cleanTargetMeaning = targetMeaning.replace(new RegExp(`^${cleanTargetDisplay.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*[-–:]\\s*`, 'i'), '').trim();
+  let cleanTargetHindi = targetHindi.replace(new RegExp(`^${cleanTargetDisplay.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*[-–:]\\s*`, 'i'), '').trim();
+  cleanTargetHindi = cleanTargetHindi.replace(/^(?:target\s*word|word|हिन्दी|भावार्थ|अर्थ)\s*[-–:]\s*/i, '').trim();
+
+  let targetLineEnglish = `${cleanTargetDisplay} – ${cleanTargetMeaning}`;
+  let targetLineHindi = `${cleanTargetDisplay}: ${cleanTargetHindi}`;
+
+  if (isOWS) {
+    targetLineEnglish = cleanTargetMeaning ? `Phrase: ${cleanTargetMeaning}` : cleanTargetDisplay;
+    targetLineHindi = cleanTargetHindi;
+  }
 
   let combinedEnglishText = targetLineEnglish;
   if (isDistinctCorrect && correctOption && correctMeaning) {
-    const cleanCorrectEng = correctMeaning.replace(/\((?:Synonym|Antonym|समानार्थी|विलोमार्थी)[^)]*\)/gi, '').trim();
-    const correctLineEnglish = `${correctOption} (${categoryLabel}) – ${cleanCorrectEng}`;
-    combinedEnglishText = `${targetLineEnglish}\n• ${correctLineEnglish}`;
+    let cleanCorrectEng = correctMeaning.replace(/\((?:Synonym|Antonym|समानार्थी|विलोमार्थी|एक शब्द|One Word)[^)]*\)/gi, '').trim();
+    cleanCorrectEng = cleanCorrectEng.replace(new RegExp(`^${correctOption.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*[-–:]\\s*`, 'i'), '').trim();
+    if (isOWS) {
+      combinedEnglishText = `${correctOption} (${categoryLabel}) – ${cleanCorrectEng || cleanTargetDisplay}`;
+    } else {
+      const correctLineEnglish = `${correctOption} (${categoryLabel}) – ${cleanCorrectEng}`;
+      combinedEnglishText = `${targetLineEnglish}\n• ${correctLineEnglish}`;
+    }
   }
 
   let combinedHindiText = targetLineHindi;
   if (isDistinctCorrect && correctOption && correctHindi) {
-    const cleanCorrectHin = correctHindi.replace(/\((?:Synonym|Antonym|समानार्थी|विलोमार्थी)[^)]*\)/gi, '').trim();
-    const correctLineHindi = `${correctOption} (${categoryLabelHindi}): ${cleanCorrectHin}`;
-    combinedHindiText = `${targetLineHindi}\n• ${correctLineHindi}`;
+    let cleanCorrectHin = correctHindi.replace(/\((?:Synonym|Antonym|समानार्थी|विलोमार्थी|एक शब्द|One Word)[^)]*\)/gi, '').trim();
+    cleanCorrectHin = cleanCorrectHin.replace(new RegExp(`^${correctOption.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*[-–:]\\s*`, 'i'), '').trim();
+    if (isOWS) {
+      combinedHindiText = `${correctOption} (${categoryLabelHindi}): ${cleanCorrectHin || cleanTargetHindi}`;
+    } else {
+      const correctLineHindi = `${correctOption} (${categoryLabelHindi}): ${cleanCorrectHin}`;
+      combinedHindiText = `${targetLineHindi}\n• ${correctLineHindi}`;
+    }
   }
 
   return {

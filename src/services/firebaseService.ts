@@ -14,6 +14,7 @@ import {
   onAuthStateChanged,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
+  signInAnonymously,
   updateProfile,
   sendPasswordResetEmail,
   deleteUser,
@@ -62,6 +63,62 @@ try {
   }
 }
 export const auth = authInstance;
+
+/**
+ * Ensures the client has an active authenticated Firebase user identity for online operations.
+ * If already logged in (Google, email), returns auth.currentUser immediately.
+ * If not logged in, signs in anonymously (or transparent transient guest account
+ * if anonymous auth is not enabled in Firebase Console) so request.auth != null
+ * and request.auth.uid is genuine for all Firestore security rules.
+ */
+let guestAuthPromise: Promise<FirebaseUser> | null = null;
+
+export async function ensureAuthenticatedUser(): Promise<FirebaseUser> {
+  if (auth.currentUser) {
+    return auth.currentUser;
+  }
+
+  if (guestAuthPromise) {
+    return guestAuthPromise;
+  }
+
+  guestAuthPromise = (async () => {
+    try {
+      // 1. First attempt native Firebase anonymous authentication
+      const anonCred = await signInAnonymously(auth);
+      return anonCred.user;
+    } catch (anonErr: any) {
+      console.info('[FIREBASE AUTH] Anonymous provider fallback:', anonErr?.code || anonErr?.message);
+      // 2. Fallback to transient authenticated guest account if anonymous auth is not toggled in console
+      const guestKey = 'vclash_guest_cred';
+      let saved = null;
+      try {
+        saved = JSON.parse(localStorage.getItem(guestKey) || 'null');
+      } catch {}
+
+      if (saved?.email && saved?.password) {
+        try {
+          const cred = await signInWithEmailAndPassword(auth, saved.email, saved.password);
+          return cred.user;
+        } catch {}
+      }
+
+      // Generate secure transient guest credentials
+      const guestEmail = `guest_${Date.now()}_${Math.floor(Math.random() * 1000000)}@guest.vocabclash.internal`;
+      const guestPassword = `VC#${Math.random().toString(36).slice(2)}!${Date.now()}`;
+
+      const created = await createUserWithEmailAndPassword(auth, guestEmail, guestPassword);
+      try {
+        localStorage.setItem(guestKey, JSON.stringify({ email: guestEmail, password: guestPassword }));
+      } catch {}
+      return created.user;
+    } finally {
+      guestAuthPromise = null;
+    }
+  })();
+
+  return guestAuthPromise;
+}
 
 // Helper to create configured Google Auth Provider
 export function createGoogleProvider(): GoogleAuthProvider {

@@ -1,97 +1,280 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Default-deny safety net
+    // 0. Default-deny safety net
     match /{document=**} {
       allow read, write: if false;
     }
 
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
     function isPyqAdmin() {
-      return request.auth != null && (
+      return isAuthenticated() && (
         request.auth.token.email == 'nathchinmoy777@gmail.com' ||
         request.auth.token.email == 'Nathchinmoy777@gmail.com' ||
         (request.auth.token.email != null && request.auth.token.email.lower() == 'nathchinmoy777@gmail.com')
       );
     }
 
-    // User Profile Document and subcollections (Authenticated Owner access)
+    // 1. Private User Profile Documents (Owner access only)
     match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read, write: if isOwner(userId);
     }
     match /users/{userId}/{document=**} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read, write: if isOwner(userId);
     }
 
-    // Shared AI Vocab Mentor Word Explanation Cache
+    // 2. AI Vocab Mentor Explanation Cache (Public read, Admin-only write)
+    // Prevents untrusted clients from injecting forged or malicious definitions into shared cache
     match /ai_tutor_cache/{wordId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if isPyqAdmin();
     }
 
-    // Real-time Matchmaking Queue
-    // Allow players to read active queue documents, create queue tickets, update during atomic match transaction, and clean up
+    // 3. Matchmaking Queue (Self-ticket only, immutable ownership, validated fields)
     match /matchmaking_queue/{uid} {
-      allow read, write: if true;
+      // User may read only their own ticket; prevent reading the entire pool
+      allow get: if isOwner(uid);
+      allow list: if false;
+
+      // User may create only their own ticket with validated fields
+      allow create: if isOwner(uid)
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.status == 'waiting'
+        && request.resource.data.displayName is string
+        && request.resource.data.displayName.size() <= 60
+        && request.resource.data.avatar is string
+        && request.resource.data.avatar.size() <= 30
+        && request.resource.data.lp is number
+        && request.resource.data.lp >= 0
+        && request.resource.data.lp <= 50000
+        && request.resource.data.roundCount in [10, 20, 30]
+        && request.resource.data.createdAt is number
+        && request.resource.data.heartbeatAt is number
+        && (!('matchId' in request.resource.data) || request.resource.data.matchId == null)
+        && (!('opponentUid' in request.resource.data) || request.resource.data.opponentUid == null);
+
+      // User may refresh their heartbeat or cancel their own ticket; ownership cannot be altered
+      allow update: if isOwner(uid)
+        && request.resource.data.uid == resource.data.uid
+        && (
+          // Heartbeat refresh
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['heartbeatAt', 'updatedAt'])
+          // Cancel ticket
+          || (request.resource.data.status == 'cancelled')
+        );
+
+      // User may delete only their own ticket
+      allow delete: if isOwner(uid);
     }
 
+    // Legacy match_queue collection alias (strictly owner-scoped)
     match /match_queue/{ticketId} {
-      allow read, write: if true;
+      allow get, delete: if isOwner(ticketId);
+      allow list: if false;
+      allow create: if isOwner(ticketId)
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.status == 'waiting';
+      allow update: if isOwner(ticketId)
+        && request.resource.data.uid == resource.data.uid;
     }
 
-    // Shared Synchronized 1v1 Live Rooms
+    // 4. Shared Synchronized 1v1 Live Rooms (Member-authenticated access only)
     match /live_rooms/{roomId} {
-      allow read, write: if true;
+      function isRoomMember() {
+        return isAuthenticated() && (
+          request.auth.uid == resource.data.player1.id ||
+          (resource.data.player2 != null && request.auth.uid == resource.data.player2.id)
+        );
+      }
+
+      function isPlayer1() {
+        return isAuthenticated() && request.auth.uid == resource.data.player1.id;
+      }
+
+      function isPlayer2() {
+        return isAuthenticated() && resource.data.player2 != null && request.auth.uid == resource.data.player2.id;
+      }
+
+      // Non-members CANNOT read private live room state
+      allow get: if isRoomMember();
+      allow list: if false;
+
+      // Creator must be player1; room must be initialized with valid data
+      allow create: if isAuthenticated()
+        && request.resource.data.player1.id == request.auth.uid
+        && request.resource.data.status in ['waiting', 'in_progress']
+        && request.resource.data.questions is list
+        && request.resource.data.createdAt is number
+        && request.resource.data.roundCount in [10, 20, 30];
+
+      // Controlled participant updates:
+      allow update: if isRoomMember()
+        // Core structural fields are immutable
+        && request.resource.data.roomId == resource.data.roomId
+        && request.resource.data.player1.id == resource.data.player1.id
+        && (
+          resource.data.player2 == null
+          || request.resource.data.player2.id == resource.data.player2.id
+        )
+        && request.resource.data.questions == resource.data.questions
+        && request.resource.data.createdAt == resource.data.createdAt
+        // Player 1 can ONLY update Player 1's scores, combos, answers; cannot alter opponent's data
+        && (
+          !isPlayer1() || (
+            (!('scores' in resource.data) || !('scores' in request.resource.data) || resource.data.player2 == null || request.resource.data.scores[resource.data.player2.id] == resource.data.scores[resource.data.player2.id])
+            && (!('combos' in resource.data) || !('combos' in request.resource.data) || resource.data.player2 == null || request.resource.data.combos[resource.data.player2.id] == resource.data.combos[resource.data.player2.id])
+            && (!('answers' in resource.data) || !('answers' in request.resource.data) || resource.data.player2 == null || request.resource.data.answers[resource.data.player2.id] == resource.data.answers[resource.data.player2.id])
+          )
+        )
+        // Player 2 can ONLY update Player 2's scores, combos, answers; cannot alter opponent's data
+        && (
+          !isPlayer2() || (
+            (!('scores' in resource.data) || !('scores' in request.resource.data) || request.resource.data.scores[resource.data.player1.id] == resource.data.scores[resource.data.player1.id])
+            && (!('combos' in resource.data) || !('combos' in request.resource.data) || request.resource.data.combos[resource.data.player1.id] == resource.data.combos[resource.data.player1.id])
+            && (!('answers' in resource.data) || !('answers' in request.resource.data) || request.resource.data.answers[resource.data.player1.id] == resource.data.answers[resource.data.player1.id])
+          )
+        );
+
+      // Rooms cannot be deleted by arbitrary clients
+      allow delete: if isPyqAdmin();
     }
 
-    // Custom 6-Digit Friend Lobbies
+    // 5. Custom 6-Digit Friend Lobbies
     match /friend_lobbies/{lobbyCode} {
-      allow read, write: if true;
+      function isHost() {
+        return isAuthenticated() && request.auth.uid == resource.data.host.id;
+      }
+
+      function isGuest() {
+        return isAuthenticated() && resource.data.guest != null && request.auth.uid == resource.data.guest.id;
+      }
+
+      // Direct listing is forbidden: users must provide the exact 6-digit room code
+      allow list: if false;
+
+      // Reading a room is permitted if open for joining, or if user is host/guest
+      allow get: if isAuthenticated() && (
+        resource.data.status == 'waiting'
+        || isHost()
+        || isGuest()
+      );
+
+      // Only authenticated user can create lobby as host
+      allow create: if isAuthenticated()
+        && request.resource.data.host.id == request.auth.uid
+        && request.resource.data.code == lobbyCode
+        && lobbyCode.size() == 6
+        && request.resource.data.status == 'waiting'
+        && (!('guest' in request.resource.data) || request.resource.data.guest == null)
+        && request.resource.data.hostReady == true
+        && request.resource.data.createdAt is number
+        && request.resource.data.expiresAt is number;
+
+      // Update control: joining, starting, leaving, cancelling
+      allow update: if isAuthenticated() && (
+        // A: Guest joins an open lobby
+        (
+          resource.data.status == 'waiting'
+          && (!('guest' in resource.data) || resource.data.guest == null)
+          && request.auth.uid != resource.data.host.id
+          && request.resource.data.guest.id == request.auth.uid
+          && request.resource.data.status == 'ready'
+          && request.resource.data.host == resource.data.host
+          && request.resource.data.code == resource.data.code
+          && request.resource.data.questions == resource.data.questions
+        )
+        // B: Host starts the battle or cancels the room
+        || (
+          isHost()
+          && request.resource.data.host.id == resource.data.host.id
+          && (
+            (resource.data.status == 'ready' && request.resource.data.status == 'in_progress')
+            || request.resource.data.status == 'cancelled'
+            || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['updatedAt'])
+          )
+        )
+        // C: Guest leaves an un-started lobby
+        || (
+          isGuest()
+          && resource.data.status == 'ready'
+          && request.resource.data.status == 'waiting'
+          && (!('guest' in request.resource.data) || request.resource.data.guest == null)
+        )
+      );
+
+      // Only host or admin can delete lobby
+      allow delete: if isHost() || isPyqAdmin();
     }
 
+    // Alias friendRooms collection follows the exact same restrictions
     match /friendRooms/{lobbyCode} {
-      allow read, write: if true;
+      allow list: if false;
+      allow get: if isAuthenticated() && (
+        resource.data.status == 'waiting'
+        || request.auth.uid == resource.data.host.id
+        || (resource.data.guest != null && request.auth.uid == resource.data.guest.id)
+      );
+      allow create: if isAuthenticated()
+        && request.resource.data.host.id == request.auth.uid
+        && request.resource.data.code == lobbyCode
+        && request.resource.data.status == 'waiting';
+      allow update: if isAuthenticated() && (
+        (request.auth.uid == resource.data.host.id)
+        || (resource.data.status == 'waiting' && request.resource.data.guest.id == request.auth.uid)
+      );
+      allow delete: if (isAuthenticated() && request.auth.uid == resource.data.host.id) || isPyqAdmin();
     }
 
-    // Realtime Global Leaderboard Users
+    // 6. Global Leaderboard Users (Public read projection, direct client writes DENIED)
+    // Direct client writes with arbitrary self-reported points are strictly forbidden.
     match /leaderboard_users/{userId} {
       allow read: if true;
-      allow write: if true;
+      allow write: if isPyqAdmin();
     }
 
-    // Match Records
+    // 7. Authoritative Match Records (Admin/server managed, direct client write DENIED)
     match /matches/{matchId} {
-      allow read, write: if true;
+      allow read: if isAuthenticated() && (
+        request.auth.uid == resource.data.player1Uid
+        || request.auth.uid == resource.data.player2Uid
+        || isPyqAdmin()
+      );
+      allow write: if isPyqAdmin();
     }
 
-    // Question Bank: Public read for client arena/drills, Admin-only write
+    // 8. Question Bank: Public read for client arena/drills, Admin-only write
     match /question_bank/{questionId} {
       allow read: if true;
       allow create, update, delete: if isPyqAdmin();
     }
 
-    // PYQ Import Batches: Admin-only read/write
+    // 9. PYQ Import Batches & Conflicts: Admin-only read/write
     match /pyq_import_batches/{batchId} {
       allow read, write: if isPyqAdmin();
     }
-
-    // PYQ Import Conflicts: Admin-only read/write
     match /pyq_import_conflicts/{conflictId} {
       allow read, write: if isPyqAdmin();
     }
 
-    // SSC Top 100 Pools: Public read for aspirants, Admin-only write
+    // 10. SSC Top 100 Pools & Frequency: Public read, Admin-only write
     match /ssc_top100/{category} {
       allow read: if true;
       allow write: if isPyqAdmin();
     }
-
-    // SSC Vocab Frequency Aggregates: Public read, Admin-only write
     match /ssc_vocab_frequency/{conceptKey} {
       allow read: if true;
       allow write: if isPyqAdmin();
     }
 
-    // Articles / Blog Publishing System:
-    // Public can read articles (drafts filtered by client/service); Admin can create, update, delete
+    // 11. Articles / Blog Publishing System: Public read, Admin-only write
     match /articles/{articleId} {
       allow read: if true;
       allow create, update, delete: if isPyqAdmin();

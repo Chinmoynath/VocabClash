@@ -788,7 +788,7 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
         {/* Right Settings Drawer / Panel: Full slide-over modal on mobile, docked sidebar on desktop */}
         <aside className={`${
           showSettingsDrawer 
-            ? 'fixed inset-0 z-50 bg-slate-900/98 backdrop-blur-xl p-5 space-y-6 overflow-y-auto w-full' 
+            ? 'fixed inset-0 z-50 bg-slate-900/98 backdrop-blur-xl p-5 space-y-6 overflow-y-auto w-full lg:static lg:z-auto lg:w-96 lg:shrink-0 lg:bg-slate-900 lg:border-l lg:border-slate-800' 
             : 'hidden lg:block lg:w-96 lg:shrink-0 lg:bg-slate-900 lg:border-l lg:border-slate-800 lg:p-5 lg:space-y-6 lg:overflow-y-auto'
         }`}>
           <div className="flex items-center justify-between pb-3 border-b border-slate-800">
@@ -798,7 +798,7 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
             </h3>
             <button
               onClick={() => setShowSettingsDrawer(false)}
-              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition"
+              className="lg:hidden p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition"
               title="Close settings"
             >
               <X className="w-4 h-4" />

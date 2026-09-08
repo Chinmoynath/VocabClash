@@ -304,44 +304,6 @@ export async function getWordExplanationWithCache(
 
   // Scenario A: Gemini Enriched Result
   if (geminiSuccess && enrichedAnalysis) {
-    try {
-      const cacheDocRef = doc(db, 'ai_tutor_cache', cleanKey);
-      await setDoc(
-        cacheDocRef,
-        {
-          word: cleanKey,
-          wordOrPhrase: cleanKey,
-          meaning: enrichedAnalysis.meaning,
-          definition: enrichedAnalysis.meaning,
-          partOfSpeech: enrichedAnalysis.partOfSpeech,
-          hindiMeaning: enrichedAnalysis.hindiMeaning,
-          rootEtymology: enrichedAnalysis.rootEtymology,
-          rootWord: enrichedAnalysis.rootEtymology,
-          mnemonicHook: enrichedAnalysis.mnemonicHook,
-          mnemonic: enrichedAnalysis.mnemonicHook,
-          examTrapTip: enrichedAnalysis.examTrapTip,
-          sampleUsage: enrichedAnalysis.sampleUsage,
-          example: enrichedAnalysis.sampleUsage,
-          relatedWords: enrichedAnalysis.relatedWords,
-          synonyms: enrichedAnalysis.synonyms || [],
-          antonyms: enrichedAnalysis.antonyms || [],
-          phonetic: enrichedAnalysis.phonetic || '',
-          source: {
-            dictionary: !!dictEntry,
-            geminiEnrichment: true,
-          },
-          sourceType: 'gemini_enriched',
-          cachedAt: Date.now(),
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        },
-        { merge: true }
-      );
-      console.log('Cache write: SUCCESS\nReturned: GEMINI ENRICHED RESULT');
-    } catch (saveErr) {
-      console.warn('[AI Tutor Cache] Firestore cache write warning:', saveErr);
-    }
-
     return {
       analysis: enrichedAnalysis,
       fromCache: false,
@@ -355,45 +317,6 @@ export async function getWordExplanationWithCache(
   // Scenario B: Dictionary / Curated Result (Gemini failed or was bypassed)
   if (baseAnalysis && baseAnalysis.meaning) {
     console.log('Returned: DICTIONARY FALLBACK');
-    // Save clean verified dictionary definition to Firestore cache so subsequent lookups are instant
-    try {
-      const cacheDocRef = doc(db, 'ai_tutor_cache', cleanKey);
-      await setDoc(
-        cacheDocRef,
-        {
-          word: cleanKey,
-          wordOrPhrase: cleanKey,
-          meaning: baseAnalysis.meaning,
-          definition: baseAnalysis.meaning,
-          partOfSpeech: baseAnalysis.partOfSpeech || 'Vocabulary Term',
-          hindiMeaning: baseAnalysis.hindiMeaning || '',
-          rootEtymology: baseAnalysis.rootEtymology || '',
-          rootWord: baseAnalysis.rootEtymology || '',
-          mnemonicHook: baseAnalysis.mnemonicHook || '',
-          mnemonic: baseAnalysis.mnemonicHook || '',
-          examTrapTip: baseAnalysis.examTrapTip || '',
-          sampleUsage: baseAnalysis.sampleUsage || '',
-          example: baseAnalysis.sampleUsage || '',
-          relatedWords: baseAnalysis.relatedWords || [],
-          synonyms: baseAnalysis.synonyms || [],
-          antonyms: baseAnalysis.antonyms || [],
-          phonetic: baseAnalysis.phonetic || '',
-          source: {
-            dictionary: !!dictEntry,
-            geminiEnrichment: false,
-          },
-          sourceType: dictEntry ? 'dictionary' : 'curated',
-          cachedAt: Date.now(),
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        },
-        { merge: true }
-      );
-      console.log('Cache write: SUCCESS');
-    } catch (saveErr) {
-      console.warn('[AI Tutor Cache] Firestore cache write warning:', saveErr);
-    }
-
     return {
       analysis: baseAnalysis,
       fromCache: false,

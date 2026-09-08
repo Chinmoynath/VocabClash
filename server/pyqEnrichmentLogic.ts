@@ -163,10 +163,11 @@ STRICT EDUCATIONAL MANDATE (EVERY SINGLE QUESTION MUST BE FULLY ENRICHED):
 
 Respond strictly with a JSON array.`;
 
-    // Candidate models ordered for maximum availability and rapid throughput
-    const modelCandidates = ['gemini-3.1-flash-lite', 'gemini-3.7-flash', 'gemini-flash-latest'];
+    // Candidate models ordered for maximum availability, low latency, and reliability
+    const modelCandidates = ['gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest'];
     
     for (const modelName of modelCandidates) {
+      let succeeded = false;
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {
           const response = await ai.models.generateContent({
@@ -174,38 +175,6 @@ Respond strictly with a JSON array.`;
             contents: prompt,
             config: {
               responseMimeType: 'application/json',
-              responseSchema: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    tempId: { type: Type.STRING },
-                    meaning: { type: Type.STRING },
-                    hindiMeaning: { type: Type.STRING },
-                    rootWordInfo: { type: Type.STRING },
-                    mnemonic: { type: Type.STRING },
-                    exampleSentence: { type: Type.STRING },
-                    explanation: { type: Type.STRING },
-                    enrichmentWarning: { type: Type.STRING },
-                    optionDetails: {
-                      type: Type.ARRAY,
-                      items: {
-                        type: Type.OBJECT,
-                        properties: {
-                          option: { type: Type.STRING },
-                          englishMeaning: { type: Type.STRING },
-                          hindiMeaning: { type: Type.STRING },
-                          explanation: { type: Type.STRING },
-                          mnemonicHook: { type: Type.STRING },
-                          isCorrect: { type: Type.BOOLEAN },
-                        },
-                        required: ['option', 'englishMeaning', 'hindiMeaning', 'explanation', 'isCorrect'],
-                      },
-                    },
-                  },
-                  required: ['tempId', 'meaning', 'hindiMeaning', 'rootWordInfo', 'mnemonic', 'exampleSentence', 'explanation', 'optionDetails'],
-                },
-              },
             },
           });
 
@@ -215,6 +184,7 @@ Respond strictly with a JSON array.`;
 
             if (Array.isArray(parsedData) && parsedData.length > 0) {
               // Validate and sanitize each item
+              succeeded = true;
               return safeBatch.map(q => {
                 const qId = q.tempId || q.id || 'q_temp';
                 const match = parsedData.find((p: any) => p.tempId === qId || p.id === qId);
@@ -269,13 +239,15 @@ Respond strictly with a JSON array.`;
         } catch (err: any) {
           const isTransient = err?.status === 503 || err?.status === 429 || err?.message?.includes('503') || err?.message?.includes('429');
           if (attempt === 1 && isTransient) {
-            await new Promise(resolve => setTimeout(resolve, 600));
+            const delay = 1000 + Math.floor(Math.random() * 600);
+            await new Promise(resolve => setTimeout(resolve, delay));
             continue;
           }
-          console.warn(`[GEMINI ENRICHMENT] Model ${modelName} attempt ${attempt} failed (${err?.status || err?.message || 'Error'}).`);
+          console.warn(`[GEMINI ENRICHMENT] Model ${modelName} attempt ${attempt} notice (${err?.status || err?.message || 'Unavailable'}).`);
           break;
         }
       }
+      if (succeeded) break;
     }
   }
 

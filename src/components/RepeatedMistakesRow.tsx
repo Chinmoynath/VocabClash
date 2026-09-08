@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { RepeatedMistakeItem, QuestionCategory, SavedWord } from '../types';
 import { soundManager } from '../utils/audio';
 import { getStoredWordDetail, StoredWordDetail } from '../services/storedWordService';
+import { OWS_MASTER_EXTENDED } from '../data/owsMasterData';
 import { 
   ShieldAlert, 
   Search, 
@@ -28,11 +29,133 @@ export interface RepeatedMistakesRowProps {
   subtitle?: string;
 }
 
+// Check if string is a generic code key or question placeholder
+function isPlaceholderConcept(str?: string): boolean {
+  if (!str) return true;
+  const s = str.toLowerCase().trim();
+  if (s === 'concept' || s === 'uncategorized' || s === 'question') return true;
+  if (/^(?:synonyms?|antonyms?|ows|idioms?)_question(?:_\d+)?$/i.test(s)) return true;
+  if (/^(?:synonyms?|antonyms?|ows|idioms?)_historical(?:_\d+)?$/i.test(s)) return true;
+  if (/^historical_(?:attempt|summary)?(?:_\d+)?$/i.test(s)) return true;
+  if (/^(?:synonym|antonym|ows|idiom)\s+question$/i.test(s)) return true;
+  return false;
+}
+
+// Clean and extract pure Hindi text, stripping nested prefixes, colons, and English repetitions
+function formatCardHindi(rawHindi?: string): string {
+  if (!rawHindi) return '';
+  let str = rawHindi.trim();
+
+  // If multiple parts separated by bullets or newlines, pick the richest Devanagari part
+  const parts = str.split(/(?:\r?\n\s*[•·\-\*]\s*|\s+[•·]\s+)/);
+  if (parts.length > 1) {
+    let best = parts[0];
+    let maxCount = (best.match(/[\u0900-\u097F]/g) || []).length;
+    for (let i = 1; i < parts.length; i++) {
+      const c = (parts[i].match(/[\u0900-\u097F]/g) || []).length;
+      if (c > maxCount) {
+        maxCount = c;
+        best = parts[i];
+      }
+    }
+    str = best.trim();
+  }
+
+  // Strip repetitive prefixes like "Something: ", "(Category):", etc.
+  let prev = '';
+  while (str !== prev) {
+    prev = str;
+    str = str.replace(/^[A-Za-z0-9\s\-',/()]+:\s*/, '').trim();
+    str = str.replace(/^\([^)]*\)\s*:?\s*/, '').trim();
+    str = str.replace(/^(?:सटीक उत्तर|एक शब्द|समानार्थी|विलोमार्थी|भावार्थ|अर्थ|हिन्दी|Target Word)\s*:\s*/i, '').trim();
+  }
+
+  // If Devanagari text exists, find the start of the first Devanagari character
+  const devIdx = str.search(/[\u0900-\u097F]/);
+  if (devIdx > 0) {
+    const before = str.slice(0, devIdx).trim();
+    if (!before.includes('/') && before.length < 50) {
+      str = str.slice(devIdx).trim();
+    }
+  }
+
+  // Remove trailing punctuation / danda
+  str = str.replace(/[\s|।]+$/, '').trim();
+  return str;
+}
+
+// Clean English meaning, stripping duplicate self-prefixes and bullet chains
+function formatCardMeaning(rawMeaning?: string, title?: string): string {
+  if (!rawMeaning) return '';
+  let str = rawMeaning.trim();
+
+  const parts = str.split(/(?:\r?\n\s*[•·\-\*]\s*|\s+[•·]\s+)/);
+  if (parts.length > 1) {
+    str = parts[0].trim();
+  }
+
+  if (title) {
+    const titleRegex = new RegExp(`^${title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\s*\\([^)]*\\))?\\s*[-–:]\\s*`, 'i');
+    str = str.replace(titleRegex, '').trim();
+  }
+
+  str = str.replace(/^(?:Target Word|Meaning|One Word|Synonym|Antonym)\s*[-–:]\s*/i, '').trim();
+  str = str.replace(/^[A-Za-z0-9\s\-]+\s*[-–]\s*/, '').trim();
+
+  return str;
+}
+
+// Resolve title and optional prompt for OWS/Idioms
+function formatCardTitleAndPrompt(item: RepeatedMistakeItem): { title: string; prompt?: string } {
+  const isOws = item.category === 'ows' || (item.category as string) === 'one_word';
+  let raw = (item.wordOrPhrase || '').trim();
+
+  // Strip instruction prefixes
+  raw = raw.replace(/^(?:select|choose|give|find|what is)\s+(?:the\s+)?(?:one\s+word|most\s+appropriate|synonym|antonym|meaning)[^:]*:\s*/i, '').trim();
+
+  if (isOws) {
+    // If raw is a phrase (more than 2 words, e.g. "One who knows everything")
+    if (raw.split(/\s+/).length > 2) {
+      const owsMatch = OWS_MASTER_EXTENDED.find(
+        o => o.phrase.toLowerCase() === raw.toLowerCase() ||
+             raw.toLowerCase().includes(o.phrase.toLowerCase().slice(0, 20)) ||
+             o.phrase.toLowerCase().includes(raw.toLowerCase().slice(0, 20))
+      );
+      if (owsMatch) {
+        return {
+          title: owsMatch.answer,
+          prompt: raw,
+        };
+      }
+    }
+  }
+
+  return { title: raw };
+}
+
+// Category visual styling badges
+function getCategoryBadge(cat: string): { label: string; bg: string; text: string; border: string } {
+  const c = (cat || '').toLowerCase();
+  if (c === 'synonyms' || c === 'synonym') {
+    return { label: 'SYNONYM', bg: 'bg-emerald-500/10', text: 'text-emerald-400', border: 'border-emerald-500/20' };
+  }
+  if (c === 'antonyms' || c === 'antonym') {
+    return { label: 'ANTONYM', bg: 'bg-blue-500/10', text: 'text-blue-400', border: 'border-blue-500/20' };
+  }
+  if (c === 'ows' || c === 'one_word') {
+    return { label: 'ONE WORD', bg: 'bg-amber-500/10', text: 'text-amber-400', border: 'border-amber-500/20' };
+  }
+  if (c === 'idioms' || c === 'idiom') {
+    return { label: 'IDIOM', bg: 'bg-purple-500/10', text: 'text-purple-400', border: 'border-purple-500/20' };
+  }
+  return { label: (cat || 'VOCAB').toUpperCase(), bg: 'bg-slate-500/10', text: 'text-slate-400', border: 'border-slate-500/20' };
+}
+
 export const RepeatedMistakesRow: React.FC<RepeatedMistakesRowProps> = ({
   items = [],
   fallbackSavedWords = [],
   title = "Words You're Repeatedly Missing",
-  subtitle = "Tap any word to view its stored meaning, mnemonic, and exam tricks."
+  subtitle = "Words missed 3+ times. Tap any word to view stored mnemonics, Hindi, and exam tricks."
 }) => {
   const [isListModalOpen, setIsListModalOpen] = useState<boolean>(false);
   const [searchFilter, setSearchFilter] = useState<string>('');
@@ -42,26 +165,32 @@ export const RepeatedMistakesRow: React.FC<RepeatedMistakesRowProps> = ({
   const [copiedTrick, setCopiedTrick] = useState<boolean>(false);
   const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
 
-  // Combine items with any mistake words from savedWords
+  // Combine items with genuine mistake words (strict >= 3 wrongCount requirement)
   const allMissingWords: RepeatedMistakeItem[] = useMemo(() => {
     const map = new Map<string, RepeatedMistakeItem>();
     
-    // 1. Add known repeated mistakes
+    // 1. Add known repeated mistakes (only >= 3 wrongCount and valid vocabulary)
     for (const it of items) {
       if (!it.wordOrPhrase) continue;
+      if (isPlaceholderConcept(it.wordOrPhrase)) continue;
+      if ((it.wrongCount || 0) < 3) continue; // STRICT >= 3 THRESHOLD
       map.set(it.wordOrPhrase.toLowerCase().trim(), { ...it });
     }
 
-    // 2. Supplement from savedWords if marked as mistakes
+    // 2. Supplement from savedWords if marked as mistakes (strict >= 3 mistakeCount)
     for (const sw of fallbackSavedWords) {
       const q = sw.question;
       if (!q || !q.wordOrPhrase) continue;
+      if (isPlaceholderConcept(q.wordOrPhrase)) continue;
+      const count = sw.mistakeCount || 0;
+      if (count < 3) continue; // STRICT >= 3 THRESHOLD
+
       const key = q.wordOrPhrase.toLowerCase().trim();
       if (!map.has(key)) {
         map.set(key, {
           wordOrPhrase: q.wordOrPhrase,
           category: q.category,
-          wrongCount: sw.mistakeCount || 1,
+          wrongCount: count,
           meaning: q.meaning,
           hindiMeaning: q.hindiMeaning,
           lastMissedAt: sw.savedAt,
@@ -85,12 +214,19 @@ export const RepeatedMistakesRow: React.FC<RepeatedMistakesRowProps> = ({
   const modalFilteredWords = useMemo(() => {
     if (!searchFilter.trim()) return allMissingWords;
     const query = searchFilter.toLowerCase().trim();
-    return allMissingWords.filter(w => 
-      w.wordOrPhrase.toLowerCase().includes(query) ||
-      (w.hindiMeaning && w.hindiMeaning.toLowerCase().includes(query)) ||
-      (w.meaning && w.meaning.toLowerCase().includes(query)) ||
-      w.category.toLowerCase().includes(query)
-    );
+    return allMissingWords.filter(w => {
+      const { title: cardTitle, prompt } = formatCardTitleAndPrompt(w);
+      const cleanH = formatCardHindi(w.hindiMeaning);
+      const cleanM = formatCardMeaning(w.meaning, cardTitle);
+      return (
+        w.wordOrPhrase.toLowerCase().includes(query) ||
+        cardTitle.toLowerCase().includes(query) ||
+        (prompt && prompt.toLowerCase().includes(query)) ||
+        cleanH.toLowerCase().includes(query) ||
+        cleanM.toLowerCase().includes(query) ||
+        w.category.toLowerCase().includes(query)
+      );
+    });
   }, [allMissingWords, searchFilter]);
 
   // Touch handler: Show stored data directly without calling Gemini
@@ -146,7 +282,7 @@ ${selectedWordDetail.rootEtymology ? `🧬 Root: ${selectedWordDetail.rootEtymol
           <span className="text-xs sm:text-sm font-black text-slate-100">{title}</span>
         </div>
         <p className="text-xs text-slate-400 max-w-md mx-auto">
-          No repeated mistakes recorded yet! Words you miss during drills or practice will automatically appear here with their complete stored mnemonics, Hindi meanings, and exam tricks.
+          No repeated mistakes recorded yet! Words you miss 3 or more times during drills or practice will automatically appear here with their complete stored mnemonics, Hindi meanings, and exam tricks.
         </p>
       </div>
     );
@@ -194,45 +330,58 @@ ${selectedWordDetail.rootEtymology ? `🧬 Root: ${selectedWordDetail.rootEtymol
 
         {/* 1-Line Cards Container */}
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5 items-stretch">
-          {visibleCards.map((item, idx) => (
-            <div
-              key={idx}
-              onClick={() => handleInspectWord(item.wordOrPhrase, item.category)}
-              className="p-3 rounded-xl bg-slate-950 border border-rose-900/30 hover:border-purple-500/70 hover:bg-purple-950/20 transition-all flex flex-col justify-between gap-2 cursor-pointer group shadow-sm hover:shadow-md"
-            >
-              <div className="space-y-1">
-                <div className="flex items-start justify-between gap-1.5">
-                  <span className="font-mono font-black text-xs sm:text-sm text-slate-100 tracking-wider group-hover:text-purple-300 transition-colors truncate">
-                    {item.wordOrPhrase}
-                  </span>
-                  <span className="px-1.5 py-0.5 rounded-full bg-rose-500/20 border border-rose-500/30 text-rose-300 font-mono font-bold text-[9px] shrink-0">
-                    {item.wrongCount}x
-                  </span>
+          {visibleCards.map((item, idx) => {
+            const { title: cardTitle, prompt } = formatCardTitleAndPrompt(item);
+            const cleanHindi = formatCardHindi(item.hindiMeaning);
+            const cleanMeaning = formatCardMeaning(item.meaning, cardTitle);
+            const categoryMeta = getCategoryBadge(item.category);
+
+            return (
+              <div
+                key={idx}
+                onClick={() => handleInspectWord(cardTitle || item.wordOrPhrase, item.category)}
+                className="p-3 rounded-xl bg-slate-950 border border-rose-900/30 hover:border-purple-500/70 hover:bg-purple-950/20 transition-all flex flex-col justify-between gap-2 cursor-pointer group shadow-sm hover:shadow-md"
+              >
+                <div className="space-y-1.5">
+                  <div className="flex items-start justify-between gap-1.5">
+                    <span className="font-mono font-black text-xs sm:text-sm text-slate-100 tracking-wider group-hover:text-purple-300 transition-colors truncate">
+                      {cardTitle}
+                    </span>
+                    <span className="px-1.5 py-0.5 rounded-full bg-rose-500/20 border border-rose-500/30 text-rose-300 font-mono font-bold text-[9px] shrink-0">
+                      {item.wrongCount}x
+                    </span>
+                  </div>
+
+                  {prompt && (
+                    <div className="text-[10px] text-purple-300/80 italic truncate leading-tight">
+                      "{prompt}"
+                    </div>
+                  )}
+
+                  {cleanHindi && (
+                    <div className="text-[11px] text-amber-400 font-bold truncate">
+                      {cleanHindi}
+                    </div>
+                  )}
+
+                  {cleanMeaning && (
+                    <div className="text-[10px] text-slate-400 line-clamp-1 leading-tight">
+                      {cleanMeaning}
+                    </div>
+                  )}
                 </div>
 
-                {item.hindiMeaning && (
-                  <div className="text-[11px] text-amber-400 font-bold truncate">
-                    {item.hindiMeaning}
-                  </div>
-                )}
-
-                {item.meaning && (
-                  <div className="text-[10px] text-slate-400 line-clamp-1">
-                    {item.meaning}
-                  </div>
-                )}
+                <div className="flex items-center justify-between text-[10px] pt-1.5 border-t border-slate-900">
+                  <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold tracking-wider uppercase border ${categoryMeta.bg} ${categoryMeta.text} ${categoryMeta.border}`}>
+                    {categoryMeta.label}
+                  </span>
+                  <span className="text-purple-400/90 font-medium group-hover:underline text-[10px] flex items-center gap-0.5">
+                    View Tricks →
+                  </span>
+                </div>
               </div>
-
-              <div className="flex items-center justify-between text-[10px] text-slate-500 pt-1.5 border-t border-slate-900">
-                <span className="uppercase tracking-wider font-semibold text-slate-400 text-[9px]">
-                  {item.category}
-                </span>
-                <span className="text-purple-400/90 font-medium group-hover:underline text-[10px] flex items-center gap-0.5">
-                  View Tricks →
-                </span>
-              </div>
-            </div>
-          ))}
+            );
+          })}
 
           {/* The 4th "More" Card when there are extra missing words */}
           {hasMoreThanLimit && (
@@ -290,7 +439,7 @@ ${selectedWordDetail.rootEtymology ? `🧬 Root: ${selectedWordDetail.rootEtymol
                     </span>
                   </div>
                   <p className="text-xs text-slate-400 mt-0.5 truncate">
-                    Tap any word to view its stored mnemonics, meaning, and tricks.
+                    Words missed 3+ times. Tap any card to inspect mnemonics and exam tricks.
                   </p>
                 </div>
               </div>
@@ -337,49 +486,65 @@ ${selectedWordDetail.rootEtymology ? `🧬 Root: ${selectedWordDetail.rootEtymol
             <div className="p-4 sm:p-5 overflow-y-auto space-y-2.5 flex-1 max-h-[60vh]">
               {modalFilteredWords.length > 0 ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  {modalFilteredWords.map((item, idx) => (
-                    <div
-                      key={idx}
-                      onClick={() => {
-                        handleInspectWord(item.wordOrPhrase, item.category);
-                      }}
-                      className="p-3.5 rounded-xl bg-slate-950 border border-rose-900/30 hover:border-purple-500 hover:bg-purple-950/20 transition-all flex flex-col justify-between gap-2.5 cursor-pointer group shadow-sm"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-mono font-black text-sm text-slate-100 tracking-wider group-hover:text-purple-300 transition-colors">
-                              {item.wordOrPhrase}
-                            </span>
-                            <Sparkles className="w-3.5 h-3.5 text-purple-400 opacity-0 group-hover:opacity-100 transition-opacity" />
-                          </div>
-                          {item.hindiMeaning && (
-                            <div className="text-xs text-amber-400 font-bold mt-0.5">
-                              {item.hindiMeaning}
-                            </div>
-                          )}
-                          {item.meaning && (
-                            <div className="text-[11px] text-slate-400 mt-1 line-clamp-2 leading-relaxed">
-                              {item.meaning}
-                            </div>
-                          )}
-                        </div>
-                        <span className="px-2 py-0.5 rounded-full bg-rose-500/20 border border-rose-500/30 text-rose-300 font-mono font-bold text-[10px] shrink-0">
-                          {item.wrongCount}x Wrong
-                        </span>
-                      </div>
+                  {modalFilteredWords.map((item, idx) => {
+                    const { title: cardTitle, prompt } = formatCardTitleAndPrompt(item);
+                    const cleanHindi = formatCardHindi(item.hindiMeaning);
+                    const cleanMeaning = formatCardMeaning(item.meaning, cardTitle);
+                    const categoryMeta = getCategoryBadge(item.category);
 
-                      <div className="flex items-center justify-between text-[10px] text-slate-500 pt-2 border-t border-slate-900">
-                        <span className="uppercase tracking-wider font-semibold text-slate-400">
-                          {item.category}
-                        </span>
-                        <span className="text-purple-400 font-bold group-hover:underline flex items-center gap-1">
-                          <span>View Tricks</span>
-                          <ChevronRight className="w-3 h-3" />
-                        </span>
+                    return (
+                      <div
+                        key={idx}
+                        onClick={() => {
+                          handleInspectWord(cardTitle || item.wordOrPhrase, item.category);
+                        }}
+                        className="p-3.5 rounded-xl bg-slate-950 border border-rose-900/30 hover:border-purple-500 hover:bg-purple-950/20 transition-all flex flex-col justify-between gap-2.5 cursor-pointer group shadow-sm"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="space-y-1 min-w-0 flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-mono font-black text-sm text-slate-100 tracking-wider group-hover:text-purple-300 transition-colors">
+                                {cardTitle}
+                              </span>
+                              <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold tracking-wider uppercase border ${categoryMeta.bg} ${categoryMeta.text} ${categoryMeta.border}`}>
+                                {categoryMeta.label}
+                              </span>
+                              <Sparkles className="w-3.5 h-3.5 text-purple-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                            </div>
+
+                            {prompt && (
+                              <div className="text-xs text-purple-300/80 italic">
+                                "{prompt}"
+                              </div>
+                            )}
+
+                            {cleanHindi && (
+                              <div className="text-xs text-amber-400 font-bold">
+                                {cleanHindi}
+                              </div>
+                            )}
+
+                            {cleanMeaning && (
+                              <div className="text-[11px] text-slate-300 line-clamp-2 leading-relaxed">
+                                {cleanMeaning}
+                              </div>
+                            )}
+                          </div>
+
+                          <span className="px-2 py-0.5 rounded-full bg-rose-500/20 border border-rose-500/30 text-rose-300 font-mono font-bold text-[10px] shrink-0">
+                            {item.wrongCount}x Wrong
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-end text-[10px] pt-2 border-t border-slate-900/80">
+                          <span className="text-purple-400 font-bold group-hover:underline flex items-center gap-1">
+                            <span>View Stored Tricks</span>
+                            <ChevronRight className="w-3 h-3" />
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="p-8 text-center text-slate-400 space-y-2">
