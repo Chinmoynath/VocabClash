@@ -1320,7 +1320,12 @@ export default function App() {
     setSscTop100InitialIndex(resumeIndex);
     setSscTop100InitialCorrect(initialCorrect);
     setPracticeCustomQueue(questions);
-    setPracticeModeBannerTitle(`SSC TOP 100 • ${SSC_TOP_100_META[cat].title}`);
+    const categoryTitle =
+      cat === 'synonyms' ? 'Synonyms Drill' :
+      cat === 'antonyms' ? 'Antonyms Drill' :
+      cat === 'ows' ? 'One Word Substitutions Drill' :
+      'Idioms & Phrases Drill';
+    setPracticeModeBannerTitle(categoryTitle);
     setCurrentTab('practice');
   };
 
@@ -1851,7 +1856,7 @@ export default function App() {
                 customSessionTitle={practiceModeBannerTitle}
                 customInitialIndex={sscTop100InitialIndex}
                 customInitialCorrectCount={sscTop100InitialCorrect}
-                customBadge={activeSscTop100Category ? `SSC TOP 100 • ${SSC_TOP_100_META[activeSscTop100Category].title}` : null}
+                customBadge={activeSscTop100Category ? 'SSC TOP 100' : null}
                 attemptSource={activeSscTop100Category ? 'ssc_top100' : 'practice'}
                 onCustomQueueQuestionAnswered={(q, isCorrect, index) => {
                   if (activeSscTop100Category) {

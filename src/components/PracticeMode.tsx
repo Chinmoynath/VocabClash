@@ -274,6 +274,29 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     ? Math.min(100, Math.round((currentDrillSolvedCount / totalCustomQuestions) * 100))
     : 0;
 
+  // Clean, non-repetitive display badge and title for custom drills
+  const displayBadge = useMemo(() => {
+    if (!customBadge) return 'SSC TOP 100';
+    if (customBadge.includes('SSC TOP 100')) return 'SSC TOP 100';
+    return customBadge;
+  }, [customBadge]);
+
+  const displayTitle = useMemo(() => {
+    if (!customSessionTitle) return 'Vocab Drill';
+    let t = customSessionTitle;
+    if (t.startsWith('SSC TOP 100 • ')) {
+      t = t.replace('SSC TOP 100 • ', '').trim();
+    }
+    if (displayBadge === 'SSC TOP 100') {
+      const lower = t.toLowerCase();
+      if (lower.includes('synonyms')) return 'Synonyms Drill';
+      if (lower.includes('antonyms')) return 'Antonyms Drill';
+      if (lower.includes('one word') || lower.includes('ows')) return 'One Word Substitutions Drill';
+      if (lower.includes('idioms')) return 'Idioms & Phrases Drill';
+    }
+    return t;
+  }, [customSessionTitle, displayBadge]);
+
   useEffect(() => {
     if (customTargetQueue && customTargetQueue.length > 0) {
       const startIdx = Math.min(Math.max(0, customInitialIndex || 0), customTargetQueue.length - 1);
@@ -903,14 +926,14 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                    {customBadge || 'SSC TOP 100'}
+                    {displayBadge}
                   </span>
                   <span className="text-[11px] font-semibold text-slate-400 hidden sm:inline">
                     TCS & Eduquity PYQ Bank
                   </span>
                 </div>
                 <h3 className="text-sm sm:text-base font-black text-slate-100 truncate mt-0.5">
-                  {customSessionTitle || 'Top 100 Vocab Drill'}
+                  {displayTitle}
                 </h3>
               </div>
             </div>
@@ -967,10 +990,10 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
               </div>
             </div>
 
-            {/* Progress Bar */}
+            {/* Progress Bar - Solid amber matching Question 1 color */}
             <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
               <div
-                className="bg-gradient-to-r from-amber-500 via-orange-500 to-emerald-500 h-full rounded-full transition-all duration-300"
+                className="bg-amber-400 h-full rounded-full transition-all duration-300"
                 style={{ width: `${drillProgressPercent}%` }}
               />
             </div>
