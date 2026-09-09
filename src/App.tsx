@@ -1852,6 +1852,8 @@ export default function App() {
                 onRecordMistake={handleRecordMistake}
                 bookmarkedIds={bookmarkedIds}
                 isPremium={subscription.isPremium}
+                currentUser={currentUser}
+                onUserChange={user => setCurrentUser(user)}
                 customTargetQueue={practiceCustomQueue}
                 customSessionTitle={practiceModeBannerTitle}
                 customInitialIndex={sscTop100InitialIndex}

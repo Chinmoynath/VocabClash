@@ -46,6 +46,14 @@ import { formatRepeatCount } from '../utils/questionFingerprint';
 
 import { User as FirebaseUser } from 'firebase/auth';
 import { AuthCard } from './AuthCard';
+import { GuestConversionModal } from './GuestConversionModal';
+import { 
+  trackGuestBattleComplete, 
+  trackGuestReviewClick, 
+  trackGuestReviewSignupPromptView, 
+  trackGuestReviewSignupPromptClose, 
+  trackGuestReviewSignupClick 
+} from '../services/analyticsService';
 
 interface MatchSummaryProps {
   player: PlayerProfile;
@@ -508,7 +516,7 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
   onUserChange,
 }) => {
   const [reportingQuestion, setReportingQuestion] = useState<Question | null>(null);
-  const [showSignupCard, setShowSignupCard] = useState<boolean>(!currentUser);
+  const [showGuestReviewModal, setShowGuestReviewModal] = useState<boolean>(false);
   const [showShareModal, setShowShareModal] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'summary' | 'solutions'>('summary');
   const [filterType, setFilterType] = useState<'all' | 'mistakes' | 'correct'>('all');
@@ -540,6 +548,46 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
   });
 
   const accuracyPct = totalQuestions > 0 ? Math.round((correctCount / totalQuestions) * 100) : 0;
+
+  // Track guest battle completion event for non-authenticated players
+  useEffect(() => {
+    if (!currentUser) {
+      trackGuestBattleComplete({
+        score: matchState.playerScore,
+        accuracy: accuracyPct,
+        result: isWinner ? 'win' : isDraw ? 'draw' : 'defeat',
+      });
+    }
+  }, []);
+
+  const handleReviewSolutionsClick = () => {
+    soundManager.playTap();
+    if (currentUser) {
+      setActiveTab('solutions');
+      return;
+    }
+
+    // Guest conversion flow: Optional prompt, doesn't block review
+    trackGuestReviewClick({ mistakesCount: mistakeCount });
+    setShowGuestReviewModal(true);
+    trackGuestReviewSignupPromptView();
+  };
+
+  const handleGuestReviewModalClose = () => {
+    trackGuestReviewSignupPromptClose();
+    setShowGuestReviewModal(false);
+    // User pressed X or dismiss: Immediately open the Solutions / Answer Review page anyway
+    setActiveTab('solutions');
+  };
+
+  const handleGuestReviewModalSuccess = (user: FirebaseUser) => {
+    if (onUserChange) {
+      onUserChange(user);
+    }
+    setShowGuestReviewModal(false);
+    // User signed in: Preserve the battle completed and immediately open Solutions page
+    setActiveTab('solutions');
+  };
 
   // Authoritative share data package
   const shareData: BattleShareData = {
@@ -722,10 +770,8 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
 
                 {/* Solution Launcher Tile */}
                 <button
-                  onClick={() => {
-                    soundManager.playTap();
-                    setActiveTab('solutions');
-                  }}
+                  onClick={handleReviewSolutionsClick}
+                  id="match-summary-solution-tile"
                   className="bg-gradient-to-br from-indigo-950/90 to-purple-950/90 hover:from-indigo-900/90 hover:to-purple-900/90 border border-indigo-500/50 hover:border-indigo-400 rounded-xl p-2.5 sm:p-3 text-center transition-all active:scale-95 group cursor-pointer shadow-md"
                 >
                   <div className="text-[10px] sm:text-[11px] font-bold text-indigo-300 uppercase tracking-wider flex items-center justify-center gap-1">
@@ -737,31 +783,31 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
                     <ChevronRight className="w-3.5 h-3.5 text-amber-400 group-hover:translate-x-0.5 transition-transform" />
                   </div>
                   <div className="text-[10px] text-amber-300 font-semibold">
-                    {mistakeCount} Mistakes
+                    {mistakeCount > 0 ? `${mistakeCount} Mistakes` : '100% Correct'}
                   </div>
                 </button>
               </div>
             </div>
 
-            {/* BIG PROMINENT "VIEW SOLUTIONS" HERO BUTTON */}
+            {/* BIG PROMINENT "REVIEW ANSWERS" / "REVIEW MY MISTAKES" HERO BUTTON */}
             <div className="max-w-xl mx-auto">
               <button
-                onClick={() => {
-                  soundManager.playTap();
-                  setActiveTab('solutions');
-                }}
+                onClick={handleReviewSolutionsClick}
+                id="match-summary-review-btn"
                 className="w-full bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-600 hover:from-indigo-500 hover:to-purple-500 text-white font-black p-3.5 sm:p-4 rounded-2xl shadow-xl shadow-indigo-900/30 border border-indigo-400/40 flex items-center justify-between px-5 transition-all active:scale-[0.98] cursor-pointer group"
               >
                 <div className="flex items-center gap-3 text-left">
-                  <div className="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center text-lg shadow-inner">
+                  <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center text-xl shadow-inner shrink-0">
                     📖
                   </div>
                   <div>
                     <div className="text-sm sm:text-base font-black tracking-wide flex items-center gap-2">
-                      <span>SEE MATCH SOLUTIONS & PERFORMANCE DIAGNOSTIC</span>
-                      <span className="text-[10px] bg-amber-400 text-slate-950 font-bold px-2 py-0.5 rounded-full uppercase">
-                        {mistakeCount} to revise
-                      </span>
+                      <span>{mistakeCount > 0 ? `Review My ${mistakeCount} Mistakes →` : 'Review Answers →'}</span>
+                      {mistakeCount > 0 && (
+                        <span className="text-[10px] bg-amber-400 text-slate-950 font-bold px-2 py-0.5 rounded-full uppercase">
+                          {mistakeCount} to revise
+                        </span>
+                      )}
                     </div>
                     <div className="text-[11px] text-indigo-200 font-medium">
                       Inspect all questions, Hindi meanings, answer analysis & performance breakdown
@@ -796,56 +842,6 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
-
-            {/* POST-MATCH SIGNUP/SAVE CARD (If guest) */}
-            {!currentUser && showSignupCard && (
-              <div className="bg-gradient-to-r from-purple-950/90 via-slate-900 to-indigo-950/90 border-2 border-purple-500/60 rounded-3xl p-5 sm:p-6 shadow-2xl relative overflow-hidden animate-fadeIn max-w-xl mx-auto">
-                <button
-                  onClick={() => {
-                    soundManager.playTap();
-                    setShowSignupCard(false);
-                  }}
-                  className="absolute top-3.5 right-3.5 p-1.5 rounded-full bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-slate-200 border border-slate-700/60 transition-all cursor-pointer z-10"
-                  title="Dismiss for now"
-                  aria-label="Close signup banner"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-
-                <div className="flex items-start gap-3.5 mb-3">
-                  <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-purple-500 to-indigo-600 flex items-center justify-center text-xl shadow-lg shrink-0">
-                    ☁️
-                  </div>
-                  <div className="pr-6">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] uppercase font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-400/40 px-2 py-0.5 rounded-full">
-                        Save Match Progress
-                      </span>
-                      <span className="text-[10px] text-emerald-400 font-bold font-mono">
-                        +{matchState.playerScore} Pts
-                      </span>
-                    </div>
-                    <h3 className="text-base font-black text-white mt-1 leading-tight">
-                      Don't lose your match LP & All-India Rank!
-                    </h3>
-                    <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                      Sign in with 1-Tap Google or Email to save this match result to your profile and unlock the leaderboard.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-3 bg-slate-950/80 p-3 sm:p-4 rounded-2xl border border-purple-800/40">
-                  <AuthCard
-                    currentUser={currentUser}
-                    onUserChange={user => {
-                      if (onUserChange) onUserChange(user);
-                      setShowSignupCard(false);
-                    }}
-                    onSuccessClose={() => setShowSignupCard(false)}
-                  />
-                </div>
-              </div>
-            )}
 
             {/* AdSense Unit (Omitted after first duel for clean onboarding & retention, gated by ADS_ENABLED) */}
             {ADS_ENABLED && !isPremium && player.matchesPlayed > 1 && (
@@ -1062,6 +1058,20 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
           onClose={() => setShowShareModal(false)}
         />
       )}
+
+      {/* Guest-to-Sign-In Optional Conversion Modal on Review Answers */}
+      <GuestConversionModal
+        isOpen={showGuestReviewModal}
+        variant="battle_review"
+        stats={{
+          score: matchState.playerScore,
+          mistakeCount,
+          accuracy: accuracyPct,
+        }}
+        onClose={handleGuestReviewModalClose}
+        onSuccess={handleGuestReviewModalSuccess}
+        onGoogleClick={trackGuestReviewSignupClick}
+      />
     </div>
   );
 };

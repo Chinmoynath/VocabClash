@@ -52,11 +52,11 @@ service cloud.firestore {
         && request.resource.data.displayName is string
         && request.resource.data.displayName.size() <= 60
         && request.resource.data.avatar is string
-        && request.resource.data.avatar.size() <= 30
+        && request.resource.data.avatar.size() <= 1000
         && request.resource.data.lp is number
         && request.resource.data.lp >= 0
-        && request.resource.data.lp <= 50000
-        && request.resource.data.roundCount in [10, 20, 30]
+        && request.resource.data.lp <= 500000
+        && request.resource.data.roundCount in [5, 10, 15, 20, 25, 30]
         && request.resource.data.createdAt is number
         && request.resource.data.heartbeatAt is number
         && (!('matchId' in request.resource.data) || request.resource.data.matchId == null)

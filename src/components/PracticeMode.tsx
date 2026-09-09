@@ -56,8 +56,15 @@ import {
   trackPracticeComplete, 
   normalizeAnalyticsCategory, 
   normalizeAnalyticsExamFamily, 
-  PracticeType 
+  PracticeType,
+  trackGuestPyq10Completed, 
+  trackGuestPyqSignupPromptView, 
+  trackGuestPyqSignupPromptClose, 
+  trackGuestPyqSignupClick,
+  trackGuestSignupComplete
 } from '../services/analyticsService';
+import { User as FirebaseUser } from 'firebase/auth';
+import { GuestConversionModal } from './GuestConversionModal';
 
 interface PracticeModeProps {
   pyqScore: number;
@@ -73,6 +80,8 @@ interface PracticeModeProps {
   onRecordMistake?: (question: Question) => void;
   bookmarkedIds: string[];
   isPremium?: boolean;
+  currentUser?: FirebaseUser | null;
+  onUserChange?: (user: FirebaseUser | null) => void;
   // Targeted coaching drill session support & SSC Top 100
   customTargetQueue?: Question[] | null;
   customSessionTitle?: string | null;
@@ -176,6 +185,8 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
   onRecordMistake,
   bookmarkedIds,
   isPremium = false,
+  currentUser = null,
+  onUserChange,
   customTargetQueue = null,
   customSessionTitle = null,
   customInitialIndex = 0,
@@ -194,6 +205,30 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
   const [exam, setExam] = useState<ExamType>(() => {
     return examProp || getStoredPyqFilterPreferences().exam;
   });
+
+  // Guest-to-sign-in conversion flow for PYQ Drill
+  const [showGuestPyqModal, setShowGuestPyqModal] = useState<boolean>(false);
+  const [guestPyqStats, setGuestPyqStats] = useState<{
+    correctCount: number;
+    mistakeCount: number;
+    accuracy: number;
+  }>({ correctCount: 0, mistakeCount: 0, accuracy: 0 });
+
+  const guestPyqSessionCountRef = useRef<number>(
+    typeof window !== 'undefined'
+      ? parseInt(sessionStorage.getItem('vocabclash_guest_pyq_session_count') || '0', 10) || 0
+      : 0
+  );
+  const guestPyqCorrectCountRef = useRef<number>(
+    typeof window !== 'undefined'
+      ? parseInt(sessionStorage.getItem('vocabclash_guest_pyq_session_correct') || '0', 10) || 0
+      : 0
+  );
+  const guestPyqMistakeCountRef = useRef<number>(
+    typeof window !== 'undefined'
+      ? parseInt(sessionStorage.getItem('vocabclash_guest_pyq_session_mistakes') || '0', 10) || 0
+      : 0
+  );
 
   // Continuous drill session state - persists across tab switches for today and resets on a new day
   const [questionNumber, setQuestionNumber] = useState<number>(() => getStoredDailyProgress().questionNumber);
@@ -531,6 +566,29 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     const nextSolvedCount = sessionSolvedCount + 1;
     setSessionSolvedCount(nextSolvedCount);
 
+    // Non-logged-in guest tracking for 10-question milestone prompt
+    if (!currentUser) {
+      guestPyqSessionCountRef.current += 1;
+      if (isCorrect) {
+        guestPyqCorrectCountRef.current += 1;
+      } else {
+        guestPyqMistakeCountRef.current += 1;
+      }
+      try {
+        sessionStorage.setItem('vocabclash_guest_pyq_session_count', String(guestPyqSessionCountRef.current));
+        sessionStorage.setItem('vocabclash_guest_pyq_session_correct', String(guestPyqCorrectCountRef.current));
+        sessionStorage.setItem('vocabclash_guest_pyq_session_mistakes', String(guestPyqMistakeCountRef.current));
+      } catch {}
+
+      if (guestPyqSessionCountRef.current === 10) {
+        const c = guestPyqCorrectCountRef.current;
+        const m = guestPyqMistakeCountRef.current;
+        const acc = Math.round((c / 10) * 100);
+        setGuestPyqStats({ correctCount: c, mistakeCount: m, accuracy: acc });
+        trackGuestPyq10Completed({ correctCount: c, mistakeCount: m, accuracy: acc });
+      }
+    }
+
     // 3. GA4: 10-Question Milestone PYQ session completion (if not in a custom bounded queue)
     if (!customTargetQueue && nextSolvedCount % 10 === 0) {
       const correctInBatch = batchCorrectCountRef.current;
@@ -576,10 +634,8 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     });
   };
 
-  const handleNextQuestion = () => {
-    if (isAdvancingRef.current) return;
+  const proceedWithNextQuestion = () => {
     isAdvancingRef.current = true;
-
     soundManager.playTap();
     
     // Batch interval ad trigger (every 15 questions solved)
@@ -659,6 +715,42 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     setTimeout(() => {
       isAdvancingRef.current = false;
     }, 400);
+  };
+
+  const handleNextQuestion = () => {
+    if (isAdvancingRef.current) return;
+
+    // Check if non-logged-in guest completed 10 questions and hasn't seen the prompt yet
+    const promptAlreadyShown = typeof window !== 'undefined' && localStorage.getItem('guestPyqSignupPromptShown') === 'true';
+    if (!currentUser && guestPyqSessionCountRef.current >= 10 && !promptAlreadyShown) {
+      setIsCountdownPaused(true);
+      setShowGuestPyqModal(true);
+      trackGuestPyqSignupPromptView();
+      return;
+    }
+
+    proceedWithNextQuestion();
+  };
+
+  const handleGuestPyqModalClose = () => {
+    try {
+      localStorage.setItem('guestPyqSignupPromptShown', 'true');
+    } catch {}
+    trackGuestPyqSignupPromptClose();
+    setShowGuestPyqModal(false);
+    setIsCountdownPaused(false);
+    proceedWithNextQuestion();
+  };
+
+  const handleGuestPyqModalSuccess = (user: FirebaseUser) => {
+    try {
+      localStorage.setItem('guestPyqSignupPromptShown', 'true');
+    } catch {}
+    trackGuestSignupComplete('pyq');
+    if (onUserChange) onUserChange(user);
+    setShowGuestPyqModal(false);
+    setIsCountdownPaused(false);
+    proceedWithNextQuestion();
   };
 
   const handleToggleBookmark = (e?: React.MouseEvent<HTMLElement> | React.TouchEvent<HTMLElement>) => {
@@ -1751,6 +1843,16 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
           prefilledBody={`Hi VocabClash Support,\n\nI am practicing in PYQ Drill Mode and have a query regarding word: "${currentQ?.wordOrPhrase || ''}" (ID: ${currentQ?.id || ''}).\n\nIssue/Query details:`}
         />
       )}
+
+      {/* Non-logged-in Guest Conversion Modal (after 10 PYQ Drill questions) */}
+      <GuestConversionModal
+        isOpen={showGuestPyqModal}
+        variant="pyq_10"
+        stats={guestPyqStats}
+        onClose={handleGuestPyqModalClose}
+        onSuccess={handleGuestPyqModalSuccess}
+        onGoogleClick={trackGuestPyqSignupClick}
+      />
     </div>
   );
 };

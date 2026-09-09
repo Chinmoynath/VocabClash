@@ -374,3 +374,47 @@ export function trackRelatedPracticeClick(articleSlug: string, practiceType: str
   });
 }
 
+/**
+ * Guest-to-Sign-In Conversion Funnel Events
+ */
+export function trackGuestPyq10Completed(params?: { correctCount?: number; mistakeCount?: number; accuracy?: number }): void {
+  trackEvent('guest_pyq_10_completed', params);
+}
+
+export function trackGuestPyqSignupPromptView(): void {
+  trackEvent('guest_pyq_signup_prompt_view');
+}
+
+export function trackGuestPyqSignupPromptClose(): void {
+  trackEvent('guest_pyq_signup_prompt_close');
+}
+
+export function trackGuestPyqSignupClick(): void {
+  trackEvent('guest_pyq_signup_click');
+}
+
+export function trackGuestBattleComplete(params?: { score?: number; accuracy?: number; result?: string }): void {
+  trackEvent('guest_battle_complete', params);
+}
+
+export function trackGuestReviewClick(params?: { mistakesCount?: number }): void {
+  trackEvent('guest_review_click', params);
+}
+
+export function trackGuestReviewSignupPromptView(): void {
+  trackEvent('guest_review_signup_prompt_view');
+}
+
+export function trackGuestReviewSignupPromptClose(): void {
+  trackEvent('guest_review_signup_prompt_close');
+}
+
+export function trackGuestReviewSignupClick(): void {
+  trackEvent('guest_review_signup_click');
+}
+
+export function trackGuestSignupComplete(source?: 'pyq' | 'battle_review'): void {
+  trackEvent('guest_signup_complete', { source: source || 'unknown' });
+}
+
+
