@@ -100,6 +100,7 @@ export const CadreRankCard: React.FC<CadreRankCardProps> = ({
   };
 
   const tierIcon = getTierInsignia();
+  const cleanTierTitle = (player.tierTitle || '').replace(/^[\p{Extended_Pictographic}\p{Emoji}\uFE0F\u200d\s]+/u, '').trim() || player.tierTitle;
 
   const handleEditClick = () => {
     soundManager.playTap();
@@ -127,7 +128,7 @@ export const CadreRankCard: React.FC<CadreRankCardProps> = ({
               Govt Service Rank
             </div>
             <h2 className="text-base sm:text-lg font-bold text-slate-100 tracking-tight truncate mt-0.5">
-              {player.tierTitle}
+              {cleanTierTitle}
             </h2>
           </div>
         </div>
