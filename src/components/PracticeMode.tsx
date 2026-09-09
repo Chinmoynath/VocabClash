@@ -1022,7 +1022,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
               )}
 
               {/* 🎯 Small Exam & Category Filter Option (To the Left of Stats Button) */}
-              <div className="relative" ref={filterPopoverRef}>
+              <div className="relative shrink-0" ref={filterPopoverRef}>
                 <button
                   type="button"
                   id="practice-filter-button"
@@ -1035,7 +1035,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
                     }
                     setIsFilterOpen(prev => !prev);
                   }}
-                  className={`flex items-center justify-center gap-1.5 p-1.5 sm:px-2.5 sm:py-1 rounded-xl border text-xs font-bold transition-all shadow-sm cursor-pointer select-none active:scale-95 min-w-[34px] min-h-[34px] sm:min-w-0 sm:min-h-0 ${
+                  className={`flex items-center justify-center gap-1 sm:gap-1.5 px-2 py-1 sm:px-2.5 sm:py-1 rounded-xl border text-xs font-bold transition-all shadow-sm cursor-pointer select-none active:scale-95 shrink-0 ${
                     isFilterOpen || normalizeFilterToFamily(exam) !== 'all'
                       ? 'bg-cyan-950/60 border-cyan-500/70 text-cyan-300 ring-1 ring-cyan-500/40'
                       : 'bg-slate-850 hover:bg-slate-800 border-slate-700/80 text-slate-300 hover:text-white'
@@ -1044,8 +1044,8 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
                   aria-expanded={isFilterOpen}
                   aria-haspopup="true"
                 >
-                  <Filter className="w-4 h-4 sm:w-3.5 sm:h-3.5 text-cyan-400 shrink-0" />
-                  <span className="text-[11px] font-bold hidden sm:inline">
+                  <Filter className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                  <span className="text-[11px] font-bold whitespace-nowrap">
                     {normalizeFilterToFamily(exam) === 'all'
                       ? 'All Exams'
                       : normalizeFilterToFamily(exam) === 'ssc'
@@ -1054,7 +1054,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
                       ? 'Banking'
                       : 'Defence'}
                   </span>
-                  <ChevronDown className={`w-3 h-3 text-slate-400 transition-transform duration-200 hidden sm:inline ${isFilterOpen ? 'rotate-180 text-cyan-400' : ''}`} />
+                  <ChevronDown className={`w-3 h-3 text-slate-400 transition-transform duration-200 shrink-0 ${isFilterOpen ? 'rotate-180 text-cyan-400' : ''}`} />
                 </button>
 
                 {/* Dropdown Popover */}
@@ -1226,7 +1226,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
                   }
                 }}
                 id="practice-stats-button"
-                className="flex items-center gap-1.5 bg-slate-850 hover:bg-slate-800 border border-amber-500/35 hover:border-amber-400 px-2.5 py-1 rounded-xl shadow-sm transition-all group active:scale-95 cursor-pointer"
+                className="flex items-center gap-1.5 bg-slate-850 hover:bg-slate-800 border border-amber-500/35 hover:border-amber-400 px-2 sm:px-2.5 py-1 rounded-xl shadow-sm transition-all group active:scale-95 cursor-pointer shrink-0"
                 title="View Solved Questions, Right/Wrong Counts & Daily Accuracy Graph"
                 aria-label="View Performance Statistics"
               >
