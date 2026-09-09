@@ -42,11 +42,18 @@ export interface EnrichedQuestionOutput {
   explanation: string;
   enrichmentWarning?: string;
   optionDetails: EnrichedOptionDetail[];
+  enrichment?: {
+    status: 'complete' | 'partial' | 'failed';
+    version: string;
+    enrichedAt?: number;
+    provider?: string;
+    warnings?: string;
+  };
 }
 
 /**
  * Robust JSON extraction helper that handles markdown code blocks,
- * trailing text/characters after JSON, and minor formatting errors.
+ * trailing text/brackets after JSON, and individual object fallback.
  */
 function extractJsonArray(raw: string): any[] | null {
   if (!raw || typeof raw !== 'string') return null;
@@ -68,10 +75,58 @@ function extractJsonArray(raw: string): any[] | null {
   try {
     const cleanedParsed = JSON.parse(cleaned);
     if (Array.isArray(cleanedParsed)) return cleanedParsed;
+    if (cleanedParsed && typeof cleanedParsed === 'object') {
+      for (const val of Object.values(cleanedParsed)) {
+        if (Array.isArray(val)) return val as any[];
+      }
+    }
   } catch {}
 
-  // 3. Extract substring between first '[' and last ']'
+  // 3. Balanced bracket extraction: find the FIRST '[' and scan until bracket depth reaches 0
   const firstBracket = cleaned.indexOf('[');
+  if (firstBracket !== -1) {
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+
+    for (let i = firstBracket; i < cleaned.length; i++) {
+      const ch = cleaned[i];
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (ch === '\\') {
+        escape = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (!inString) {
+        if (ch === '[') depth++;
+        else if (ch === ']') {
+          depth--;
+          if (depth === 0) {
+            const candidate = cleaned.slice(firstBracket, i + 1);
+            try {
+              const parsed = JSON.parse(candidate);
+              if (Array.isArray(parsed)) return parsed;
+            } catch {
+              try {
+                const sanitized = candidate.replace(/,\s*([\]}])/g, '$1');
+                const parsed = JSON.parse(sanitized);
+                if (Array.isArray(parsed)) return parsed;
+              } catch {}
+            }
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  // 4. Substring between first '[' and last ']'
   const lastBracket = cleaned.lastIndexOf(']');
   if (firstBracket !== -1 && lastBracket > firstBracket) {
     const arraySubstring = cleaned.substring(firstBracket, lastBracket + 1);
@@ -80,7 +135,6 @@ function extractJsonArray(raw: string): any[] | null {
       if (Array.isArray(parsedSlice)) return parsedSlice;
     } catch {}
 
-    // Clean trailing commas before closing braces/brackets: ,] -> ] or ,} -> }
     try {
       const sanitized = arraySubstring.replace(/,\s*([\]}])/g, '$1');
       const sanitizedParsed = JSON.parse(sanitized);
@@ -88,18 +142,57 @@ function extractJsonArray(raw: string): any[] | null {
     } catch {}
   }
 
-  // 4. Single JSON object fallback if returned as single item instead of array
-  const firstBrace = cleaned.indexOf('{');
-  const lastBrace = cleaned.lastIndexOf('}');
-  if (firstBrace !== -1 && lastBrace > firstBrace) {
-    try {
-      const obj = JSON.parse(cleaned.substring(firstBrace, lastBrace + 1));
-      if (obj && typeof obj === 'object') {
-        if (Array.isArray((obj as any).questions)) return (obj as any).questions;
-        if (Array.isArray((obj as any).data)) return (obj as any).data;
-        return [obj];
+  // 5. Individual object extraction fallback: extract each top-level {...}
+  const extractedObjects: any[] = [];
+  let braceDepth = 0;
+  let inStr = false;
+  let esc = false;
+  let objStart = -1;
+
+  for (let i = 0; i < cleaned.length; i++) {
+    const ch = cleaned[i];
+    if (esc) {
+      esc = false;
+      continue;
+    }
+    if (ch === '\\') {
+      esc = true;
+      continue;
+    }
+    if (ch === '"') {
+      inStr = !inStr;
+      continue;
+    }
+    if (!inStr) {
+      if (ch === '{') {
+        if (braceDepth === 0) objStart = i;
+        braceDepth++;
+      } else if (ch === '}') {
+        braceDepth--;
+        if (braceDepth === 0 && objStart !== -1) {
+          const objCandidate = cleaned.slice(objStart, i + 1);
+          try {
+            const parsedObj = JSON.parse(objCandidate);
+            if (parsedObj && typeof parsedObj === 'object') {
+              extractedObjects.push(parsedObj);
+            }
+          } catch {
+            try {
+              const sanitizedObj = objCandidate.replace(/,\s*([\]}])/g, '$1');
+              const parsedObj = JSON.parse(sanitizedObj);
+              if (parsedObj && typeof parsedObj === 'object') {
+                extractedObjects.push(parsedObj);
+              }
+            } catch {}
+          }
+          objStart = -1;
+        }
       }
-    } catch {}
+    }
+  }
+
+  if (extractedObjects.length > 0) {
+    return extractedObjects;
   }
 
   return null;
@@ -164,7 +257,7 @@ STRICT EDUCATIONAL MANDATE (EVERY SINGLE QUESTION MUST BE FULLY ENRICHED):
 Respond strictly with a JSON array.`;
 
     // Candidate models ordered for maximum availability, low latency, and reliability
-    const modelCandidates = ['gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest'];
+    const modelCandidates = ['gemini-3.1-flash-lite', 'gemini-flash-latest', 'gemini-3.6-flash', 'gemini-3.8-flash'];
     
     for (const modelName of modelCandidates) {
       let succeeded = false;
@@ -185,13 +278,18 @@ Respond strictly with a JSON array.`;
             if (Array.isArray(parsedData) && parsedData.length > 0) {
               // Validate and sanitize each item
               succeeded = true;
-              return safeBatch.map(q => {
+              return safeBatch.map((q, qIndex) => {
                 const qId = q.tempId || q.id || 'q_temp';
-                const match = parsedData.find((p: any) => p.tempId === qId || p.id === qId);
+                const match = parsedData.find((p: any) => p && (p.tempId === qId || p.id === qId))
+                  || parsedData.find((p: any) => p && p.wordOrPhrase && q.wordOrPhrase && String(p.wordOrPhrase).toLowerCase().trim() === String(q.wordOrPhrase).toLowerCase().trim())
+                  || (parsedData[qIndex] && typeof parsedData[qIndex] === 'object' ? parsedData[qIndex] : null);
                 const correctIdx = typeof q.correctIndex === 'number' ? q.correctIndex : 0;
                 const options = Array.isArray(q.options) ? q.options : ['A', 'B', 'C', 'D'];
 
-                if (match && match.meaning && match.hindiMeaning) {
+                if (match && (match.meaning || match.englishMeaning || match.hindiMeaning)) {
+                  const resolvedMeaning = match.meaning?.trim() || match.englishMeaning?.trim() || `Definition of ${q.wordOrPhrase}`;
+                  const resolvedHindi = match.hindiMeaning?.trim() || `"${q.wordOrPhrase}" का भावार्थ`;
+
                   // Ensure optionDetails has 4 items
                   let optDetails: EnrichedOptionDetail[] = [];
                   if (Array.isArray(match.optionDetails) && match.optionDetails.length === options.length) {
@@ -199,8 +297,8 @@ Respond strictly with a JSON array.`;
                       const od = match.optionDetails[idx] || {};
                       return {
                         option: opt,
-                        englishMeaning: od.englishMeaning?.trim() || `Definition of "${opt}"`,
-                        hindiMeaning: od.hindiMeaning?.trim() || `अर्थ: "${opt}"`,
+                        englishMeaning: od.englishMeaning?.trim() || (idx === correctIdx ? resolvedMeaning : `Definition of "${opt}"`),
+                        hindiMeaning: od.hindiMeaning?.trim() || (idx === correctIdx ? resolvedHindi : `अर्थ: "${opt}"`),
                         explanation: od.explanation?.trim() || (idx === correctIdx ? 'Correct Answer' : 'Distractor'),
                         shortExplanation: od.explanation?.trim() || (idx === correctIdx ? 'Correct Answer' : undefined),
                         mnemonicHook: od.mnemonicHook?.trim() || undefined,
@@ -210,8 +308,8 @@ Respond strictly with a JSON array.`;
                   } else {
                     optDetails = options.map((opt, idx) => ({
                       option: opt,
-                      englishMeaning: idx === correctIdx ? match.meaning : `Meaning of "${opt}"`,
-                      hindiMeaning: idx === correctIdx ? match.hindiMeaning : `अर्थ: "${opt}"`,
+                      englishMeaning: idx === correctIdx ? resolvedMeaning : `Meaning of "${opt}"`,
+                      hindiMeaning: idx === correctIdx ? resolvedHindi : `अर्थ: "${opt}"`,
                       explanation: idx === correctIdx ? 'Correct Answer' : 'Distractor option',
                       shortExplanation: idx === correctIdx ? 'Correct Answer' : undefined,
                       isCorrect: idx === correctIdx,
@@ -220,14 +318,20 @@ Respond strictly with a JSON array.`;
 
                   return {
                     tempId: qId,
-                    meaning: match.meaning.trim(),
-                    hindiMeaning: match.hindiMeaning.trim(),
-                    rootWordInfo: match.rootWordInfo?.trim() || '',
-                    mnemonic: match.mnemonic?.trim() || '',
+                    meaning: resolvedMeaning,
+                    hindiMeaning: resolvedHindi,
+                    rootWordInfo: match.rootWordInfo?.trim() || match.rootEtymology?.trim() || '',
+                    mnemonic: match.mnemonic?.trim() || match.mnemonicHook?.trim() || '',
                     exampleSentence: match.exampleSentence?.trim() || '',
                     explanation: match.explanation?.trim() || '',
                     enrichmentWarning: match.enrichmentWarning?.trim() || undefined,
                     optionDetails: optDetails,
+                    enrichment: {
+                      status: 'complete',
+                      version: 'learning-v1',
+                      enrichedAt: Date.now(),
+                      provider: 'gemini-ai',
+                    },
                   };
                 }
 
@@ -364,5 +468,13 @@ function createFallbackOutput(q: EnrichmentQuestionInput): EnrichedQuestionOutpu
     exampleSentence: example,
     explanation,
     optionDetails,
+    enrichmentWarning: 'AI service temporarily unavailable; generated fallback template.',
+    enrichment: {
+      status: 'partial',
+      version: 'learning-fallback-v1',
+      enrichedAt: Date.now(),
+      provider: 'contextual_fallback',
+      warnings: 'AI service temporarily unavailable; generated fallback template.',
+    },
   };
 }

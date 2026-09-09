@@ -11,7 +11,93 @@ export interface EnrichmentProgress {
 }
 
 /**
+ * Detects whether a question contains robotic or placeholder fallback content
+ * rather than rich, authentic Gemini AI educational vocabulary details.
+ */
+export function isFallbackEnrichment(q: Partial<ExtractedQuestion | Question> | null | undefined): boolean {
+  if (!q) return false;
+  if (q.enrichment?.provider === 'contextual_fallback' || q.enrichment?.version?.includes('fallback')) return true;
+  if (q.enrichmentWarning?.toLowerCase().includes('fallback') || q.enrichmentWarning?.toLowerCase().includes('placeholder')) return true;
+
+  const m = q.meaning || '';
+  const h = q.hindiMeaning || '';
+  const ex = q.exampleSentence || '';
+  const root = q.rootWordInfo || '';
+  const mn = q.mnemonic || '';
+
+  // Generic fallback meanings
+  if (
+    m.includes('Accurately denotes the quality or attribute') ||
+    m.includes('Expresses a state, action, or quality directly contrasting') ||
+    m.includes('One who or that which fits the description:') ||
+    m.includes('Figurative meaning: A common idiomatic phrase') ||
+    m.includes('Accurately corresponds to') ||
+    (m.includes('denoting "') && m.includes('serving as an exam distractor'))
+  ) {
+    return true;
+  }
+
+  // Generic fallback examples
+  if (
+    ex.includes('The official recognized the importance of') ||
+    ex.includes('appeared in standard examination practice') ||
+    ex.includes('appeared in administrative literature')
+  ) {
+    return true;
+  }
+
+  // Generic fallback roots
+  if (
+    root.includes('Classical root structure for') ||
+    (root.includes('Root structure for') && root.includes('tested frequently'))
+  ) {
+    return true;
+  }
+
+  // Generic fallback mnemonics
+  if (
+    mn.includes('during exam revision') ||
+    mn.includes('in daily usage') ||
+    mn.includes('for rapid recall in the exam hall') ||
+    mn.includes('as two opposite states')
+  ) {
+    return true;
+  }
+
+  // Generic fallback Hindi translations
+  if (
+    h.includes('का सटीक भावार्थ एवं समानार्थी शब्द') ||
+    h.includes('का यथार्थ विलोमार्थी भाव') ||
+    h.includes('का एक शब्द में सटीक अर्थ') ||
+    h.includes('का लाक्षणिक अर्थ') ||
+    h.includes('का स्वतंत्र अर्थ')
+  ) {
+    return true;
+  }
+
+  // Generic fallback optionDetails
+  if (Array.isArray(q.optionDetails)) {
+    const hasDistractorTemplate = q.optionDetails.some(od => {
+      const eng = od.englishMeaning || '';
+      const hin = od.hindiMeaning || '';
+      return (
+        eng.includes('serving as an exam distractor') ||
+        eng.includes('serving as a distractor option') ||
+        eng.includes('Distinct concept denoting') ||
+        eng.includes('Accurately denotes the quality or attribute') ||
+        hin.includes('का स्वतंत्र अर्थ') ||
+        hin.includes('का सटीक भावार्थ एवं समानार्थी शब्द')
+      );
+    });
+    if (hasDistractorTemplate) return true;
+  }
+
+  return false;
+}
+
+/**
  * Checks whether a question is missing critical educational enrichment fields
+ * or only has robotic template fallbacks that need real AI enrichment.
  */
 export function needsEnrichment(q: ExtractedQuestion | Question): boolean {
   if (!q.meaning || q.meaning.trim() === '') return true;
@@ -20,6 +106,9 @@ export function needsEnrichment(q: ExtractedQuestion | Question): boolean {
   if (!q.mnemonic || q.mnemonic.trim() === '') return true;
   if (!q.exampleSentence || q.exampleSentence.trim() === '') return true;
   if (!q.optionDetails || !Array.isArray(q.optionDetails) || q.optionDetails.length !== 4) return true;
+
+  // If question is using robotic template fallback, it needs real AI enrichment
+  if (isFallbackEnrichment(q)) return true;
   
   // Check if option details are empty or placeholder
   const hasIncompleteOptions = q.optionDetails.some(
@@ -71,6 +160,8 @@ export function mergeEnrichment(
     });
   }
 
+  const isFallback = isFallbackEnrichment(enriched) || (!enriched.meaning && isFallbackEnrichment(original));
+
   return {
     ...original,
     // Strictly preserve authoritative question facts
@@ -106,12 +197,13 @@ export function mergeEnrichment(
     explanation: enriched.explanation?.trim() || original.explanation || '',
     optionDetails: finalOptionDetails,
     enrichment: {
-      status: (enriched.meaning && enriched.hindiMeaning && finalOptionDetails) ? 'complete' : 'partial',
-      version: 'learning-v1',
+      status: (!isFallback && enriched.meaning && enriched.hindiMeaning && finalOptionDetails) ? 'complete' : 'partial',
+      version: isFallback ? 'learning-fallback-v1' : 'learning-v1',
       enrichedAt: Date.now(),
-      provider: enriched.enrichment?.provider || 'gemini-ai',
+      provider: enriched.enrichment?.provider || (isFallback ? 'contextual_fallback' : 'gemini-ai'),
+      warnings: isFallback ? 'Template fallback generated. Real AI re-enrichment recommended.' : undefined,
     },
-    enrichmentWarning: enriched.enrichmentWarning || original.enrichmentWarning,
+    enrichmentWarning: isFallback ? 'Template Fallback (Needs AI)' : (enriched.enrichmentWarning || original.enrichmentWarning),
   };
 }
 
@@ -120,16 +212,17 @@ export function mergeEnrichment(
  */
 export async function enrichQuestionBatch(
   questions: ExtractedQuestion[],
-  onProgress?: (progress: EnrichmentProgress) => void
+  onProgress?: (progress: EnrichmentProgress) => void,
+  force: boolean = false
 ): Promise<{
   enrichedQuestions: ExtractedQuestion[];
   successCount: number;
   failedCount: number;
 }> {
-  console.log(`[PYQ ENRICHMENT] ${questions.length} questions parsed`);
+  console.log(`[PYQ ENRICHMENT] ${questions.length} questions received (force=${force})`);
 
-  const incompleteQuestions = questions.filter(q => needsEnrichment(q));
-  const completeQuestions = questions.filter(q => !needsEnrichment(q));
+  const incompleteQuestions = force ? questions : questions.filter(q => needsEnrichment(q));
+  const completeQuestions = force ? [] : questions.filter(q => !needsEnrichment(q));
 
   console.log(`[PYQ ENRICHMENT] ${incompleteQuestions.length} require enrichment (${completeQuestions.length} already complete)`);
 
@@ -138,7 +231,7 @@ export async function enrichQuestionBatch(
       onProgress({
         current: questions.length,
         total: questions.length,
-        stage: 'All questions already fully enriched!',
+        stage: 'All questions already fully enriched with AI!',
       });
     }
     console.log('[PYQ ENRICHMENT] Ready to publish');
@@ -159,7 +252,7 @@ export async function enrichQuestionBatch(
   let failedCount = 0;
 
   const totalToEnrich = incompleteQuestions.length;
-  const CHUNK_SIZE = 6; // Optimal batch size for Gemini rate limits & response token limits
+  const CHUNK_SIZE = 3; // 3 items per chunk is ideal for ultra-reliable LLM JSON generation without token cutoff
   const totalChunks = Math.ceil(totalToEnrich / CHUNK_SIZE);
 
   for (let i = 0; i < incompleteQuestions.length; i += CHUNK_SIZE) {
@@ -172,7 +265,7 @@ export async function enrichQuestionBatch(
       onProgress({
         current: Math.min(completeQuestions.length + i + chunk.length, questions.length),
         total: questions.length,
-        stage: `✨ Enriching vocabulary… ${Math.min(completeQuestions.length + i + chunk.length, questions.length)} / ${questions.length} complete`,
+        stage: `✨ Generating AI educational vocabulary… ${Math.min(completeQuestions.length + i + chunk.length, questions.length)} / ${questions.length} complete`,
       });
     }
 
@@ -181,24 +274,28 @@ export async function enrichQuestionBatch(
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          questions: chunk.map(q => ({
-            tempId: q.tempId,
-            id: q.tempId,
-            category: q.category,
-            wordOrPhrase: q.wordOrPhrase,
-            question: q.question,
-            instruction: q.instruction,
-            options: q.options,
-            correctIndex: q.correctIndex,
-            exam: q.exam,
-            year: q.year,
-            meaning: q.meaning || '',
-            englishMeaning: q.meaning || '',
-            hindiMeaning: q.hindiMeaning || '',
-            mnemonic: q.mnemonic || '',
-            exampleSentence: q.exampleSentence || '',
-            rootWordInfo: q.rootWordInfo || '',
-          })),
+          questions: chunk.map(q => {
+            const isFallback = isFallbackEnrichment(q);
+            return {
+              tempId: q.tempId,
+              id: q.tempId,
+              category: q.category,
+              wordOrPhrase: q.wordOrPhrase,
+              question: q.question,
+              instruction: q.instruction,
+              options: q.options,
+              correctIndex: q.correctIndex,
+              exam: q.exam,
+              year: q.year,
+              // Strip robotic placeholder text so Gemini generates fresh, authentic explanations
+              meaning: isFallback ? '' : (q.meaning || ''),
+              englishMeaning: isFallback ? '' : (q.meaning || ''),
+              hindiMeaning: isFallback ? '' : (q.hindiMeaning || ''),
+              mnemonic: isFallback ? '' : (q.mnemonic || ''),
+              exampleSentence: isFallback ? '' : (q.exampleSentence || ''),
+              rootWordInfo: isFallback ? '' : (q.rootWordInfo || ''),
+            };
+          }),
         }),
       });
 
@@ -209,11 +306,15 @@ export async function enrichQuestionBatch(
       const data = await response.json();
       const enrichedArray: any[] = Array.isArray(data.enrichedQuestions) ? data.enrichedQuestions : [];
 
-      console.log(`[PYQ ENRICHMENT] Received enriched batch ${chunkIndex}`);
+      console.log(`[PYQ ENRICHMENT] Received enriched batch ${chunkIndex} (${enrichedArray.length} items)`);
 
-      for (const orig of chunk) {
-        const matchingEnriched = enrichedArray.find((e: any) => e.tempId === orig.tempId);
-        if (matchingEnriched) {
+      for (let cIdx = 0; cIdx < chunk.length; cIdx++) {
+        const orig = chunk[cIdx];
+        const matchingEnriched = enrichedArray.find((e: any) => e && (e.tempId === orig.tempId || e.id === orig.tempId))
+          || enrichedArray.find((e: any) => e && e.wordOrPhrase && orig.wordOrPhrase && e.wordOrPhrase.toLowerCase().trim() === orig.wordOrPhrase.toLowerCase().trim())
+          || enrichedArray[cIdx];
+
+        if (matchingEnriched && (matchingEnriched.meaning || matchingEnriched.hindiMeaning)) {
           const merged = mergeEnrichment(orig, matchingEnriched);
           enrichedMap.set(orig.tempId, merged);
           successCount++;
@@ -245,7 +346,7 @@ export async function enrichQuestionBatch(
     onProgress({
       current: questions.length,
       total: questions.length,
-      stage: '✨ Enrichment complete and ready to publish!',
+      stage: '✨ AI enrichment complete and ready to publish!',
     });
   }
 
@@ -260,10 +361,13 @@ export async function enrichQuestionBatch(
 }
 
 /**
- * Enriches a single question
+ * Enriches a single question with Gemini AI (defaults to force=true to bypass previous template fallbacks)
  */
-export async function enrichSingleQuestion(question: ExtractedQuestion): Promise<ExtractedQuestion> {
-  const { enrichedQuestions } = await enrichQuestionBatch([question]);
+export async function enrichSingleQuestion(
+  question: ExtractedQuestion,
+  force: boolean = true
+): Promise<ExtractedQuestion> {
+  const { enrichedQuestions } = await enrichQuestionBatch([question], undefined, force);
   return enrichedQuestions[0] || question;
 }
 
@@ -307,7 +411,8 @@ export async function enrichFirestoreQuestions(
 
   const { enrichedQuestions } = await enrichQuestionBatch(
     extractedFormat,
-    onProgress
+    onProgress,
+    true
   );
 
   // Prepare updates for Firestore

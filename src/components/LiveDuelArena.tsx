@@ -39,7 +39,8 @@ import {
   RefreshCw,
   Signal,
   CheckCircle2,
-  BookOpen
+  BookOpen,
+  Sparkles
 } from 'lucide-react';
 
 interface LiveDuelArenaProps {
@@ -1005,9 +1006,10 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
 
           <div 
             title={currentQuestion.repeatCount > 5 ? `Repeated ${currentQuestion.repeatCount} times in exams` : undefined}
-            className="flex items-center gap-1 bg-amber-950/90 border border-amber-600/70 text-amber-300 px-3 py-1 sm:px-3.5 sm:py-1.5 rounded-full text-xs sm:text-sm font-extrabold"
+            className="flex items-center gap-1.5 bg-amber-950/90 border border-amber-600/70 text-amber-400 px-2.5 py-1 sm:px-3 sm:py-1 rounded-full text-xs sm:text-sm font-extrabold shadow-sm"
           >
-            <span>🔥 {formatRepeatCount(currentQuestion.repeatCount)}</span>
+            <Sparkles className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400 shrink-0" />
+            <span>{formatRepeatCount(currentQuestion.repeatCount)}</span>
           </div>
         </div>
 

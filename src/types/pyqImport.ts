@@ -33,6 +33,7 @@ export interface ExtractedQuestion {
     version: string;
     enrichedAt?: number;
     provider?: string;
+    warnings?: string;
   };
   enrichmentWarning?: string;
   examFamily: string; // e.g. "SSC", "Banking", "Defence", "Railways"

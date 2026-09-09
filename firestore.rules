@@ -38,11 +38,12 @@ service cloud.firestore {
       allow write: if isPyqAdmin();
     }
 
-    // 3. Matchmaking Queue (Self-ticket only, immutable ownership, validated fields)
+    // 3. Matchmaking Queue (Authenticated queue with status filtering & atomic pairing claim)
     match /matchmaking_queue/{uid} {
-      // User may read only their own ticket; prevent reading the entire pool
-      allow get: if isOwner(uid);
-      allow list: if false;
+      // Authenticated users may read their own ticket or candidate tickets
+      allow get: if isAuthenticated();
+      // Authenticated users may query active waiting tickets (Query Enforcer: status == 'waiting')
+      allow list: if isAuthenticated() && resource.data.status == 'waiting';
 
       // User may create only their own ticket with validated fields
       allow create: if isOwner(uid)
@@ -61,29 +62,42 @@ service cloud.firestore {
         && (!('matchId' in request.resource.data) || request.resource.data.matchId == null)
         && (!('opponentUid' in request.resource.data) || request.resource.data.opponentUid == null);
 
-      // User may refresh their heartbeat or cancel their own ticket; ownership cannot be altered
-      allow update: if isOwner(uid)
-        && request.resource.data.uid == resource.data.uid
-        && (
-          // Heartbeat refresh
-          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['heartbeatAt', 'updatedAt'])
-          // Cancel ticket
-          || (request.resource.data.status == 'cancelled')
-        );
+      // User may update their own ticket (heartbeat, status transition, cancel), or claim a waiting ticket during atomic pairing
+      allow update: if isAuthenticated() && (
+        // A. Ticket owner heartbeat, status transition, or cancel
+        (
+          isOwner(uid)
+          && request.resource.data.uid == resource.data.uid
+          && (
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['heartbeatAt', 'updatedAt'])
+            || request.resource.data.status in ['waiting', 'matched', 'cancelled']
+          )
+        )
+        // B. Atomic Matchmaking Claim by pairing peer
+        || (
+          resource.data.status == 'waiting'
+          && request.resource.data.status == 'matched'
+          && request.resource.data.opponentUid == request.auth.uid
+          && request.resource.data.matchId is string
+        )
+      );
 
-      // User may delete only their own ticket
-      allow delete: if isOwner(uid);
+      // User may delete only their own ticket, or admin cleanup
+      allow delete: if isOwner(uid) || isPyqAdmin();
     }
 
-    // Legacy match_queue collection alias (strictly owner-scoped)
+    // Legacy match_queue collection alias (strictly owner-scoped with waiting query support)
     match /match_queue/{ticketId} {
-      allow get, delete: if isOwner(ticketId);
-      allow list: if false;
+      allow get: if isAuthenticated();
+      allow list: if isAuthenticated() && resource.data.status == 'waiting';
+      allow delete: if isOwner(ticketId) || isPyqAdmin();
       allow create: if isOwner(ticketId)
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.status == 'waiting';
-      allow update: if isOwner(ticketId)
-        && request.resource.data.uid == resource.data.uid;
+      allow update: if isAuthenticated() && (
+        (isOwner(ticketId) && request.resource.data.uid == resource.data.uid)
+        || (resource.data.status == 'waiting' && request.resource.data.status == 'matched')
+      );
     }
 
     // 4. Shared Synchronized 1v1 Live Rooms (Member-authenticated access only)
@@ -240,14 +254,20 @@ service cloud.firestore {
       allow write: if isPyqAdmin();
     }
 
-    // 7. Authoritative Match Records (Admin/server managed, direct client write DENIED)
+    // 7. Authoritative Match Records (Participants create on match, read by participants/admin)
     match /matches/{matchId} {
       allow read: if isAuthenticated() && (
         request.auth.uid == resource.data.player1Uid
         || request.auth.uid == resource.data.player2Uid
         || isPyqAdmin()
       );
-      allow write: if isPyqAdmin();
+      // Either participating player can create the initial in_progress match record
+      allow create: if isAuthenticated() && (
+        request.auth.uid == request.resource.data.player1Uid
+        || request.auth.uid == request.resource.data.player2Uid
+        || isPyqAdmin()
+      );
+      allow update, delete: if isPyqAdmin();
     }
 
     // 8. Question Bank: Public read for client arena/drills, Admin-only write

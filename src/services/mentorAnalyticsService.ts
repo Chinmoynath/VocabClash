@@ -221,11 +221,15 @@ export function buildMentorAnalytics(
   const isPlaceholderConcept = (str: string) => {
     if (!str) return true;
     const s = str.toLowerCase().trim();
-    if (s === 'concept' || s === 'uncategorized' || s === 'question') return true;
-    if (/^(?:synonyms?|antonyms?|ows|idioms?)_question(?:_\d+)?$/i.test(s)) return true;
-    if (/^(?:synonyms?|antonyms?|ows|idioms?)_historical(?:_\d+)?$/i.test(s)) return true;
-    if (/^historical_(?:attempt|summary)?(?:_\d+)?$/i.test(s)) return true;
-    if (/^(?:synonym|antonym|ows|idiom)\s+question$/i.test(s)) return true;
+    if (['concept', 'uncategorized', 'question', 'questions', 'unknown', 'null', 'undefined', 'synonym', 'antonym', 'synonyms', 'antonyms', 'ows', 'idiom', 'idioms'].includes(s)) return true;
+    if (/^(?:synonyms?|antonyms?|ows|idioms?)[_-\s]+(?:question|historical|attempt|summary)s?(?:_\d+)?$/i.test(s)) return true;
+    if (/^(?:synonyms?|antonyms?|ows|idioms?)$/i.test(s)) return true;
+    if (/^(?:synonym|antonym|ows|idiom)\s+questions?$/i.test(s)) return true;
+    if (/^historical[_-\s]+(?:attempt|summary|question)?(?:_\d+)?$/i.test(s)) return true;
+    if (/^(?:select|choose|find|what is|give|identify)\b/i.test(s)) return true;
+    if (s.includes('question') && (s.includes('synonym') || s.includes('antonym') || s.includes('ows') || s.includes('idiom'))) return true;
+    if (/^q(?:uestion)?_?(?:\d+|temp|id)$/i.test(s)) return true;
+    if (s.length < 2) return true;
     return false;
   };
 

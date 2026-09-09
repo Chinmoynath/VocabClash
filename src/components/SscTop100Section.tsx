@@ -5,12 +5,11 @@ import {
   RotateCcw,
   BookOpen,
   Trophy,
-  ArrowRight,
   Database,
   ArrowLeftRight,
   Target,
   Quote,
-  Flame
+  RefreshCw
 } from 'lucide-react';
 import {
   SscTop100Category,
@@ -173,21 +172,17 @@ export const SscTop100Section: React.FC<SscTop100SectionProps> = ({
   return (
     <section id="ssc-top-100-section" className="w-full mt-1 mb-2">
       {/* Header Banner */}
-      <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-gradient-to-br from-amber-950/80 via-slate-900/95 to-slate-950 border border-amber-500/40 p-3.5 sm:p-5 shadow-xl backdrop-blur-md">
+      <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-slate-900/90 border border-slate-800 p-3.5 sm:p-5 shadow-xl backdrop-blur-md">
         {/* Subtle decorative glow */}
-        <div className="absolute -top-20 -right-20 w-64 h-64 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute -bottom-20 -left-20 w-64 h-64 bg-orange-500/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute -top-20 -right-20 w-64 h-64 bg-sky-500/5 rounded-full blur-3xl pointer-events-none" />
 
         <div className="relative z-10 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="max-w-3xl">
             <div className="flex items-center gap-1.5 sm:gap-2 mb-1.5 flex-wrap">
-              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-bold tracking-wide uppercase bg-amber-500/20 border border-amber-400/40 text-amber-300 shadow-sm">
-                SSC TOP 100
-              </span>
-              <span className="text-[10px] sm:text-xs font-semibold text-slate-300 bg-slate-800/80 px-2 py-0.5 rounded-full border border-slate-700">
+              <span className="text-[10px] sm:text-xs font-semibold text-slate-300 bg-slate-800/80 px-2.5 py-0.5 rounded-full border border-slate-700">
                 TCS & Eduquity PYQ Bank
               </span>
-              <span className="text-[10px] sm:text-xs font-bold text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-800/60">
+              <span className="text-[10px] sm:text-xs font-bold text-sky-400 bg-sky-950/50 px-2.5 py-0.5 rounded-full border border-sky-500/40 shadow-sm">
                 400 Questions
               </span>
             </div>
@@ -198,21 +193,17 @@ export const SscTop100Section: React.FC<SscTop100SectionProps> = ({
           </div>
 
           {/* Right Action & Vault Progress Strip */}
-          <div className="flex flex-row items-center justify-between sm:justify-end gap-2.5 shrink-0 pt-1 sm:pt-0 border-t sm:border-t-0 border-slate-800/80">
-            <div className="bg-slate-900/90 border border-slate-800 rounded-xl px-3 py-1.5 sm:px-3.5 sm:py-2 shadow-md flex items-center gap-2.5">
+          <div className="flex flex-row items-center justify-between sm:justify-end gap-2.5 shrink-0">
+            <div className="bg-slate-950/80 border border-slate-800/80 rounded-xl px-3 py-1.5 sm:px-3.5 sm:py-2 shadow-sm flex items-center gap-2.5">
               <div className="text-right">
                 <div className="text-[9px] sm:text-[10px] uppercase font-bold text-slate-400 tracking-wider">
                   Vault Mastered
                 </div>
-                <div className="text-sm sm:text-base font-black text-amber-300 font-mono leading-tight">
-                  {totalSolvedAll} <span className="text-[10px] sm:text-xs font-semibold text-slate-400">/ 400</span>
-                </div>
-                <div className="text-[9px] text-amber-400/90 font-medium flex items-center justify-end gap-1">
-                  <RotateCcw className="w-2.5 h-2.5 text-amber-400 shrink-0" />
-                  <span>Resets daily at midnight</span>
+                <div className="text-sm sm:text-base font-black text-sky-400 font-mono leading-tight">
+                  {totalSolvedAll} <span className="text-[10px] sm:text-xs font-semibold text-slate-500">/ 400</span>
                 </div>
               </div>
-              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-amber-500/15 border border-amber-400/30 flex items-center justify-center text-amber-400">
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400">
                 <Trophy className="w-4 h-4" />
               </div>
             </div>
@@ -223,7 +214,7 @@ export const SscTop100Section: React.FC<SscTop100SectionProps> = ({
                 onClick={handleOpenDiagnostics}
                 className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800/90 hover:bg-slate-700/90 border border-slate-600 text-slate-200 text-xs font-semibold shadow-sm transition-all"
               >
-                <Database className="w-3.5 h-3.5 text-amber-400" />
+                <Database className="w-3.5 h-3.5 text-sky-400" />
                 Admin Rankings
               </button>
             )}
@@ -250,37 +241,28 @@ export const SscTop100Section: React.FC<SscTop100SectionProps> = ({
                 key={catInfo.id}
                 id={`ssc-top-100-card-${catInfo.id}`}
                 onClick={() => handleStartCategory(catInfo.id)}
-                className="group relative flex flex-col justify-between bg-gradient-to-b from-slate-900/95 to-slate-950/95 hover:from-slate-850 hover:to-slate-900 border border-slate-800/90 hover:border-amber-500/60 rounded-xl sm:rounded-2xl p-3 sm:p-4 transition-all duration-200 shadow-lg hover:shadow-xl hover:shadow-amber-500/10 cursor-pointer overflow-hidden"
+                className="group relative flex flex-col justify-between bg-slate-900/80 hover:bg-slate-850/90 border border-slate-800 hover:border-slate-700 rounded-xl sm:rounded-2xl p-3 sm:p-4 transition-all duration-200 shadow-md hover:shadow-lg cursor-pointer overflow-hidden"
               >
-                {/* Accent top highlight bar */}
-                <div
-                  className={`absolute top-0 left-0 right-0 h-1 sm:h-1.5 transition-all ${
-                    isCompleted
-                      ? 'bg-gradient-to-r from-emerald-500 to-teal-400'
-                      : 'bg-gradient-to-r from-amber-500 via-orange-500 to-amber-400 opacity-80 group-hover:opacity-100'
-                  }`}
-                />
-
-                {/* Card Top: Icon, Badges, Title, Hindi */}
+                {/* Card Content: Icon, Solved count badge, Title */}
                 <div>
-                  {/* Top Bar: Serious Icon & Solved Count Badge */}
-                  <div className="flex items-center justify-between mb-2 sm:mb-2.5">
-                    <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-slate-800/90 border border-slate-700/70 flex items-center justify-center shadow-inner group-hover:scale-105 transition-transform shrink-0">
+                  {/* Top Bar: Icon & Solved Count Badge */}
+                  <div className="flex items-center justify-between mb-2.5">
+                    <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-slate-800/80 border border-slate-700/50 flex items-center justify-center shadow-inner group-hover:scale-105 transition-transform shrink-0">
                       {getCategoryIcon(catInfo.id)}
                     </div>
 
                     <span
                       className={`text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded-lg border flex items-center gap-1 shadow-sm ${
                         isCompleted
-                          ? 'bg-emerald-950/90 border-emerald-500/60 text-emerald-300'
+                          ? 'bg-sky-950/70 border-sky-500/40 text-sky-300'
                           : isInProgress
-                          ? 'bg-amber-950/90 border-amber-500/60 text-amber-300'
-                          : 'bg-slate-800/90 border-slate-700 text-slate-300'
+                          ? 'bg-slate-800 border-slate-700 text-sky-400 font-mono'
+                          : 'bg-slate-800/60 border-slate-700/60 text-slate-400'
                       }`}
                     >
                       {isCompleted ? (
                         <>
-                          <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                          <CheckCircle2 className="w-3 h-3 text-sky-400" />
                           <span>100</span>
                         </>
                       ) : (
@@ -289,46 +271,20 @@ export const SscTop100Section: React.FC<SscTop100SectionProps> = ({
                     </span>
                   </div>
 
-                  {/* Title */}
-                  <h3 className="text-xs sm:text-sm lg:text-base font-bold text-white group-hover:text-amber-300 transition-colors leading-tight">
+                  {/* Title (Clean, crisp, no Hindi wording) */}
+                  <h3 className="text-xs sm:text-sm lg:text-base font-bold text-white group-hover:text-sky-300 transition-colors leading-tight">
                     {catInfo.title}
                   </h3>
-
-                  {/* Hindi Translation Pill */}
-                  <div className="mt-1.5">
-                    <span className="inline-block text-[10px] sm:text-xs font-medium text-amber-300/90 bg-amber-400/10 px-2 py-0.5 rounded border border-amber-400/20 truncate max-w-full">
-                      {catInfo.hindiTitle}
-                    </span>
-                  </div>
                 </div>
 
-                {/* Card Bottom: Progress Bar & Action CTA */}
-                <div className="mt-3 pt-2.5 border-t border-slate-800/80 space-y-2">
-                  {/* Progress Header & Bar */}
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between text-[10px] font-medium">
-                      <span className="text-slate-400">
-                        {isCompleted
-                          ? 'Mastered'
-                          : isInProgress
-                          ? `${progressPercent}% Solved`
-                          : '100 PYQs'}
-                      </span>
-                      <span className="font-mono font-bold text-amber-300">
-                        {solvedCount}/100
-                      </span>
-                    </div>
-
-                    <div className="w-full bg-slate-950 rounded-full h-1.5 overflow-hidden border border-slate-800">
-                      <div
-                        className={`h-full rounded-full transition-all duration-500 ${
-                          isCompleted
-                            ? 'bg-gradient-to-r from-emerald-500 to-teal-400'
-                            : 'bg-gradient-to-r from-amber-500 via-orange-500 to-amber-300'
-                        }`}
-                        style={{ width: `${progressPercent}%` }}
-                      />
-                    </div>
+                {/* Card Bottom: Slim Progress Bar & Action CTA */}
+                <div className="mt-3.5 space-y-2">
+                  {/* Slim Progress Bar */}
+                  <div className="w-full bg-slate-800/60 rounded-full h-1 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-sky-500 transition-all duration-500"
+                      style={{ width: `${progressPercent}%` }}
+                    />
                   </div>
 
                   {/* Action CTA Button */}
@@ -340,10 +296,10 @@ export const SscTop100Section: React.FC<SscTop100SectionProps> = ({
                           e.stopPropagation();
                           handleStartCategory(catInfo.id);
                         }}
-                        className="w-full py-1.5 sm:py-2 px-2 bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-500/50 text-emerald-200 font-bold text-[11px] sm:text-xs rounded-lg sm:rounded-xl flex items-center justify-center gap-1 shadow-sm transition-all"
+                        className="w-full py-1.5 sm:py-2 px-2 bg-slate-800/90 hover:bg-slate-750 border border-slate-700 text-sky-300 font-bold text-[11px] sm:text-xs rounded-lg sm:rounded-xl flex items-center justify-center gap-1 shadow-sm transition-all"
                       >
                         <span>Retake</span>
-                        <ChevronRight className="w-3.5 h-3.5 text-emerald-400" />
+                        <ChevronRight className="w-3.5 h-3.5 text-sky-400" />
                       </button>
                     ) : isInProgress ? (
                       <div className="flex items-center gap-1.5">
@@ -362,7 +318,7 @@ export const SscTop100Section: React.FC<SscTop100SectionProps> = ({
                             e.stopPropagation();
                             handleStartCategory(catInfo.id);
                           }}
-                          className="flex-1 py-1.5 sm:py-2 px-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-[11px] sm:text-xs rounded-lg sm:rounded-xl flex items-center justify-center gap-0.5 shadow-sm transition-all truncate"
+                          className="flex-1 py-1.5 sm:py-2 px-1.5 bg-sky-500 hover:bg-sky-400 text-slate-950 font-black text-[11px] sm:text-xs rounded-lg sm:rounded-xl flex items-center justify-center gap-0.5 shadow-sm transition-all truncate"
                         >
                           <span>Resume</span>
                           <ChevronRight className="w-3.5 h-3.5 shrink-0" />
@@ -375,7 +331,7 @@ export const SscTop100Section: React.FC<SscTop100SectionProps> = ({
                           e.stopPropagation();
                           handleStartCategory(catInfo.id);
                         }}
-                        className="w-full py-1.5 sm:py-2 px-2 bg-slate-800/90 group-hover:bg-gradient-to-r group-hover:from-amber-500 group-hover:to-orange-500 group-hover:text-slate-950 border border-slate-700 group-hover:border-amber-400/80 text-amber-400 font-bold text-[11px] sm:text-xs rounded-lg sm:rounded-xl flex items-center justify-center gap-1 shadow-sm transition-all duration-200"
+                        className="w-full py-1.5 sm:py-2 px-2 bg-slate-800/80 group-hover:bg-sky-500 group-hover:text-slate-950 border border-slate-700/80 group-hover:border-sky-400 text-slate-200 font-bold text-[11px] sm:text-xs rounded-lg sm:rounded-xl flex items-center justify-center gap-1 shadow-sm transition-all duration-200"
                       >
                         <span>Start Drill</span>
                         <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
@@ -424,7 +380,7 @@ export const SscTop100Section: React.FC<SscTop100SectionProps> = ({
                   disabled={isRebuilding}
                   className="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 disabled:opacity-50 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-2 shadow-md transition-all whitespace-nowrap"
                 >
-                  <Flame className="w-4 h-4" />
+                  <RefreshCw className={`w-4 h-4 ${isRebuilding ? 'animate-spin' : ''}`} />
                   {isRebuilding ? 'Rebuilding & Syncing...' : 'Rebuild & Sync SSC Top 100'}
                 </button>
               </div>

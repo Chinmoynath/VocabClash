@@ -1282,9 +1282,10 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
             <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
               <span 
                 title={currentQ.repeatCount > 5 ? `Repeated ${currentQ.repeatCount} times in official exams` : undefined}
-                className="bg-amber-950/80 text-amber-300 border border-amber-800/60 px-2 py-0.5 rounded-full font-bold text-[10px] shrink-0"
+                className="inline-flex items-center gap-1 bg-amber-950/80 text-amber-300 border border-amber-800/60 px-2 py-0.5 rounded-full font-bold text-[10px] shrink-0"
               >
-                🔥 Repeated {formatRepeatCount(currentQ.repeatCount)}
+                <Sparkles className="w-2.5 h-2.5 text-amber-400 shrink-0" />
+                <span>Repeated {formatRepeatCount(currentQ.repeatCount)}</span>
               </span>
 
               {/* Spaced Review Reason Pill (Subtle & clean) */}

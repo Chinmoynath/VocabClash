@@ -44,7 +44,8 @@ import {
   enrichSingleQuestion, 
   enrichFirestoreQuestions, 
   backfillQuestionBankEnrichment,
-  needsEnrichment 
+  needsEnrichment,
+  isFallbackEnrichment
 } from '../services/pyqEnrichmentService';
 import { Question, QuestionCategory, ExamAppearance } from '../types';
 import { resolveQuestionMeaningsBreakdown } from '../utils/questionEducationResolver';
@@ -101,6 +102,7 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [isPublishing, setIsPublishing] = useState<boolean>(false);
   const [isEnriching, setIsEnriching] = useState<boolean>(false);
+  const [enrichingSingleId, setEnrichingSingleId] = useState<string | null>(null);
   const [enrichProgress, setEnrichProgress] = useState<{ processed: number; total: number; stage: string } | null>(null);
   const [isBackfilling, setIsBackfilling] = useState<boolean>(false);
   const [backfillProgress, setBackfillProgress] = useState<{ processed: number; total: number; updated: number; currentExam?: string } | null>(null);
@@ -285,20 +287,21 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
     }));
   };
 
-  const handleEnrichBatch = async (questionsToEnrich?: ExtractedQuestion[]) => {
+  const handleEnrichBatch = async (questionsToEnrich?: ExtractedQuestion[], force: boolean = false) => {
     const list = questionsToEnrich || extractedQuestions;
     if (list.length === 0) return;
 
     setIsEnriching(true);
     setErrorMessage(null);
-    setEnrichProgress({ processed: 0, total: list.length, stage: 'Starting AI Enrichment for Hindi, Mnemonics & 4-Option Details...' });
+    setEnrichProgress({ processed: 0, total: list.length, stage: 'Connecting to Gemini AI for Hindi meanings, Mnemonics & Option Explanations...' });
 
     try {
       const { enrichedQuestions } = await enrichQuestionBatch(
         list,
         (progress) => {
           setEnrichProgress({ processed: progress.current, total: progress.total, stage: progress.stage });
-        }
+        },
+        force
       );
       setExtractedQuestions(enrichedQuestions);
     } catch (err: any) {
@@ -314,10 +317,13 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
     if (!target) return;
 
     try {
-      const enriched = await enrichSingleQuestion(target);
+      setEnrichingSingleId(tempId);
+      const enriched = await enrichSingleQuestion(target, true);
       setExtractedQuestions(prev => prev.map(q => q.tempId === tempId ? { ...enriched, reviewStatus: q.reviewStatus } : q));
     } catch (err: any) {
       setErrorMessage(`Single question enrichment error: ${err?.message}`);
+    } finally {
+      setEnrichingSingleId(null);
     }
   };
 
@@ -461,32 +467,8 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
     setErrorMessage(null);
 
     try {
-      // Ensure all approved questions have full educational enrichment before saving
-      let readyToPublish = [...approved];
-      const pendingEnrichment = readyToPublish.filter(q => needsEnrichment(q));
-
-      if (pendingEnrichment.length > 0) {
-        setIsEnriching(true);
-        setEnrichProgress({
-          processed: 0,
-          total: pendingEnrichment.length,
-          stage: `Completing full AI enrichment for ${pendingEnrichment.length} questions before saving...`,
-        });
-
-        const { enrichedQuestions } = await enrichQuestionBatch(pendingEnrichment, (prog) => {
-          setEnrichProgress({
-            processed: prog.current,
-            total: prog.total,
-            stage: prog.stage,
-          });
-        });
-
-        const enrichedMap = new Map(enrichedQuestions.map(eq => [eq.tempId, eq]));
-        readyToPublish = readyToPublish.map(q => enrichedMap.get(q.tempId) || q);
-        setExtractedQuestions(prev => prev.map(q => enrichedMap.get(q.tempId) || q));
-        setEnrichProgress(null);
-        setIsEnriching(false);
-      }
+      // Directly publish approved questions to Firestore without repeating enrichment
+      const readyToPublish = [...approved];
 
       const finalQuestionsToPublish: Question[] = readyToPublish.map((q, qIndex) => {
         const resolvedShift = (q.shift && q.shift !== 'Not Specified' && q.shift !== 'null' && q.shift !== 'undefined')
@@ -1165,7 +1147,7 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
 
                   <div className="flex items-center gap-2 flex-wrap">
                     <button
-                      onClick={() => handleEnrichBatch()}
+                      onClick={() => handleEnrichBatch(undefined, false)}
                       disabled={isEnriching || extractedQuestions.length === 0}
                       className="px-3.5 py-2 bg-gradient-to-r from-purple-500/20 to-indigo-500/20 border border-purple-500/40 hover:bg-purple-500/30 text-purple-200 text-xs font-bold rounded-xl flex items-center gap-1.5 transition disabled:opacity-50"
                       title="AI Auto-Enrich Hindi meanings, Mnemonics & 4-Option Details"
@@ -1174,6 +1156,16 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
                       {isEnriching 
                         ? 'Enriching Learning Data...' 
                         : `Auto-Enrich Batch (${extractedQuestions.filter(q => needsEnrichment(q)).length} need AI)`}
+                    </button>
+
+                    <button
+                      onClick={() => handleEnrichBatch(undefined, true)}
+                      disabled={isEnriching || extractedQuestions.length === 0}
+                      className="px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs font-bold rounded-xl flex items-center gap-1.5 transition disabled:opacity-50"
+                      title="Force Gemini AI to re-generate educational content for all questions, replacing any template fallbacks"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 text-purple-400 ${isEnriching ? 'animate-spin' : ''}`} />
+                      Force Re-Enrich All
                     </button>
 
                     <button
@@ -1257,7 +1249,8 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
                       </div>
                     ) : (
                       filteredQuestions.map((q, idx) => {
-                        const isEnriched = Boolean(q.hindiMeaning && q.meaning && q.optionDetails && q.optionDetails.length === 4);
+                        const isFallback = isFallbackEnrichment(q);
+                        const isEnriched = Boolean(!isFallback && q.hindiMeaning && q.meaning && q.optionDetails && q.optionDetails.length === 4);
                         const isExpanded = expandedOptionDetails[q.tempId] ?? false;
 
                         return (
@@ -1298,10 +1291,18 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
 
                                   {isEnriched ? (
                                     <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full font-bold border border-emerald-500/30 flex items-center gap-1">
-                                      <Sparkles className="w-2.5 h-2.5" /> Enriched
+                                      <Sparkles className="w-2.5 h-2.5" /> Enriched (AI)
+                                    </span>
+                                  ) : isFallback ? (
+                                    <span 
+                                      className="text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full font-bold border border-amber-500/40 flex items-center gap-1 cursor-pointer hover:bg-amber-500/30 transition"
+                                      title="Using temporary robotic template fallback. Click the sparkle button to enrich with Gemini AI."
+                                      onClick={() => handleEnrichSingle(q.tempId)}
+                                    >
+                                      <AlertTriangle className="w-2.5 h-2.5 text-amber-400" /> Template Fallback (Click to AI Enrich)
                                     </span>
                                   ) : (
-                                    <span className="text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full font-medium border border-amber-500/30">
+                                    <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded-full font-medium border border-slate-700">
                                       Pending Enrichment
                                     </span>
                                   )}
@@ -1373,10 +1374,11 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
                               <div className="flex items-center gap-2 shrink-0">
                                 <button
                                   onClick={() => handleEnrichSingle(q.tempId)}
-                                  className="p-1.5 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 transition"
-                                  title="Re-enrich with AI"
+                                  disabled={enrichingSingleId === q.tempId || isEnriching}
+                                  className="p-1.5 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 transition disabled:opacity-50"
+                                  title="Enrich or Re-enrich with Gemini AI"
                                 >
-                                  <Sparkles className="w-3.5 h-3.5" />
+                                  <Sparkles className={`w-3.5 h-3.5 ${enrichingSingleId === q.tempId ? 'animate-spin text-purple-400' : ''}`} />
                                 </button>
 
                                 <button
@@ -1548,40 +1550,57 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
 
                                   {isExpanded && (
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2">
-                                      {q.optionDetails.map((optDetail, oIdx) => (
-                                        <div 
-                                          key={oIdx} 
-                                          className={`p-2.5 rounded-lg border text-[11px] space-y-1 ${
-                                            oIdx === q.correctIndex
-                                              ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-100'
-                                              : 'bg-slate-950 border-slate-800/80 text-slate-300'
-                                          }`}
-                                        >
-                                          <div className="flex items-center justify-between font-bold">
-                                            <span>Option {String.fromCharCode(65 + oIdx)}: {optDetail.text}</span>
-                                            {oIdx === q.correctIndex && (
-                                              <span className="text-[9px] bg-emerald-500/30 text-emerald-300 px-1 py-0.2 rounded uppercase">
-                                                Correct
+                                      {q.optionDetails.map((optDetail, oIdx) => {
+                                        const optText = (optDetail as any).option || (optDetail as any).text || q.options?.[oIdx] || '';
+                                        const engMeaning = (optDetail as any).englishMeaning || (optDetail as any).meaning || (optDetail as any).explanation || (optDetail as any).shortExplanation || '';
+                                        const hinMeaning = optDetail.hindiMeaning || '';
+                                        const hook = (optDetail as any).mnemonicHook || (optDetail as any).mnemonic || '';
+                                        const isCorrect = oIdx === q.correctIndex;
+
+                                        return (
+                                          <div 
+                                            key={oIdx} 
+                                            className={`p-2.5 rounded-lg border text-[11px] space-y-1.5 ${
+                                              isCorrect
+                                                ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-100'
+                                                : 'bg-slate-950 border-slate-800/80 text-slate-300'
+                                            }`}
+                                          >
+                                            <div className="flex items-start justify-between gap-2 font-bold">
+                                              <span className="text-white text-xs">
+                                                <span className="text-sky-400 font-mono">Option {String.fromCharCode(65 + oIdx)}:</span>{' '}
+                                                <span className="text-slate-100 font-semibold">{optText}</span>
                                               </span>
+                                              {isCorrect && (
+                                                <span className="text-[9px] bg-emerald-500/30 text-emerald-300 px-1.5 py-0.5 rounded uppercase font-bold tracking-wider shrink-0">
+                                                  Correct
+                                                </span>
+                                              )}
+                                            </div>
+
+                                            {/* English Meaning / Explanation */}
+                                            {engMeaning && (
+                                              <div className="text-slate-300 text-[11px] leading-relaxed">
+                                                <span className="text-slate-400 font-semibold">Meaning:</span> {engMeaning}
+                                              </div>
+                                            )}
+
+                                            {/* Hindi Meaning (Bilingual Aid) */}
+                                            {hinMeaning && (
+                                              <div className="text-amber-300/90 font-medium text-[11px] leading-relaxed">
+                                                <span className="text-amber-400/80 font-semibold">हिन्दी अर्थ:</span> {hinMeaning}
+                                              </div>
+                                            )}
+
+                                            {/* Memory Hook / Mnemonic if available */}
+                                            {hook && (
+                                              <div className="text-purple-300/80 text-[10px]">
+                                                <span className="font-semibold text-purple-400">Hook:</span> {hook}
+                                              </div>
                                             )}
                                           </div>
-                                          {optDetail.hindiMeaning && (
-                                            <div className="text-emerald-300 font-medium">
-                                              हिन्दी: {optDetail.hindiMeaning}
-                                            </div>
-                                          )}
-                                          {optDetail.meaning && (
-                                            <div className="text-slate-300">
-                                              Meaning: {optDetail.meaning}
-                                            </div>
-                                          )}
-                                          {optDetail.mnemonic && (
-                                            <div className="text-amber-300/80 text-[10px]">
-                                              Hook: {optDetail.mnemonic}
-                                            </div>
-                                          )}
-                                        </div>
-                                      ))}
+                                        );
+                                      })}
                                     </div>
                                   )}
                                 </div>
@@ -2761,7 +2780,7 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
                         newOpts[oIdx] = e.target.value;
                         const newDetails = editingQuestion.optionDetails ? [...editingQuestion.optionDetails] : [];
                         if (newDetails[oIdx]) {
-                          newDetails[oIdx] = { ...newDetails[oIdx], text: e.target.value };
+                          newDetails[oIdx] = { ...newDetails[oIdx], text: e.target.value, option: e.target.value };
                         }
                         setEditingQuestion({ ...editingQuestion, options: newOpts, optionDetails: newDetails.length > 0 ? newDetails : undefined });
                       }}
@@ -2784,10 +2803,15 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
                       />
                       <input
                         type="text"
-                        value={editingQuestion.optionDetails[oIdx].meaning || ''}
+                        value={(editingQuestion.optionDetails[oIdx] as any).englishMeaning || editingQuestion.optionDetails[oIdx].meaning || ''}
                         onChange={e => {
                           const newDetails = [...(editingQuestion.optionDetails || [])];
-                          newDetails[oIdx] = { ...newDetails[oIdx], meaning: e.target.value };
+                          newDetails[oIdx] = { 
+                            ...newDetails[oIdx], 
+                            meaning: e.target.value, 
+                            englishMeaning: e.target.value,
+                            explanation: e.target.value
+                          };
                           setEditingQuestion({ ...editingQuestion, optionDetails: newDetails });
                         }}
                         placeholder="English meaning"

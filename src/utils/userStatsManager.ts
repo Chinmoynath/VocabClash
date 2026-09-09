@@ -205,7 +205,7 @@ export function recordQuestionAttempt(params: {
   // 3. Log into authoritative normalized attempts pipeline
   recordAttemptEvent({
     questionId,
-    conceptKey: conceptKey || questionId || `${cat}_question`,
+    conceptKey: conceptKey || questionId || '',
     category: normCat,
     correct: isCorrect,
     source: source || 'practice',

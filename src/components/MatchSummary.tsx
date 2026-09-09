@@ -180,9 +180,10 @@ const MatchQuestionReviewCard: React.FC<MatchQuestionReviewCardProps> = ({
           {/* Repeat Frequency */}
           <span 
             title={q.repeatCount > 5 ? `Repeated ${q.repeatCount} times in SSC exams` : undefined}
-            className="text-[10px] font-bold bg-amber-950/60 text-amber-300 border border-amber-700/50 px-2 py-0.5 rounded-md"
+            className="inline-flex items-center gap-1 text-[10px] font-bold bg-amber-950/60 text-amber-300 border border-amber-700/50 px-2 py-0.5 rounded-md"
           >
-            🔥 {formatRepeatCount(q.repeatCount)} in SSC
+            <Sparkles className="w-3 h-3 text-amber-400 shrink-0" />
+            <span>{formatRepeatCount(q.repeatCount)} in SSC</span>
           </span>
         </div>
 
@@ -582,15 +583,10 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
   });
 
   return (
-    <div className="flex-1 min-h-0 w-full overflow-y-auto px-3 sm:px-6 py-4 sm:py-6 bg-slate-950/40">
-      <div className="max-w-3xl lg:max-w-4xl mx-auto space-y-5 sm:space-y-6 pb-12">
-
-        {activeTab === 'summary' ? (
-          /* ========================================================
-             VIEW 1: MATCH SUMMARY OVERVIEW (FOCUSED & COMPACT)
-             ======================================================== */
-          <div className="space-y-5 sm:space-y-6 animate-fadeIn">
-            {/* HERO RESULT CARD (Centered, Boxed, Non-Flat) */}
+    <div className={`flex-1 min-h-0 w-full overflow-y-auto bg-slate-950/40 ${activeTab === 'solutions' ? 'p-0' : 'px-3 sm:px-6 py-4 sm:py-6'}`}>
+      {activeTab === 'summary' ? (
+        <div className="max-w-3xl lg:max-w-4xl mx-auto space-y-5 sm:space-y-6 pb-12">
+          {/* HERO RESULT CARD (Centered, Boxed, Non-Flat) */}
             <div
               className={`rounded-3xl border p-5 sm:p-7 shadow-2xl relative overflow-hidden text-center transition-all ${
                 isWinner
@@ -859,46 +855,53 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
             )}
           </div>
         ) : (
-          /* ========================================================
-             VIEW 2: DEDICATED SOLUTION & MNEMONICS PAGE
-             ======================================================== */
-          <div className="space-y-4 animate-fadeIn">
-            {/* Top Navigation & Fast Action Header */}
-            <div className="bg-slate-900/95 border border-slate-800 rounded-3xl p-4 sm:p-5 shadow-2xl backdrop-blur-md sticky top-0 z-20 space-y-3">
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
+        /* ========================================================
+           VIEW 2: DEDICATED SOLUTION & MNEMONICS PAGE
+           ======================================================== */
+        <div className="min-h-full flex flex-col animate-fadeIn">
+          {/* Top Navigation & Fast Action Header (Fixed directly below topper) */}
+          <div className="sticky top-0 z-30 w-full bg-slate-950/95 sm:bg-slate-900/95 border-b border-slate-800 shadow-xl backdrop-blur-md">
+            <div className="max-w-3xl lg:max-w-4xl mx-auto px-3 sm:px-6 py-3 space-y-2.5">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
+                <div className="flex items-center gap-2.5 flex-wrap">
                   <button
                     onClick={() => {
                       soundManager.playTap();
                       setActiveTab('summary');
                     }}
-                    className="p-2 sm:px-3 sm:py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-extrabold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95"
+                    className="p-1.5 sm:px-3 sm:py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700/80 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95 shrink-0"
                   >
-                    <ArrowLeft className="w-4 h-4" />
+                    <ArrowLeft className="w-3.5 h-3.5" />
                     <span>Back to Result</span>
                   </button>
 
-                  <div>
-                    <h2 className="text-base sm:text-lg font-black text-slate-100 flex items-center gap-2">
-                      <Brain className="w-5 h-5 text-amber-400" />
-                      <span>Match Solutions & Performance Diagnostic ({totalQuestions} PYQs)</span>
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2.5">
+                    <h2 className="text-sm sm:text-base font-black text-slate-100 flex items-center gap-1.5">
+                      <Brain className="w-4 h-4 text-sky-400 shrink-0" />
+                      <span>Match Solutions & Performance Diagnostic</span>
                     </h2>
-                    <p className="text-xs text-slate-400">
-                      Score: <span className="text-amber-400 font-bold">{matchState.playerScore}</span> vs{' '}
-                      <span className="text-orange-400 font-bold">{matchState.opponentScore}</span> • Accuracy:{' '}
-                      <span className="text-emerald-400 font-bold">{accuracyPct}%</span>
-                    </p>
+
+                    {/* Score vs Pill: Styled precisely according to Image 2 with electric sky blue numbers */}
+                    <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-sky-950/50 border border-sky-500/40 text-[11px] text-sky-200 shadow-sm">
+                      <span className="text-slate-300 font-medium">Score:</span>
+                      <span className="text-sky-400 font-black tracking-wide">{matchState.playerScore}</span>
+                      <span className="text-sky-400/60 font-semibold text-[10px]">vs</span>
+                      <span className="text-sky-400 font-black tracking-wide">{matchState.opponentScore}</span>
+                      <span className="text-sky-500/40">•</span>
+                      <span className="text-slate-300 font-medium">Accuracy:</span>
+                      <span className="text-sky-400 font-black">{accuracyPct}%</span>
+                    </div>
                   </div>
                 </div>
 
                 {/* Quick Match Triggers right in the header */}
-                <div className="flex items-center gap-2 w-full sm:w-auto">
+                <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
                   <button
                     onClick={() => {
                       soundManager.playTap();
                       onPlayAgain();
                     }}
-                    className="flex-1 sm:flex-initial bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 text-slate-950 font-black px-3.5 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-md active:scale-95 cursor-pointer"
+                    className="flex-1 sm:flex-initial bg-sky-500 hover:bg-sky-400 text-slate-950 font-black px-3.5 py-1.5 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-sm active:scale-95 cursor-pointer transition-all"
                   >
                     <RotateCcw className="w-3.5 h-3.5" />
                     <span>Play Next</span>
@@ -909,7 +912,7 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
                       soundManager.playTap();
                       onBackToLobby();
                     }}
-                    className="flex-1 sm:flex-initial bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer"
+                    className="flex-1 sm:flex-initial bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700/80 font-bold px-3 py-1.5 rounded-xl text-xs flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer transition-all"
                   >
                     <span>Lobby</span>
                     <ArrowRight className="w-3.5 h-3.5" />
@@ -917,17 +920,17 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
                 </div>
               </div>
 
-              {/* Filter Tabs Bar */}
-              <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 justify-start overflow-x-auto no-scrollbar">
+              {/* Filter Tabs Bar: Cohesive Sky & Slate Palette */}
+              <div className="flex items-center gap-1.5 bg-slate-950/70 p-1 rounded-xl border border-slate-800/80 justify-start overflow-x-auto no-scrollbar">
                 <button
                   onClick={() => {
                     soundManager.playTap();
                     setFilterType('all');
                   }}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all flex items-center gap-1.5 shrink-0 ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer ${
                     filterType === 'all'
-                      ? 'bg-slate-800 text-amber-400 shadow-sm border border-slate-700'
-                      : 'text-slate-400 hover:text-slate-200'
+                      ? 'bg-sky-950/70 text-sky-300 border border-sky-500/40 shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-transparent'
                   }`}
                 >
                   <span>All ({totalQuestions})</span>
@@ -938,10 +941,10 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
                     soundManager.playTap();
                     setFilterType('mistakes');
                   }}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all flex items-center gap-1.5 shrink-0 ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer ${
                     filterType === 'mistakes'
-                      ? 'bg-rose-950/80 text-rose-300 border border-rose-700/60 shadow-sm'
-                      : 'text-slate-400 hover:text-rose-300'
+                      ? 'bg-sky-950/70 text-sky-300 border border-sky-500/40 shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-transparent'
                   }`}
                 >
                   <XCircle className="w-3.5 h-3.5 text-rose-400" />
@@ -953,10 +956,10 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
                     soundManager.playTap();
                     setFilterType('correct');
                   }}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all flex items-center gap-1.5 shrink-0 ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer ${
                     filterType === 'correct'
-                      ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 shadow-sm'
-                      : 'text-slate-400 hover:text-emerald-300'
+                      ? 'bg-sky-950/70 text-sky-300 border border-sky-500/40 shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-transparent'
                   }`}
                 >
                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
@@ -964,43 +967,43 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
                 </button>
               </div>
             </div>
+          </div>
 
-            {/* Questions List: Centered Cards with rich visual breakdown */}
-            <div className="space-y-4">
-              {filteredQuestions.length === 0 ? (
-                <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-10 text-center space-y-3 shadow-xl">
-                  <div className="w-14 h-14 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center mx-auto text-2xl">
-                    🎉
-                  </div>
-                  <div className="font-extrabold text-base text-slate-200">No questions match this filter</div>
-                  <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                    {filterType === 'mistakes'
-                      ? 'Great job! You had zero mistakes in this category.'
-                      : 'Switch filters to inspect the other questions from this match.'}
-                  </p>
-                  <button
-                    onClick={() => setFilterType('all')}
-                    className="bg-slate-800 hover:bg-slate-700 text-amber-400 px-4 py-2 rounded-xl text-xs font-bold border border-slate-700 cursor-pointer"
-                  >
-                    View All Questions
-                  </button>
+          {/* Questions List: Centered Cards with rich visual breakdown */}
+          <div className="flex-1 max-w-3xl lg:max-w-4xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-4 pb-16">
+            {filteredQuestions.length === 0 ? (
+              <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-10 text-center space-y-3 shadow-xl">
+                <div className="w-14 h-14 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center mx-auto text-2xl">
+                  🎉
                 </div>
-              ) : (
-                filteredQuestions.map(({ question: q, originalIndex: idx, isCorrect, selectedOptionIndex }) => (
-                  <MatchQuestionReviewCard
-                    key={q.id || `match-q-${idx}`}
-                    question={q}
-                    originalIndex={idx}
-                    isCorrect={isCorrect}
-                    selectedOptionIndex={selectedOptionIndex}
-                    isBookmarked={bookmarkedIds.includes(q.id)}
-                    onBookmark={onBookmarkQuestion}
-                    onOpenAiDeepDive={onOpenAiDeepDive}
-                    onReport={(questionToReport) => setReportingQuestion(questionToReport)}
-                  />
-                ))
-              )}
-            </div>
+                <div className="font-extrabold text-base text-slate-200">No questions match this filter</div>
+                <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                  {filterType === 'mistakes'
+                    ? 'Great job! You had zero mistakes in this category.'
+                    : 'Switch filters to inspect the other questions from this match.'}
+                </p>
+                <button
+                  onClick={() => setFilterType('all')}
+                  className="bg-slate-800 hover:bg-slate-700 text-sky-400 px-4 py-2 rounded-xl text-xs font-bold border border-slate-700 cursor-pointer"
+                >
+                  View All Questions
+                </button>
+              </div>
+            ) : (
+              filteredQuestions.map(({ question: q, originalIndex: idx, isCorrect, selectedOptionIndex }) => (
+                <MatchQuestionReviewCard
+                  key={q.id || `match-q-${idx}`}
+                  question={q}
+                  originalIndex={idx}
+                  isCorrect={isCorrect}
+                  selectedOptionIndex={selectedOptionIndex}
+                  isBookmarked={bookmarkedIds.includes(q.id)}
+                  onBookmark={onBookmarkQuestion}
+                  onOpenAiDeepDive={onOpenAiDeepDive}
+                  onReport={(questionToReport) => setReportingQuestion(questionToReport)}
+                />
+              ))
+            )}
 
             {/* Bottom Sticky Action Bar in Solution view */}
             <div className="pt-4 flex flex-col sm:flex-row items-center justify-center gap-3">
@@ -1009,7 +1012,7 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
                   soundManager.playTap();
                   onPlayAgain();
                 }}
-                className="w-full sm:w-auto bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 text-slate-950 font-black px-6 py-3.5 rounded-2xl shadow-xl shadow-amber-500/20 flex items-center justify-center gap-2 text-sm transition-all active:scale-95 cursor-pointer"
+                className="w-full sm:w-auto bg-sky-500 hover:bg-sky-400 text-slate-950 font-black px-6 py-3.5 rounded-2xl shadow-xl shadow-sky-500/20 flex items-center justify-center gap-2 text-sm transition-all active:scale-95 cursor-pointer"
               >
                 <RotateCcw className="w-4 h-4" />
                 <span>PLAY NEXT MATCH</span>
@@ -1040,8 +1043,8 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
               </button>
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Report Question Modal */}
       {reportingQuestion && (

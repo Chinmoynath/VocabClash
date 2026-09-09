@@ -244,9 +244,27 @@
         "readingTimeMinutes": { "type": "number", "description": "Estimated reading duration in minutes" }
       },
       "required": ["title", "slug", "content", "category", "status", "createdAt", "updatedAt"]
+    },
+    "MatchRecord": {
+      "title": "MatchRecord",
+      "description": "Authoritative match record linking paired players and match status",
+      "type": "object",
+      "properties": {
+        "matchId": { "type": "string", "description": "Unique match ID" },
+        "player1Uid": { "type": "string", "description": "Host player UID" },
+        "player2Uid": { "type": "string", "description": "Opponent player UID" },
+        "status": { "type": "string", "description": "in_progress or completed" },
+        "type": { "type": "string", "description": "Match type (e.g. random-human)" },
+        "createdAt": { "type": "number", "description": "Creation timestamp in ms" }
+      },
+      "required": ["matchId", "player1Uid", "player2Uid", "status", "createdAt"]
     }
   },
   "firestore": {
+    "/matches/{matchId}": {
+      "schema": "MatchRecord",
+      "description": "Authoritative match records between two paired players"
+    },
     "/ai_tutor_cache/{wordId}": {
       "schema": "AiTutorCacheItem",
       "description": "Global shared cache for AI Vocab Mentor vocabulary explanations"

@@ -33,11 +33,15 @@ export interface RepeatedMistakesRowProps {
 function isPlaceholderConcept(str?: string): boolean {
   if (!str) return true;
   const s = str.toLowerCase().trim();
-  if (s === 'concept' || s === 'uncategorized' || s === 'question') return true;
-  if (/^(?:synonyms?|antonyms?|ows|idioms?)_question(?:_\d+)?$/i.test(s)) return true;
-  if (/^(?:synonyms?|antonyms?|ows|idioms?)_historical(?:_\d+)?$/i.test(s)) return true;
-  if (/^historical_(?:attempt|summary)?(?:_\d+)?$/i.test(s)) return true;
-  if (/^(?:synonym|antonym|ows|idiom)\s+question$/i.test(s)) return true;
+  if (['concept', 'uncategorized', 'question', 'questions', 'unknown', 'null', 'undefined', 'synonym', 'antonym', 'synonyms', 'antonyms', 'ows', 'idiom', 'idioms'].includes(s)) return true;
+  if (/^(?:synonyms?|antonyms?|ows|idioms?)[_-\s]+(?:question|historical|attempt|summary)s?(?:_\d+)?$/i.test(s)) return true;
+  if (/^(?:synonyms?|antonyms?|ows|idioms?)$/i.test(s)) return true;
+  if (/^(?:synonym|antonym|ows|idiom)\s+questions?$/i.test(s)) return true;
+  if (/^historical[_-\s]+(?:attempt|summary|question)?(?:_\d+)?$/i.test(s)) return true;
+  if (/^(?:select|choose|find|what is|give|identify)\b/i.test(s)) return true;
+  if (s.includes('question') && (s.includes('synonym') || s.includes('antonym') || s.includes('ows') || s.includes('idiom'))) return true;
+  if (/^q(?:uestion)?_?(?:\d+|temp|id)$/i.test(s)) return true;
+  if (s.length < 2) return true;
   return false;
 }
 
@@ -105,13 +109,33 @@ function formatCardMeaning(rawMeaning?: string, title?: string): string {
   return str;
 }
 
-// Resolve title and optional prompt for OWS/Idioms
+// Resolve title and optional prompt for OWS/Idioms/Synonyms/Antonyms
 function formatCardTitleAndPrompt(item: RepeatedMistakeItem): { title: string; prompt?: string } {
   const isOws = item.category === 'ows' || (item.category as string) === 'one_word';
   let raw = (item.wordOrPhrase || '').trim();
 
-  // Strip instruction prefixes
-  raw = raw.replace(/^(?:select|choose|give|find|what is)\s+(?:the\s+)?(?:one\s+word|most\s+appropriate|synonym|antonym|meaning)[^:]*:\s*/i, '').trim();
+  // If raw has an instruction pattern, isolate the target word
+  const instructionMatch = raw.match(/(?:synonym|antonym|meaning)\s+(?:of|for)\s+(?:the\s+(?:given\s+)?word\s+)?["'“]?([A-Za-z\-]{2,35})["'”]?/i);
+  if (instructionMatch && instructionMatch[1]) {
+    return { title: instructionMatch[1].toUpperCase() };
+  }
+
+  // Strip standard instruction prefixes
+  raw = raw.replace(/^(?:select|choose|give|find|what is|in the following question,? select|in the following question)\s+(?:the\s+)?(?:one\s+word|most\s+appropriate|synonym|antonym|meaning)[^:]*:\s*/i, '').trim();
+
+  // If raw contains ":", take the portion after ":" if it looks like a word
+  if (raw.includes(':') && raw.split(':').length === 2) {
+    const afterColon = raw.split(':')[1].trim().replace(/^["'“]+|["'”]+$/g, '');
+    if (afterColon.length >= 2 && afterColon.length <= 35 && !/[.?!]/.test(afterColon)) {
+      return { title: afterColon.toUpperCase() };
+    }
+  }
+
+  // If quoted word exists: "ACCRUE" -> ACCRUE
+  const quoteMatch = raw.match(/["'“]([A-Za-z\-]{2,35})["'”]/);
+  if (quoteMatch) {
+    return { title: quoteMatch[1].toUpperCase() };
+  }
 
   if (isOws) {
     // If raw is a phrase (more than 2 words, e.g. "One who knows everything")
@@ -169,26 +193,36 @@ export const RepeatedMistakesRow: React.FC<RepeatedMistakesRowProps> = ({
   const allMissingWords: RepeatedMistakeItem[] = useMemo(() => {
     const map = new Map<string, RepeatedMistakeItem>();
     
-    // 1. Add known repeated mistakes (only >= 3 wrongCount and valid vocabulary)
+    // 1. Add known repeated mistakes (only >= 3 wrongCount and strictly valid vocabulary)
     for (const it of items) {
       if (!it.wordOrPhrase) continue;
-      if (isPlaceholderConcept(it.wordOrPhrase)) continue;
-      if ((it.wrongCount || 0) < 3) continue; // STRICT >= 3 THRESHOLD
-      map.set(it.wordOrPhrase.toLowerCase().trim(), { ...it });
+      const count = it.wrongCount || 0;
+      if (count < 3) continue; // STRICT >= 3 THRESHOLD
+
+      const { title: resolvedTitle, prompt } = formatCardTitleAndPrompt(it);
+      if (isPlaceholderConcept(resolvedTitle) || isPlaceholderConcept(it.wordOrPhrase)) continue;
+
+      const key = resolvedTitle.toLowerCase().trim();
+      if (!map.has(key) || (map.get(key)!.wrongCount || 0) < count) {
+        map.set(key, { ...it, wordOrPhrase: resolvedTitle, wrongCount: count });
+      }
     }
 
-    // 2. Supplement from savedWords if marked as mistakes (strict >= 3 mistakeCount)
+    // 2. Supplement from savedWords ONLY if marked as mistakes with strict >= 3 mistakeCount
     for (const sw of fallbackSavedWords) {
       const q = sw.question;
       if (!q || !q.wordOrPhrase) continue;
-      if (isPlaceholderConcept(q.wordOrPhrase)) continue;
-      const count = sw.mistakeCount || 0;
-      if (count < 3) continue; // STRICT >= 3 THRESHOLD
+      const count = typeof sw.mistakeCount === 'number' ? sw.mistakeCount : 0;
+      if (count < 3) continue; // STRICT >= 3 THRESHOLD: MUST BE MISSED 3 OR MORE TIMES
 
-      const key = q.wordOrPhrase.toLowerCase().trim();
+      const { title: cleanTarget } = formatCardTitleAndPrompt({ wordOrPhrase: q.wordOrPhrase, category: q.category, wrongCount: count });
+      const candidateTitle = cleanTarget && !isPlaceholderConcept(cleanTarget) ? cleanTarget : q.wordOrPhrase;
+      if (isPlaceholderConcept(candidateTitle)) continue;
+
+      const key = candidateTitle.toLowerCase().trim();
       if (!map.has(key)) {
         map.set(key, {
-          wordOrPhrase: q.wordOrPhrase,
+          wordOrPhrase: candidateTitle,
           category: q.category,
           wrongCount: count,
           meaning: q.meaning,
@@ -198,7 +232,7 @@ export const RepeatedMistakesRow: React.FC<RepeatedMistakesRowProps> = ({
       }
     }
 
-    return Array.from(map.values()).sort((a, b) => b.wrongCount - a.wrongCount);
+    return Array.from(map.values()).sort((a, b) => (b.wrongCount || 0) - (a.wrongCount || 0));
   }, [items, fallbackSavedWords]);
 
   // Show first 3 cards + 1 "More" card if there are > 3 words
@@ -276,13 +310,13 @@ ${selectedWordDetail.rootEtymology ? `🧬 Root: ${selectedWordDetail.rootEtymol
 
   if (allMissingWords.length === 0) {
     return (
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-2 text-center">
+      <div className="bg-slate-900/80 border border-slate-800/80 rounded-2xl p-4 sm:p-5 space-y-2 text-center">
         <div className="flex items-center justify-center gap-2 text-emerald-400">
           <CheckCircle2 className="w-5 h-5" />
           <span className="text-xs sm:text-sm font-black text-slate-100">{title}</span>
         </div>
         <p className="text-xs text-slate-400 max-w-md mx-auto">
-          No repeated mistakes recorded yet! Words you miss 3 or more times during drills or practice will automatically appear here with their complete stored mnemonics, Hindi meanings, and exam tricks.
+          No repeated mistakes recorded! Words you miss 3 or more times during battles, drills, or practice will automatically appear here with their complete stored mnemonics, Hindi meanings, and exam revision tricks.
         </p>
       </div>
     );
@@ -303,7 +337,7 @@ ${selectedWordDetail.rootEtymology ? `🧬 Root: ${selectedWordDetail.rootEtymol
                   {title}
                 </h3>
                 <span className="px-2 py-0.5 rounded-full bg-rose-500/15 border border-rose-500/30 text-rose-300 font-mono font-bold text-[10px]">
-                  {allMissingWords.length} Words
+                  {allMissingWords.length} Words (Missed ≥3x)
                 </span>
               </div>
               <p className="text-[10px] text-slate-400 hidden sm:block">

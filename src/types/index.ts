@@ -68,6 +68,7 @@ export interface Question {
     version: string;
     enrichedAt?: number;
     provider?: string;
+    warnings?: string;
   };
   enrichmentWarning?: string;
   question?: string; // Full question prompt if applicable
