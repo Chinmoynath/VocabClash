@@ -240,6 +240,7 @@ export interface DailyStreakState {
   lastActiveDate: string; // YYYY-MM-DD
   lastActiveTimestamp: number;
   claimedToday: boolean;
+  lastClaimedBonusDate?: string; // YYYY-MM-DD representing the day the streak daily bonus (+25 LP) was claimed
   totalDaysActive: number;
   history: Record<string, boolean>; // { "2026-08-14": true }
   streakBrokenNotice?: boolean;

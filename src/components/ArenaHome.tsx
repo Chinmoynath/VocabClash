@@ -25,7 +25,7 @@ import { AdSenseUnit } from './AdSenseUnit';
 import { ADSENSE_BANNER_SLOT } from '../services/adSenseService';
 import { DailyTargetCard } from './DailyTargetCard';
 import { CadreRankCard } from './CadreRankCard';
-import { SscTop100Section } from './SscTop100Section';
+// import { SscTop100Section } from './SscTop100Section'; // Temporarily hidden; will bring back later
 import { SscTop100Category } from '../data/sscTop100';
 import { 
   EXAM_FAMILY_PILLS, 
@@ -340,7 +340,8 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
             </div>
           </div>
 
-          {/* 🔥 SSC TOP 100 Most Repeated Vocabulary Module (2-card system to fill PC mode gap, matching phone & tablet) */}
+          {/* 🔥 Top 100 Vocab Drill Module (temporarily disabled per user request; will bring back later) */}
+          {/*
           {onStartSscTop100Drill && (
             <div className="w-full pt-1">
               <SscTop100Section
@@ -350,6 +351,7 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
               />
             </div>
           )}
+          */}
         </div>
 
         {/* RIGHT COLUMN: Cadre Rank Card, Daily Target Missions, VIP / Auth (5 Cols on Desktop) */}

@@ -1,6 +1,7 @@
 import { DailyStreakState } from '../types';
 
 const STORAGE_KEY_STREAK = 'vocabclash_daily_streak_v2';
+export const STORAGE_KEY_STREAK_BONUS_CLAIMED_DATE = 'vocabclash_streak_daily_bonus_claimed_date';
 
 /**
  * Returns YYYY-MM-DD in local time
@@ -28,6 +29,40 @@ export function calculateDayDifference(dateStr1: string, dateStr2: string): numb
 }
 
 /**
+ * Checks if today's streak daily bonus (+25 LP) has already been claimed today.
+ * Strictly checks both in-memory state and localStorage to prevent multi-claiming.
+ */
+export function isDailyStreakBonusClaimed(
+  state: DailyStreakState,
+  today: string = getTodayDateString()
+): boolean {
+  if (state.lastClaimedBonusDate === today) {
+    return true;
+  }
+  if (typeof window !== 'undefined') {
+    try {
+      const localClaimedDate = localStorage.getItem(STORAGE_KEY_STREAK_BONUS_CLAIMED_DATE);
+      if (localClaimedDate === today) {
+        return true;
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return false;
+}
+
+/**
+ * Checks if user has solved at least one question today
+ */
+export function isDailyQuestionSolvedToday(
+  state: DailyStreakState,
+  today: string = getTodayDateString()
+): boolean {
+  return Boolean(state.history?.[today] || state.lastActiveDate === today);
+}
+
+/**
  * Loads stored streak from localStorage and checks for missed days
  */
 export function getInitialStreak(): DailyStreakState {
@@ -52,6 +87,7 @@ export function getInitialStreak(): DailyStreakState {
     lastActiveDate: '',
     lastActiveTimestamp: 0,
     claimedToday: false,
+    lastClaimedBonusDate: '',
     totalDaysActive: 0,
     history: {},
     streakBrokenNotice: false,
@@ -67,12 +103,13 @@ export function getInitialStreak(): DailyStreakState {
  * - If last active was >= 2 days ago: user missed a day -> streak resets to 0!
  */
 export function evaluateStreakIntegrity(state: DailyStreakState, today: string = getTodayDateString()): DailyStreakState {
+  const isBonusClaimedToday = isDailyStreakBonusClaimed(state, today);
   const lastDate = state.lastActiveDate;
   if (!lastDate) {
     return {
       ...state,
       currentStreak: 0,
-      claimedToday: false,
+      claimedToday: isBonusClaimedToday,
       streakBrokenNotice: false,
     };
   }
@@ -83,14 +120,14 @@ export function evaluateStreakIntegrity(state: DailyStreakState, today: string =
     // Solved questions today
     return {
       ...state,
-      claimedToday: true,
+      claimedToday: isBonusClaimedToday,
       streakBrokenNotice: false,
     };
   } else if (daysDiff === 1) {
     // Solved questions yesterday, streak is currently active and waiting for today's practice
     return {
       ...state,
-      claimedToday: false,
+      claimedToday: isBonusClaimedToday,
       streakBrokenNotice: false,
     };
   } else {
@@ -99,12 +136,65 @@ export function evaluateStreakIntegrity(state: DailyStreakState, today: string =
     const updated: DailyStreakState = {
       ...state,
       currentStreak: 0,
-      claimedToday: false,
+      claimedToday: isBonusClaimedToday,
       streakBrokenNotice: state.currentStreak > 0, // Flag notice if they had an active streak that was broken
     };
     saveStreakState(updated);
     return updated;
   }
+}
+
+/**
+ * Claims the daily streak bonus (+25 LP).
+ * STRICT RULE: Can only be claimed ONCE per calendar day!
+ */
+export function claimDailyStreakBonus(
+  state: DailyStreakState,
+  today: string = getTodayDateString()
+): { success: boolean; rewardLP: number; updatedStreak: DailyStreakState; error?: string } {
+  // 1. Guard against claiming more than once per day
+  if (isDailyStreakBonusClaimed(state, today)) {
+    return {
+      success: false,
+      rewardLP: 0,
+      updatedStreak: state,
+      error: 'ALREADY_CLAIMED',
+    };
+  }
+
+  // 2. Guard: Must have solved at least 1 question today
+  const isSolvedToday = isDailyQuestionSolvedToday(state, today);
+  if (!isSolvedToday) {
+    return {
+      success: false,
+      rewardLP: 0,
+      updatedStreak: state,
+      error: 'NOT_SOLVED_TODAY',
+    };
+  }
+
+  // 3. Mark claimed both in state and localStorage
+  const updated: DailyStreakState = {
+    ...state,
+    claimedToday: true,
+    lastClaimedBonusDate: today,
+  };
+
+  saveStreakState(updated);
+
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem(STORAGE_KEY_STREAK_BONUS_CLAIMED_DATE, today);
+    } catch {
+      // ignore
+    }
+  }
+
+  return {
+    success: true,
+    rewardLP: 25,
+    updatedStreak: updated,
+  };
 }
 
 /**
@@ -117,6 +207,7 @@ export function recordDailyQuestionSolved(
   state: DailyStreakState,
   today: string = getTodayDateString()
 ): { updatedStreak: DailyStreakState; isNewStreakDay: boolean } {
+  const isBonusClaimed = isDailyStreakBonusClaimed(state, today);
   const lastDate = state.lastActiveDate;
   
   if (!lastDate) {
@@ -127,7 +218,8 @@ export function recordDailyQuestionSolved(
       longestStreak: Math.max(state.longestStreak, 1),
       lastActiveDate: today,
       lastActiveTimestamp: Date.now(),
-      claimedToday: true,
+      claimedToday: isBonusClaimed,
+      lastClaimedBonusDate: state.lastClaimedBonusDate,
       totalDaysActive: (state.totalDaysActive || 0) + 1,
       history: {
         ...state.history,
@@ -145,7 +237,8 @@ export function recordDailyQuestionSolved(
     // Already solved a question today -> Streak already incremented for today
     const updated: DailyStreakState = {
       ...state,
-      claimedToday: true,
+      claimedToday: isBonusClaimed,
+      lastClaimedBonusDate: state.lastClaimedBonusDate,
       history: {
         ...state.history,
         [today]: true,
@@ -163,7 +256,8 @@ export function recordDailyQuestionSolved(
       longestStreak: Math.max(state.longestStreak, newStreak),
       lastActiveDate: today,
       lastActiveTimestamp: Date.now(),
-      claimedToday: true,
+      claimedToday: isBonusClaimed,
+      lastClaimedBonusDate: state.lastClaimedBonusDate,
       totalDaysActive: (state.totalDaysActive || 0) + 1,
       history: {
         ...state.history,
@@ -181,7 +275,8 @@ export function recordDailyQuestionSolved(
       longestStreak: Math.max(state.longestStreak, 1),
       lastActiveDate: today,
       lastActiveTimestamp: Date.now(),
-      claimedToday: true,
+      claimedToday: isBonusClaimed,
+      lastClaimedBonusDate: state.lastClaimedBonusDate,
       totalDaysActive: (state.totalDaysActive || 0) + 1,
       history: {
         ...state.history,

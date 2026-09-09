@@ -12,7 +12,12 @@ import {
   Target,
   Zap
 } from 'lucide-react';
-import { getTodayDateString } from '../utils/streakManager';
+import { 
+  getTodayDateString,
+  isDailyStreakBonusClaimed,
+  isDailyQuestionSolvedToday,
+  claimDailyStreakBonus
+} from '../utils/streakManager';
 
 interface StreakModalProps {
   streak: DailyStreakState;
@@ -29,11 +34,14 @@ export const StreakModal: React.FC<StreakModalProps> = ({
   onAddLP,
   onGoToPractice,
 }) => {
-  const [claimedBonus, setClaimedBonus] = useState<boolean>(false);
+  const todayStr = getTodayDateString();
+  const isSolvedToday = isDailyQuestionSolvedToday(streak, todayStr);
+  const isBonusAlreadyClaimed = isDailyStreakBonusClaimed(streak, todayStr);
+
+  const [claimedBonus, setClaimedBonus] = useState<boolean>(() => isBonusAlreadyClaimed);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  const todayStr = getTodayDateString();
-  const isSolvedToday = streak.history[todayStr] || streak.claimedToday;
+  const isBonusClaimed = claimedBonus || isBonusAlreadyClaimed;
 
   // Calculate 7-day recent status window
   const last7Days = Array.from({ length: 7 }, (_, i) => {
@@ -61,17 +69,41 @@ export const StreakModal: React.FC<StreakModalProps> = ({
   ];
 
   const handleClaimDailyBonus = () => {
+    // 1. Strict guard: Bonus can only be claimed ONCE per calendar day
+    if (isBonusClaimed) {
+      setToastMessage('⚠️ You have already claimed today’s streak bonus (+25 LP). Come back tomorrow!');
+      setTimeout(() => setToastMessage(null), 3000);
+      return;
+    }
+
+    // 2. Strict guard: Must have solved at least 1 question today
     if (!isSolvedToday) {
       setToastMessage('⚠️ Solve at least 1 question today to unlock the daily streak bonus!');
       setTimeout(() => setToastMessage(null), 3000);
       return;
     }
+
+    // 3. Atomically claim bonus with verification
+    const result = claimDailyStreakBonus(streak, todayStr);
+    if (!result.success) {
+      if (result.error === 'ALREADY_CLAIMED') {
+        setClaimedBonus(true);
+        setToastMessage('⚠️ You have already claimed today’s streak bonus (+25 LP). Come back tomorrow!');
+      } else {
+        setToastMessage('⚠️ Solve at least 1 question today to unlock the daily streak bonus!');
+      }
+      setTimeout(() => setToastMessage(null), 3000);
+      return;
+    }
+
     soundManager.playCorrect();
     setClaimedBonus(true);
+    onUpdateStreak(result.updatedStreak);
+
     if (onAddLP) {
-      onAddLP(25);
+      onAddLP(result.rewardLP);
     }
-    setToastMessage('🔥 +25 LP Daily Streak Bonus Claimed!');
+    setToastMessage('🔥 +25 LP Daily Streak Bonus Claimed! (Available once per day)');
     setTimeout(() => setToastMessage(null), 2500);
   };
 
@@ -241,23 +273,23 @@ export const StreakModal: React.FC<StreakModalProps> = ({
         <div className="mt-4 space-y-2 pt-2 border-t border-slate-800">
           <button
             onClick={handleClaimDailyBonus}
-            disabled={claimedBonus || !isSolvedToday}
+            disabled={isBonusClaimed || !isSolvedToday}
             className={`w-full py-3 px-4 rounded-full font-black text-xs flex items-center justify-center gap-2 shadow-lg transition-all ${
-              claimedBonus
-                ? 'bg-emerald-950 border border-emerald-600 text-emerald-300 cursor-default'
+              isBonusClaimed
+                ? 'bg-emerald-950/80 border border-emerald-600/70 text-emerald-300 cursor-default shadow-emerald-950/30'
                 : isSolvedToday
-                ? 'bg-gradient-to-r from-orange-600 via-amber-600 to-orange-600 hover:from-orange-500 hover:to-amber-500 text-white shadow-orange-950 active:scale-98'
-                : 'bg-slate-800 border border-slate-700 text-slate-400 cursor-not-allowed'
+                ? 'bg-gradient-to-r from-orange-600 via-amber-600 to-orange-600 hover:from-orange-500 hover:to-amber-500 text-white shadow-orange-950 active:scale-98 cursor-pointer'
+                : 'bg-slate-800 border border-slate-700 text-slate-400 cursor-not-allowed opacity-80'
             }`}
           >
-            {claimedBonus ? (
+            {isBonusClaimed ? (
               <>
                 <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                 <span>Today's Daily Bonus Claimed (+25 LP)</span>
               </>
             ) : isSolvedToday ? (
               <>
-                <Sparkles className="w-4 h-4" />
+                <Sparkles className="w-4 h-4 text-amber-300 animate-spin" />
                 <span>Claim Today's Streak Bonus (+25 LP)</span>
               </>
             ) : (
@@ -267,6 +299,13 @@ export const StreakModal: React.FC<StreakModalProps> = ({
               </>
             )}
           </button>
+
+          {isBonusClaimed && (
+            <p className="text-[11px] text-center text-emerald-400/90 font-semibold flex items-center justify-center gap-1.5 py-0.5">
+              <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+              <span>Claimed for today! Next bonus unlocks after midnight.</span>
+            </p>
+          )}
 
           {!isSolvedToday && onGoToPractice && (
             <button

@@ -152,7 +152,7 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ player, isPrem
               #{userRank.toLocaleString()}
             </div>
             <div className="text-[10px] text-slate-400 font-mono mt-0.5">
-              of {totalAspirantsCount.toLocaleString()}
+              of 5,000+
             </div>
           </div>
         </div>
@@ -309,7 +309,7 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ player, isPrem
                       {user.rankPoints} LP
                     </div>
                     <div className="text-[10px] text-emerald-400 font-semibold mt-0.5">
-                      {user.winRate}% Win ({user.winStreak} streak)
+                      {user.winRate}% Win
                     </div>
                   </div>
                 </div>
