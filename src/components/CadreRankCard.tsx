@@ -1,12 +1,6 @@
 import React from 'react';
 import { 
-  Target, 
-  Swords, 
-  TrendingUp, 
-  Pencil, 
-  Shield, 
-  Sparkles,
-  Award
+  Pencil 
 } from 'lucide-react';
 import { PlayerProfile } from '../types';
 import { soundManager } from '../utils/audio';
@@ -96,16 +90,16 @@ export const CadreRankCard: React.FC<CadreRankCardProps> = ({
 
   const parsedGoal = parseTargetExam(player.targetExam || 'SSC CPO - Sub-Inspector');
 
-  // Tier Medal Icon & Frame
+  // Tier Medal Icon
   const getTierInsignia = () => {
-    if (currentLP >= 3000) return { icon: '🎖️', label: 'Gazetted Cadre', border: 'border-amber-400/50', glow: 'shadow-amber-500/20' };
-    if (currentLP >= 2000) return { icon: '💎', label: 'Inspector Cadre', border: 'border-cyan-400/50', glow: 'shadow-cyan-500/20' };
-    if (currentLP >= 1200) return { icon: '🥇', label: 'Auditor Cadre', border: 'border-yellow-400/50', glow: 'shadow-yellow-500/20' };
-    if (currentLP >= 600) return { icon: '🥈', label: 'Assistant Cadre', border: 'border-slate-400/50', glow: 'shadow-slate-400/20' };
-    return { icon: '🥉', label: 'Aspirant Division', border: 'border-orange-500/40', glow: 'shadow-orange-500/20' };
+    if (currentLP >= 3000) return '🎖️';
+    if (currentLP >= 2000) return '💎';
+    if (currentLP >= 1200) return '🥇';
+    if (currentLP >= 600) return '🥈';
+    return '🥉';
   };
 
-  const insignia = getTierInsignia();
+  const tierIcon = getTierInsignia();
 
   const handleEditClick = () => {
     soundManager.playTap();
@@ -119,154 +113,83 @@ export const CadreRankCard: React.FC<CadreRankCardProps> = ({
   return (
     <div 
       id="govt-service-cadre-card"
-      className="bg-gradient-to-b from-[#0b1322] via-[#0d1629] to-[#0a0f1d] border border-cyan-500/25 hover:border-cyan-500/40 rounded-2xl p-4 sm:p-5 shadow-xl relative overflow-hidden transition-all space-y-3.5"
+      className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-sm space-y-3.5 transition-all"
     >
-      {/* Ambient background glows matching palette */}
-      <div className="absolute -top-12 -left-12 w-44 h-44 bg-[#00C4EE]/10 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute -bottom-12 -right-12 w-44 h-44 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
-
-      {/* TOP HEADER: Govt Service Rank badge + LP Score */}
-      <div className="flex items-start justify-between gap-3 relative z-10">
+      {/* Top Header: Cadre & LP */}
+      <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
-          {/* Insignia Shield Crest */}
-          <div className={`w-11 h-11 rounded-xl bg-gradient-to-br from-slate-900 to-slate-950 border ${insignia.border} flex items-center justify-center text-xl shadow-md ${insignia.glow} shrink-0`}>
-            <span>{insignia.icon}</span>
+          <div className="w-10 h-10 rounded-xl bg-slate-800/80 border border-slate-700/60 flex items-center justify-center text-xl shrink-0">
+            <span>{tierIcon}</span>
           </div>
 
           <div className="min-w-0">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-[10px] sm:text-[11px] font-black tracking-wider uppercase text-slate-300">
-                Govt Service Rank
-              </span>
-              <span className="px-2 py-0.5 bg-gradient-to-r from-amber-500/15 to-orange-500/15 text-amber-300 border border-amber-500/30 rounded-full text-[9px] font-black tracking-wide">
-                SEASON 2026
-              </span>
+            <div className="text-[10px] font-bold tracking-wider uppercase text-slate-400">
+              Govt Service Rank
             </div>
-            <h2 className="text-base sm:text-lg font-black text-amber-300 tracking-tight truncate mt-0.5">
+            <h2 className="text-base sm:text-lg font-bold text-slate-100 tracking-tight truncate mt-0.5">
               {player.tierTitle}
             </h2>
           </div>
         </div>
 
-        {/* LP Readout with Gold & Amber styling */}
+        {/* LP Score & Next Cadre Tag */}
         <div className="text-right shrink-0">
-          <div className="flex items-baseline justify-end gap-1.5">
-            <span className="text-2xl sm:text-3xl font-black font-mono tracking-tight bg-gradient-to-r from-amber-300 via-amber-400 to-orange-400 bg-clip-text text-transparent">
-              {player.rankPoints}
+          <div className="flex items-baseline justify-end gap-1">
+            <span className="text-2xl sm:text-3xl font-black font-mono tracking-tight text-amber-400">
+              {player.rankPoints.toLocaleString()}
             </span>
-            <span className="text-[10px] sm:text-xs font-black px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 uppercase font-mono">
+            <span className="text-[10px] font-bold text-amber-400/80 font-mono">
               LP
             </span>
           </div>
-          <div className="text-[10px] text-slate-400 font-medium mt-0.5">
-            League Standing
+          <div className="text-[10px] text-slate-400 font-mono mt-0.5">
+            {lpRemaining > 0 ? `${lpRemaining} LP to next tier` : 'Apex Cadre'}
           </div>
         </div>
       </div>
 
-      {/* COMBAT RECORD & WIN RATE (Redesigned: Clean, dignified capsules instead of ugly (3W/52M) brackets!) */}
-      <div className="grid grid-cols-2 gap-2 sm:gap-2.5 relative z-10">
-        {/* Win Rate Capsule */}
-        <div className="bg-slate-950/80 border border-slate-800/90 rounded-xl px-3 py-2 sm:py-2.5 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="p-1.5 rounded-lg bg-emerald-950/70 border border-emerald-500/30 text-emerald-400">
-              <TrendingUp className="w-3.5 h-3.5" />
-            </div>
-            <div>
-              <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-                Win Rate
-              </div>
-              <div className="text-sm sm:text-base font-black font-mono text-emerald-400 leading-tight">
-                {player.accuracyRate}%
-              </div>
-            </div>
-          </div>
-          <div className="text-[9px] font-black text-slate-400 font-mono px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800">
-            {player.accuracyRate >= 60 ? 'ELITE' : 'ACTIVE'}
-          </div>
-        </div>
-
-        {/* Battle Record Capsule */}
-        <div className="bg-slate-950/80 border border-slate-800/90 rounded-xl px-3 py-2 sm:py-2.5 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="p-1.5 rounded-lg bg-cyan-950/70 border border-[#00C4EE]/30 text-[#00C4EE]">
-              <Swords className="w-3.5 h-3.5" />
-            </div>
-            <div>
-              <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-                Combat Record
-              </div>
-              <div className="text-xs sm:text-sm font-black font-mono leading-tight flex items-center gap-1.5">
-                <span className="text-[#00C4EE]">{player.matchesWon} Won</span>
-                <span className="text-slate-600">•</span>
-                <span className="text-slate-300">{player.matchesPlayed} Matches</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* TARGET CADRE POST: Clean Electric Cyan Pill + Full Post Title + Sleek Change Button */}
+      {/* Target Cadre Strip (Simple, clickable) */}
       <div 
         onClick={handleEditClick}
-        className="bg-slate-950/80 hover:bg-slate-900/90 border border-slate-800/90 hover:border-cyan-500/40 rounded-xl p-2.5 relative z-10 cursor-pointer transition-all group shadow-sm flex items-center justify-between gap-2.5"
-        title="Click to switch your target exam post"
+        className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-slate-800/40 hover:bg-slate-800/70 border border-slate-800 transition-colors cursor-pointer group"
+        title="Click to change target exam"
       >
-        <div className="flex items-center gap-2.5 min-w-0 flex-1">
-          {/* Vibrant Electric Cyan Pill matching user's reference image */}
-          <div className="px-2.5 py-1 rounded-lg bg-[#00C4EE] text-slate-950 font-black text-xs tracking-wider shrink-0 shadow-sm shadow-[#00C4EE]/30 flex items-center gap-1">
-            <Target className="w-3 h-3 stroke-[2.5]" />
-            <span>{parsedGoal.tag}</span>
-          </div>
-
-          {/* Clean Post Title */}
-          <div className="min-w-0 flex-1">
-            <div className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">
-              Target Cadre Post
-            </div>
-            <div className="text-xs sm:text-sm font-bold text-slate-100 group-hover:text-cyan-200 transition-colors truncate">
-              {parsedGoal.detail}
-            </div>
-          </div>
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <span className="px-2 py-0.5 rounded-md bg-sky-500/10 border border-sky-500/20 text-sky-400 text-[10px] font-bold shrink-0">
+            {parsedGoal.tag}
+          </span>
+          <span className="text-xs text-slate-300 truncate font-medium group-hover:text-slate-100 transition-colors">
+            {parsedGoal.detail}
+          </span>
         </div>
 
-        {/* Change Goal Button */}
-        <div className="flex items-center gap-1 text-slate-400 group-hover:text-cyan-300 bg-slate-900 group-hover:bg-cyan-950/60 border border-slate-700/80 group-hover:border-cyan-500/40 px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all shrink-0">
+        <div className="flex items-center gap-1 text-[11px] text-slate-400 group-hover:text-slate-200 shrink-0 font-medium">
           <Pencil className="w-3 h-3" />
           <span>Change</span>
         </div>
       </div>
 
-      {/* CADRE PROMOTION PROGRESS BAR */}
-      <div className="space-y-1.5 relative z-10 pt-0.5">
-        <div className="flex items-center justify-between text-[11px]">
-          <span className="text-slate-300 font-bold flex items-center gap-1.5">
-            <Shield className="w-3.5 h-3.5 text-amber-400" />
-            <span>Cadre Promotion</span>
-          </span>
-          <span className="text-amber-300 font-mono font-black bg-amber-950/60 border border-amber-500/30 px-2 py-0.5 rounded-md text-[11px]">
-            {lpRemaining} LP to Next Cadre
-          </span>
-        </div>
-
-        {/* Multi-tier Gradient Bar with Stage Markers */}
-        <div className="w-full bg-slate-950/90 rounded-full h-3 overflow-hidden border border-slate-700/60 p-0.5 relative shadow-inner">
-          <div
-            className="bg-gradient-to-r from-[#00C4EE] via-amber-400 to-orange-500 h-full rounded-full transition-all duration-700 relative shadow-sm"
-            style={{ width: `${progressPercent}%` }}
-          >
-            {/* Subtle glow highlight on leading tip */}
-            {progressPercent > 5 && (
-              <div className="absolute right-0 top-0 bottom-0 w-2 bg-white/70 rounded-full blur-[1px]" />
-            )}
+      {/* Stats & Progress Section */}
+      <div className="space-y-2 pt-1 border-t border-slate-800/60">
+        <div className="flex items-center justify-between text-xs text-slate-400">
+          <div className="flex items-center gap-3">
+            <span>
+              Win Rate: <strong className="text-emerald-400 font-mono font-bold">{player.accuracyRate}%</strong>
+            </span>
+            <span className="text-slate-700">•</span>
+            <span>
+              Record: <strong className="text-slate-200 font-mono">{player.matchesWon} Won</strong> <span className="text-slate-500">/</span> <span className="font-mono">{player.matchesPlayed} Matches</span>
+            </span>
           </div>
+          <span className="font-mono text-[11px] text-slate-400">{progressPercent}%</span>
         </div>
 
-        {/* Milestone Footer */}
-        <div className="flex justify-between items-center text-[10px] text-slate-400 font-mono px-0.5">
-          <span>{prevTierLP} LP</span>
-          <span className="text-cyan-300 font-bold">{progressPercent}% Cadre Progress</span>
-          <span>{nextTierLP} LP</span>
+        {/* Minimal Progress Bar */}
+        <div className="w-full bg-slate-800/80 rounded-full h-1.5 overflow-hidden">
+          <div
+            className="bg-amber-400 h-full rounded-full transition-all duration-500"
+            style={{ width: `${progressPercent}%` }}
+          />
         </div>
       </div>
     </div>
