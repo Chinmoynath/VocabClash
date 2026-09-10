@@ -1,9 +1,28 @@
+import path from 'path';
+import fs from 'fs';
+import { pathToFileURL } from 'url';
+
 async function loadScheduler() {
+  const possiblePaths = [
+    path.resolve(process.cwd(), 'server/notificationScheduler.js'),
+    path.resolve(process.cwd(), 'notificationScheduler.js'),
+    path.resolve(process.cwd(), 'server/notificationScheduler.ts'),
+    path.resolve(process.cwd(), 'notificationScheduler.ts'),
+  ];
+
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) {
+      try {
+        return await import(pathToFileURL(p).href);
+      } catch {}
+    }
+  }
+
   try {
-    return await import('../../server/notificationScheduler.ts');
+    return await import('../../server/notificationScheduler.js');
   } catch {
     try {
-      return await import('../../server/notificationScheduler.js');
+      return await import('../../server/notificationScheduler.ts');
     } catch {
       return await import('../../server/notificationScheduler');
     }
