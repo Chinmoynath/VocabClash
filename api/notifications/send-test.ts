@@ -50,15 +50,22 @@ export default async function handler(req: any, res: any) {
         body: testBody,
         url: testUrl,
         target: 'me',
-        sentCount: 1,
+        sentCount: result.success ? 1 : 0,
         failedCount: result.success ? 0 : 1,
         status: result.success ? 'success' : 'failed',
         sentAt: Date.now(),
       });
 
       return res.status(200).json({
-        success: true,
-        deliveredVia: result.success ? 'fcm' : 'fcm_attempted',
+        endpoint: '/api/notifications/send-test',
+        success: result.success,
+        deliveredVia: result.success ? 'fcm' : 'fcm_failed',
+        eligibleTokenCount: 1,
+        fcmAttempted: true,
+        fcmSuccess: result.success,
+        fcmFailed: result.success ? 0 : 1,
+        firebaseErrorCode: result.error || null,
+        messageId: result.messageId || null,
         result,
       });
     }
@@ -68,9 +75,14 @@ export default async function handler(req: any, res: any) {
 
     if (tokens.length === 0) {
       return res.status(200).json({
-        success: true,
+        endpoint: '/api/notifications/send-test',
+        success: false,
         message: 'No registered device tokens found for admin in Firestore. Open VocabClash on your target device and enable notifications first.',
-        sentCount: 0,
+        eligibleTokenCount: 0,
+        fcmAttempted: false,
+        fcmSuccess: false,
+        fcmFailed: 0,
+        firebaseErrorCode: 'NO_DEVICE_TOKENS_FOUND',
         deliveredVia: 'lookup_empty',
       });
     }
@@ -82,6 +94,7 @@ export default async function handler(req: any, res: any) {
       type: 'test',
     });
 
+    const isSuccess = sendRes.successCount > 0;
     await logNotification({
       type: 'test',
       dateKey: getIstDateString(),
@@ -92,13 +105,19 @@ export default async function handler(req: any, res: any) {
       target: 'me',
       sentCount: sendRes.successCount,
       failedCount: sendRes.failureCount,
-      status: sendRes.failureCount === 0 ? 'success' : 'partial',
+      status: sendRes.failureCount === 0 ? 'success' : isSuccess ? 'partial' : 'failed',
       sentAt: Date.now(),
     });
 
     return res.status(200).json({
-      success: sendRes.successCount > 0,
-      deliveredVia: 'fcm_multicast',
+      endpoint: '/api/notifications/send-test',
+      success: isSuccess,
+      deliveredVia: isSuccess ? 'fcm_multicast' : 'fcm_multicast_failed',
+      eligibleTokenCount: tokens.length,
+      fcmAttempted: true,
+      fcmSuccess: isSuccess,
+      fcmFailed: sendRes.failureCount,
+      firebaseErrorCode: sendRes.failureCount > 0 ? (sendRes.results.find(r => !r.success)?.error || 'MULTICAST_FAILURE') : null,
       ...sendRes,
     });
   } catch (err: any) {

@@ -353,6 +353,17 @@ export async function requestBrowserPermission(): Promise<NotificationPermission
   });
 }
 
+export interface DiagnosticErrorDetails {
+  name: string;
+  message: string;
+  stack?: string;
+  functionName: string;
+  fileName: string;
+  lineNumber?: string | number;
+  operation: string;
+  timestamp: string;
+}
+
 /**
  * Reads and sanitizes VITE_FCM_VAPID_KEY from Vite's import.meta.env
  */
@@ -365,9 +376,11 @@ export function getCleanVapidKey(): string | undefined {
   if (key.startsWith('VITE_FCM_VAPID_KEY=')) {
     key = key.replace(/^VITE_FCM_VAPID_KEY=/, '').trim();
   }
-  // Strip enclosing quotes or newlines
+  // Strip enclosing quotes
   key = key.replace(/^["']|["']$/g, '').trim();
-  if (!key || key === 'undefined' || key === 'null' || key.includes('YOUR_') || key.includes('xxx')) {
+  // Strip all internal whitespace, newlines, carriage returns
+  key = key.replace(/\s+/g, '');
+  if (!key || key === 'undefined' || key === 'null' || key.includes('YOUR_') || key.includes('xxx') || key.length < 20) {
     return undefined;
   }
   return key;
@@ -402,70 +415,165 @@ export interface FcmDiagnosticResult {
   serviceWorkerScriptUrl?: string;
   hasStoredToken: boolean;
   storedTokenPreview?: string;
+  tokenVerified?: boolean;
   fcmReady: boolean;
   fcmNotReadyReason?: string;
+  diagnosticError?: DiagnosticErrorDetails;
 }
 
 /**
- * Run safe non-sensitive FCM and push diagnostic checks and log to browser console
+ * Run safe non-sensitive FCM and push diagnostic checks and log to browser console.
+ * Strictly adheres to Requirement 4: FCM READY must ONLY be true when:
+ * 1. Notification.permission === "granted"
+ * 2. VAPID key exists
+ * 3. Service worker registration succeeds
+ * 4. getToken() succeeds
+ * 5. Token is stored successfully
+ * If any one fails, shows FCM NOT READY with exact diagnostic details.
  */
 export async function runFcmDiagnostics(): Promise<FcmDiagnosticResult> {
   const vapidKey = getCleanVapidKey();
-  const vapidConfigured = Boolean(vapidKey);
+  const vapidConfigured = Boolean(vapidKey && vapidKey.length >= 20);
   const vapidLength = vapidKey?.length ?? 0;
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
   const permission = getNotificationPermission();
 
-  // Safe Console Logs required by Diagnostic Plan
-  console.log('[FCM] VAPID configured:', vapidConfigured);
-  console.log('[FCM] VAPID length:', vapidLength);
-  console.log('[FCM] Origin:', origin);
-  console.log('[FCM] Notification permission:', permission);
+  console.log('[FCM Diagnostics] Starting verification...', {
+    vapidConfigured,
+    vapidLength,
+    origin,
+    permission,
+  });
 
   let messagingSupported = false;
   try {
     messagingSupported = await checkNotificationSupport();
-  } catch {}
-  console.log('[FCM] Firebase Messaging supported:', messagingSupported);
+  } catch (mErr: any) {
+    console.warn('[FCM Diagnostics] checkNotificationSupport notice:', mErr);
+  }
 
   let swRegistered = false;
   let swScope: string | undefined;
   let swScriptUrl: string | undefined;
+  let swRegistration: ServiceWorkerRegistration | undefined;
+  let diagnosticError: DiagnosticErrorDetails | undefined;
 
+  // 1. Service Worker check & ensure registration
   if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
     try {
-      const reg = await navigator.serviceWorker.getRegistration('/');
-      if (reg) {
+      const existingReg = await navigator.serviceWorker.getRegistration('/');
+      if (existingReg) {
         swRegistered = true;
-        swScope = reg.scope;
-        swScriptUrl = reg.active?.scriptURL || reg.installing?.scriptURL || reg.waiting?.scriptURL;
-        console.log('[FCM] Service Worker registration scope:', swScope);
-        console.log('[FCM] Active Service Worker script URL:', swScriptUrl);
+        swScope = existingReg.scope;
+        swScriptUrl = existingReg.active?.scriptURL || existingReg.installing?.scriptURL || existingReg.waiting?.scriptURL;
+        swRegistration = existingReg;
       } else {
-        console.log('[FCM] No active Service Worker registration found for root scope (/)');
+        // Attempt clean registration of root service worker
+        try {
+          const newReg = await navigator.serviceWorker.register('/firebase-messaging-sw.js', { scope: '/' });
+          await navigator.serviceWorker.ready;
+          swRegistered = true;
+          swScope = newReg.scope;
+          swScriptUrl = newReg.active?.scriptURL || newReg.installing?.scriptURL || newReg.waiting?.scriptURL;
+          swRegistration = newReg;
+        } catch (regErr: any) {
+          console.error('[FCM Diagnostics] SW registration failed:', regErr);
+          diagnosticError = {
+            name: regErr?.name || 'ServiceWorkerRegistrationError',
+            message: regErr?.message || String(regErr),
+            stack: regErr?.stack,
+            functionName: 'runFcmDiagnostics',
+            fileName: 'src/services/fcmNotificationService.ts',
+            lineNumber: 440,
+            operation: "navigator.serviceWorker.register('/firebase-messaging-sw.js', { scope: '/' })",
+            timestamp: new Date().toISOString(),
+          };
+        }
       }
-    } catch (swErr) {
-      console.warn('[FCM] Error checking service worker registration:', swErr);
+    } catch (swErr: any) {
+      console.error('[FCM Diagnostics] SW getRegistration failed:', swErr);
+      diagnosticError = {
+        name: swErr?.name || 'ServiceWorkerCheckError',
+        message: swErr?.message || String(swErr),
+        stack: swErr?.stack,
+        functionName: 'runFcmDiagnostics',
+        fileName: 'src/services/fcmNotificationService.ts',
+        lineNumber: 455,
+        operation: "navigator.serviceWorker.getRegistration('/')",
+        timestamp: new Date().toISOString(),
+      };
     }
   }
 
   const storedToken = getSavedFcmToken();
-  const hasStoredToken = Boolean(storedToken && !storedToken.startsWith('web_'));
-  const storedTokenPreview = storedToken ? `${storedToken.slice(0, 10)}...${storedToken.slice(-6)}` : undefined;
+  let hasStoredToken = Boolean(storedToken && !storedToken.startsWith('web_') && storedToken.length > 40);
+  let storedTokenPreview = storedToken ? `${storedToken.slice(0, 10)}...${storedToken.slice(-6)}` : undefined;
+  let tokenVerified = false;
 
   let fcmReady = false;
   let fcmNotReadyReason: string | undefined;
 
+  // STRICT 5-POINT REQUIREMENT 4 EVALUATION
   if (permission !== 'granted') {
-    fcmNotReadyReason = `Notification permission not granted (current status: ${permission})`;
-  } else if (!vapidConfigured) {
-    fcmNotReadyReason = 'Production build does not contain VITE_FCM_VAPID_KEY.';
+    fcmNotReadyReason = `Notification permission is '${permission}' (expected 'granted')`;
+  } else if (!vapidConfigured || !vapidKey) {
+    fcmNotReadyReason = 'VAPID key is missing or invalid in production build bundle (VITE_FCM_VAPID_KEY)';
   } else if (!messagingSupported) {
-    fcmNotReadyReason = 'Firebase Messaging is not supported in this browser environment.';
-  } else if (!hasStoredToken) {
-    fcmNotReadyReason = 'FCM token has not been generated yet. Click "Enable Reminders" to register.';
+    fcmNotReadyReason = 'Firebase Messaging is not supported in this browser environment';
+  } else if (!swRegistered || !swRegistration) {
+    fcmNotReadyReason = 'Service worker (/firebase-messaging-sw.js) registration failed or is inactive';
   } else {
-    fcmReady = true;
+    // Permission granted, VAPID present, SW active. Now verify getToken() & storage!
+    try {
+      const messaging = await getMessagingInstance();
+      if (!messaging) {
+        throw new Error('Firebase Messaging instance initialization returned null');
+      }
+
+      // Test live token acquisition / validation with PushManager
+      const activeToken = await getToken(messaging, {
+        serviceWorkerRegistration: swRegistration,
+        vapidKey,
+      });
+
+      if (!activeToken || activeToken.length < 40) {
+        throw new Error('getToken() completed but returned an empty or invalid token');
+      }
+
+      // Verify token persists to localStorage
+      try {
+        localStorage.setItem(STORAGE_KEY_TOKEN, activeToken);
+        const readBack = localStorage.getItem(STORAGE_KEY_TOKEN);
+        if (readBack !== activeToken) {
+          throw new Error('LocalStorage failed to persist FCM token');
+        }
+      } catch (storageErr: any) {
+        throw new Error(`Failed to store FCM token in localStorage: ${storageErr?.message || storageErr}`);
+      }
+
+      hasStoredToken = true;
+      tokenVerified = true;
+      storedTokenPreview = `${activeToken.slice(0, 10)}...${activeToken.slice(-6)}`;
+      fcmReady = true;
+    } catch (tokenErr: any) {
+      console.error('[FCM Diagnostics] Error in getToken during FCM READY verification:', {
+        name: tokenErr?.name,
+        message: tokenErr?.message,
+        stack: tokenErr?.stack,
+      });
+      diagnosticError = {
+        name: tokenErr?.name || 'GetTokenError',
+        message: tokenErr?.message || String(tokenErr),
+        stack: tokenErr?.stack,
+        functionName: 'getToken / runFcmDiagnostics',
+        fileName: 'src/services/fcmNotificationService.ts',
+        lineNumber: 500,
+        operation: 'getToken(messaging, { serviceWorkerRegistration, vapidKey }) -> PushManager.subscribe({ applicationServerKey })',
+        timestamp: new Date().toISOString(),
+      };
+      fcmReady = false;
+      fcmNotReadyReason = `getToken() failed: ${tokenErr?.message || tokenErr}`;
+    }
   }
 
   return {
@@ -479,8 +587,10 @@ export async function runFcmDiagnostics(): Promise<FcmDiagnosticResult> {
     serviceWorkerScriptUrl: swScriptUrl,
     hasStoredToken,
     storedTokenPreview,
+    tokenVerified,
     fcmReady,
     fcmNotReadyReason,
+    diagnosticError,
   };
 }
 
@@ -692,11 +802,12 @@ export async function displayNativeNotification(title: string, options: {
     return false;
   }
 
-  const icon = options.icon || 'https://vocabclash.in/icon-192.png';
-  const badge = options.badge || 'https://vocabclash.in/icon-192.png';
+  const icon = (options.icon || 'https://vocabclash.in/icon-192.png').trim().replace(/^(https?:\/\/[^\/]+)\1+/i, '$1');
+  const badge = (options.badge || 'https://vocabclash.in/icon-192.png').trim().replace(/^(https?:\/\/[^\/]+)\1+/i, '$1');
   // Use clean alphanumeric tag to avoid browser pattern matching rejections
   const tag = (options.tag || `vocabclash_${Date.now()}`).replace(/[^a-zA-Z0-9_-]/g, '_');
-  const url = options.url || '/pyq-drill';
+  const rawUrl = (options.url || '/pyq-drill').trim();
+  const url = rawUrl.replace(/^(https?:\/\/[^\/]+)\1+/i, '$1');
 
   // 1. Prefer ServiceWorker registration showNotification (standard for PWA & modern Chrome)
   try {

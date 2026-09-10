@@ -22,6 +22,7 @@ import {
   Terminal,
   Radio,
   Wifi,
+  Activity,
 } from 'lucide-react';
 import { auth } from '../../services/firebaseService';
 import { 
@@ -32,6 +33,7 @@ import {
   runFcmDiagnostics,
   FcmDiagnosticResult,
   getCleanVapidKey,
+  DiagnosticErrorDetails,
 } from '../../services/fcmNotificationService';
 
 const ADMIN_EMAIL = 'nathchinmoy777@gmail.com';
@@ -119,6 +121,19 @@ export const AdminNotificationsPanel: React.FC = () => {
   const [triggeringCron, setTriggeringCron] = useState<string | null>(null);
   const [actionFeedback, setActionFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [diagnosticErrorDetails, setDiagnosticErrorDetails] = useState<DiagnosticErrorDetails | null>(null);
+  const [testAuditResult, setTestAuditResult] = useState<{
+    endpoint: string;
+    httpStatus: number;
+    contentType: string;
+    eligibleTokenCount: number;
+    fcmAttempted: boolean;
+    fcmSuccess: boolean;
+    fcmFailed: number;
+    firebaseErrorCode: string | null;
+    messageId: string | null;
+    timestamp: string;
+  } | null>(null);
 
   // Real-time IST Clock running client-side
   useEffect(() => {
@@ -225,24 +240,21 @@ export const AdminNotificationsPanel: React.FC = () => {
   const handleSendTest = async () => {
     setSendingTest(true);
     setActionFeedback(null);
+    setDiagnosticErrorDetails(null);
     try {
       const idToken = await getAdminIdToken();
       if (!idToken) throw new Error('You must be signed in as admin to send test notifications');
 
       // Use locally saved FCM token if present; otherwise pass undefined to let backend lookup admin's active device tokens
       const localToken = getSavedFcmToken() || undefined;
-
       const endpoint = '/api/notifications/send-test';
-      const sendUrl = typeof window !== 'undefined'
-        ? new URL(endpoint, window.location.origin).toString()
-        : endpoint;
 
-      console.log('[AdminPush] Dispatching test notification to:', sendUrl, {
+      console.log('[AdminPush] Dispatching isolated test notification to:', endpoint, {
         origin: typeof window !== 'undefined' ? window.location.origin : '',
         hasLocalToken: Boolean(localToken),
       });
 
-      const res = await fetch(sendUrl, {
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -262,14 +274,28 @@ export const AdminNotificationsPanel: React.FC = () => {
       if (contentType.includes('application/json')) {
         try {
           data = await res.json();
-        } catch {
-          const rawText = await res.text().catch(() => '');
-          throw new Error(`Server returned non-JSON body (HTTP ${res.status}): ${rawText.slice(0, 150)}`);
+        } catch (jErr: any) {
+          throw new Error(`Server returned non-JSON body (HTTP ${res.status}): ${jErr?.message}`);
         }
       } else {
         const rawText = await res.text().catch(() => '');
         throw new Error(`Server endpoint returned HTTP ${res.status} (${contentType || 'plain text'}): ${rawText.slice(0, 150) || 'Route missing or unreachable on production'}`);
       }
+
+      // Record live backend audit payload for Requirement 6
+      const auditPayload = {
+        endpoint,
+        httpStatus: res.status,
+        contentType,
+        eligibleTokenCount: data?.eligibleTokenCount ?? (localToken ? 1 : (statusData?.activeTokensCount || 0)),
+        fcmAttempted: Boolean(data?.fcmAttempted ?? true),
+        fcmSuccess: Boolean(res.ok && data?.success),
+        fcmFailed: data?.fcmFailed ?? (data?.success ? 0 : 1),
+        firebaseErrorCode: data?.firebaseErrorCode || (data?.success ? null : (data?.error || 'UNKNOWN_ERROR')),
+        messageId: data?.messageId || data?.result?.messageId || null,
+        timestamp: new Date().toLocaleTimeString('en-US', { timeZone: 'Asia/Kolkata' }),
+      };
+      setTestAuditResult(auditPayload);
 
       if (res.ok && data?.success) {
         if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
@@ -284,19 +310,30 @@ export const AdminNotificationsPanel: React.FC = () => {
 
         setActionFeedback({
           type: 'success',
-          text: `⚡ Test notification sent successfully! (${deliveryMsg})`,
+          text: `⚡ Real FCM Push Delivered! (${deliveryMsg})`,
         });
         fetchStatusAndLogs();
         runDiagnostics();
       } else {
-        throw new Error(data?.error || `Failed to send test push (HTTP ${res.status})`);
+        throw new Error(data?.message || data?.error || data?.firebaseErrorCode || `Failed to send test push (HTTP ${res.status})`);
       }
     } catch (err: any) {
-      console.error('[AdminPanel] Error sending test push [AdminNotificationsPanel.tsx]:', {
+      console.error('[AdminPanel] Error in handleSendTest [AdminNotificationsPanel.tsx]:', {
         name: err?.name,
         message: err?.message,
         stack: err?.stack,
       });
+      const errorObj: DiagnosticErrorDetails = {
+        name: err?.name || 'Error',
+        message: err?.message || String(err),
+        stack: err?.stack,
+        functionName: 'handleSendTest',
+        fileName: 'src/components/admin/AdminNotificationsPanel.tsx',
+        lineNumber: 247,
+        operation: "fetch('/api/notifications/send-test')",
+        timestamp: new Date().toISOString(),
+      };
+      setDiagnosticErrorDetails(errorObj);
       const rawErr = err?.message || String(err);
       setActionFeedback({ 
         type: 'error', 
@@ -311,16 +348,13 @@ export const AdminNotificationsPanel: React.FC = () => {
     setShowConfirmModal(false);
     setSendingBroadcast(true);
     setActionFeedback(null);
+    setDiagnosticErrorDetails(null);
     try {
       const idToken = await getAdminIdToken();
       if (!idToken) throw new Error('You must be signed in as admin to broadcast notifications');
 
       const endpoint = '/api/notifications/send-admin';
-      const sendUrl = typeof window !== 'undefined'
-        ? new URL(endpoint, window.location.origin).toString()
-        : endpoint;
-
-      const res = await fetch(sendUrl, {
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -361,6 +395,17 @@ export const AdminNotificationsPanel: React.FC = () => {
       }
     } catch (err: any) {
       console.error('[AdminPanel] Error executing broadcast:', err);
+      const errorObj: DiagnosticErrorDetails = {
+        name: err?.name || 'Error',
+        message: err?.message || String(err),
+        stack: err?.stack,
+        functionName: 'handleSendBroadcast',
+        fileName: 'src/components/admin/AdminNotificationsPanel.tsx',
+        lineNumber: 350,
+        operation: "fetch('/api/notifications/send-admin')",
+        timestamp: new Date().toISOString(),
+      };
+      setDiagnosticErrorDetails(errorObj);
       const rawErr = err?.message || String(err);
       setActionFeedback({ 
         type: 'error', 
@@ -374,14 +419,11 @@ export const AdminNotificationsPanel: React.FC = () => {
   const handleTriggerCron = async (slot: 'morning' | 'evening') => {
     setTriggeringCron(slot);
     setActionFeedback(null);
+    setDiagnosticErrorDetails(null);
     try {
       const idToken = await getAdminIdToken();
       const endpoint = '/api/notifications/cron-dispatch';
-      const sendUrl = typeof window !== 'undefined'
-        ? new URL(endpoint, window.location.origin).toString()
-        : endpoint;
-
-      const res = await fetch(sendUrl, {
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -416,6 +458,17 @@ export const AdminNotificationsPanel: React.FC = () => {
         throw new Error(data?.error || `Failed to trigger cron (HTTP ${res.status})`);
       }
     } catch (err: any) {
+      const errorObj: DiagnosticErrorDetails = {
+        name: err?.name || 'Error',
+        message: err?.message || String(err),
+        stack: err?.stack,
+        functionName: 'handleTriggerCron',
+        fileName: 'src/components/admin/AdminNotificationsPanel.tsx',
+        lineNumber: 415,
+        operation: "fetch('/api/notifications/cron-dispatch')",
+        timestamp: new Date().toISOString(),
+      };
+      setDiagnosticErrorDetails(errorObj);
       setActionFeedback({ type: 'error', text: err?.message || 'Error triggering scheduler' });
     } finally {
       setTriggeringCron(null);
@@ -479,6 +532,124 @@ export const AdminNotificationsPanel: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Requirement 3: Development Diagnostic Error Block */}
+      {(diagnosticErrorDetails || diagResult?.diagnosticError) && (
+        <div className="p-5 rounded-2xl bg-rose-950/40 border border-rose-500/50 text-rose-200 text-xs font-mono space-y-3 shadow-2xl">
+          <div className="flex items-center justify-between border-b border-rose-500/30 pb-2">
+            <div className="font-bold text-rose-300 flex items-center gap-2 uppercase tracking-wider text-[11px]">
+              <AlertTriangle className="w-4 h-4 text-rose-400" />
+              <span>Exact Diagnostic Exception Capture</span>
+            </div>
+            <button
+              onClick={() => {
+                setDiagnosticErrorDetails(null);
+                if (diagResult) {
+                  setDiagResult({ ...diagResult, diagnosticError: undefined });
+                }
+              }}
+              className="text-rose-400 hover:text-rose-200 text-[10px] underline"
+            >
+              Dismiss
+            </button>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px]">
+            <div>
+              <strong className="text-slate-400">Error Name:</strong>{' '}
+              <span className="text-amber-300">{(diagnosticErrorDetails || diagResult?.diagnosticError)?.name}</span>
+            </div>
+            <div>
+              <strong className="text-slate-400">Function:</strong>{' '}
+              <span className="text-sky-300">{(diagnosticErrorDetails || diagResult?.diagnosticError)?.functionName}</span>
+            </div>
+            <div>
+              <strong className="text-slate-400">File:</strong>{' '}
+              <span className="text-sky-300">{(diagnosticErrorDetails || diagResult?.diagnosticError)?.fileName}</span>
+            </div>
+            <div>
+              <strong className="text-slate-400">Line:</strong>{' '}
+              <span className="text-sky-300">{(diagnosticErrorDetails || diagResult?.diagnosticError)?.lineNumber}</span>
+            </div>
+            <div className="md:col-span-2">
+              <strong className="text-slate-400">Operation:</strong>{' '}
+              <span className="text-orange-300">{(diagnosticErrorDetails || diagResult?.diagnosticError)?.operation}</span>
+            </div>
+            <div className="md:col-span-2">
+              <strong className="text-slate-400">Error Message:</strong>{' '}
+              <span className="text-rose-300 font-semibold">{(diagnosticErrorDetails || diagResult?.diagnosticError)?.message}</span>
+            </div>
+          </div>
+          {(diagnosticErrorDetails || diagResult?.diagnosticError)?.stack && (
+            <div className="mt-2 pt-2 border-t border-rose-500/20">
+              <div className="text-[10px] text-slate-400 mb-1 font-sans font-bold">Stack Trace:</div>
+              <pre className="p-2.5 bg-black/60 rounded-xl text-[10px] text-rose-300/90 whitespace-pre-wrap overflow-x-auto max-h-48">
+                {(diagnosticErrorDetails || diagResult?.diagnosticError)?.stack}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Requirement 6: Manual Test Send Backend Response Audit */}
+      {testAuditResult && (
+        <div className="p-4 rounded-2xl bg-slate-900 border border-slate-700 text-xs font-mono space-y-3 shadow-xl">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+            <div className="flex items-center gap-2 text-slate-200 font-sans font-bold text-xs">
+              <Activity className="w-4 h-4 text-sky-400" />
+              <span>Manual Test Send Audit Log ({testAuditResult.timestamp})</span>
+            </div>
+            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold font-sans ${
+              testAuditResult.fcmSuccess 
+                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' 
+                : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+            }`}>
+              {testAuditResult.fcmSuccess ? 'FCM_SUCCESS' : 'FCM_FAILED'}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px]">
+            <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+              <span className="text-slate-400 block text-[10px]">Endpoint:</span>
+              <span className="text-sky-300 font-bold">{testAuditResult.endpoint}</span>
+            </div>
+            <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+              <span className="text-slate-400 block text-[10px]">HTTP Status:</span>
+              <span className={`font-bold ${testAuditResult.httpStatus === 200 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {testAuditResult.httpStatus}
+              </span>
+            </div>
+            <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+              <span className="text-slate-400 block text-[10px]">Content-Type:</span>
+              <span className="text-slate-200 truncate block">{testAuditResult.contentType || 'none'}</span>
+            </div>
+            <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+              <span className="text-slate-400 block text-[10px]">Eligible Tokens:</span>
+              <span className="text-amber-300 font-bold">{testAuditResult.eligibleTokenCount}</span>
+            </div>
+            <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+              <span className="text-slate-400 block text-[10px]">FCM Attempted:</span>
+              <span className="text-slate-200 font-bold">{testAuditResult.fcmAttempted ? 'Yes' : 'No'}</span>
+            </div>
+            <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+              <span className="text-slate-400 block text-[10px]">FCM Success:</span>
+              <span className={`font-bold ${testAuditResult.fcmSuccess ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {testAuditResult.fcmSuccess ? 'true' : 'false'}
+              </span>
+            </div>
+            <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+              <span className="text-slate-400 block text-[10px]">FCM Failed:</span>
+              <span className={`font-bold ${testAuditResult.fcmFailed > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                {testAuditResult.fcmFailed}
+              </span>
+            </div>
+            <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+              <span className="text-slate-400 block text-[10px]">Firebase Error Code:</span>
+              <span className={`font-bold ${testAuditResult.firebaseErrorCode ? 'text-rose-400' : 'text-emerald-400'}`}>
+                {testAuditResult.firebaseErrorCode || 'NONE'}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Action feedback */}
       {actionFeedback && (
@@ -609,27 +780,28 @@ export const AdminNotificationsPanel: React.FC = () => {
           </div>
         </div>
 
-        {/* Diagnostic Metrics Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-4 text-xs">
+        {/* Diagnostic Metrics Grid - 5 Critical Points for FCM READY */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 pt-4 text-xs">
           <div className="bg-slate-950/70 p-3 rounded-2xl border border-slate-800">
-            <div className="text-slate-400 font-semibold mb-1">1. VAPID Key (Build-Time)</div>
+            <div className="text-slate-400 font-semibold mb-1">1. VAPID Key</div>
             {diagResult?.vapidConfigured ? (
               <div className="text-emerald-400 font-bold flex items-center gap-1">
-                <Check className="w-3.5 h-3.5" /> Present in Bundle ({diagResult.vapidLength} chars)
+                <Check className="w-3.5 h-3.5" /> Present ({diagResult.vapidLength} chars)
               </div>
             ) : (
               <div className="text-rose-400 font-bold flex items-center gap-1">
-                <AlertTriangle className="w-3.5 h-3.5" /> Missing in Bundle
+                <AlertTriangle className="w-3.5 h-3.5" /> Missing
               </div>
             )}
-            <div className="text-[10px] text-slate-500 mt-1 font-mono">
+            <div className="text-[10px] text-slate-500 mt-1 font-mono truncate">
               VITE_FCM_VAPID_KEY
             </div>
           </div>
 
           <div className="bg-slate-950/70 p-3 rounded-2xl border border-slate-800">
-            <div className="text-slate-400 font-semibold mb-1">2. Notification Permission</div>
-            <div className={`font-bold capitalize ${diagResult?.permission === 'granted' ? 'text-emerald-400' : 'text-amber-400'}`}>
+            <div className="text-slate-400 font-semibold mb-1">2. Permission</div>
+            <div className={`font-bold capitalize flex items-center gap-1 ${diagResult?.permission === 'granted' ? 'text-emerald-400' : 'text-amber-400'}`}>
+              {diagResult?.permission === 'granted' ? <Check className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
               {diagResult?.permission || 'Checking...'}
             </div>
             <div className="text-[10px] text-slate-500 mt-1">
@@ -638,12 +810,35 @@ export const AdminNotificationsPanel: React.FC = () => {
           </div>
 
           <div className="bg-slate-950/70 p-3 rounded-2xl border border-slate-800">
-            <div className="text-slate-400 font-semibold mb-1">3. Service Worker Scope</div>
-            <div className="text-slate-200 font-mono text-[11px] truncate">
-              {diagResult?.serviceWorkerScope || '/ (Root Scope)'}
+            <div className="text-slate-400 font-semibold mb-1">3. Service Worker</div>
+            <div className={`font-bold flex items-center gap-1 ${diagResult?.serviceWorkerActive ? 'text-emerald-400' : 'text-amber-400'}`}>
+              {diagResult?.serviceWorkerActive ? <Check className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
+              {diagResult?.serviceWorkerActive ? 'Registered & Active' : 'Not Active'}
             </div>
-            <div className="text-[10px] text-slate-500 mt-1">
+            <div className="text-[10px] text-slate-500 mt-1 font-mono truncate">
               /firebase-messaging-sw.js
+            </div>
+          </div>
+
+          <div className="bg-slate-950/70 p-3 rounded-2xl border border-slate-800">
+            <div className="text-slate-400 font-semibold mb-1">4. getToken()</div>
+            <div className={`font-bold flex items-center gap-1 ${diagResult?.tokenObtained ? 'text-emerald-400' : 'text-rose-400'}`}>
+              {diagResult?.tokenObtained ? <Check className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
+              {diagResult?.tokenObtained ? 'Verified' : 'Failed'}
+            </div>
+            <div className="text-[10px] text-slate-500 mt-1 font-mono truncate">
+              PushManager.subscribe()
+            </div>
+          </div>
+
+          <div className="bg-slate-950/70 p-3 rounded-2xl border border-slate-800">
+            <div className="text-slate-400 font-semibold mb-1">5. Token Storage</div>
+            <div className={`font-bold flex items-center gap-1 ${diagResult?.savedTokenPresent ? 'text-emerald-400' : 'text-amber-400'}`}>
+              {diagResult?.savedTokenPresent ? <Check className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
+              {diagResult?.savedTokenPresent ? 'Persisted' : 'None'}
+            </div>
+            <div className="text-[10px] text-slate-500 mt-1 font-mono truncate">
+              fcm_token cache
             </div>
           </div>
         </div>

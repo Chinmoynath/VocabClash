@@ -1484,14 +1484,6 @@ app.post('/api/notifications/send-test', async (req, res) => {
         } catch {}
       }
 
-      emitLiveNotification({
-        title: testTitle,
-        body: testBody,
-        url: testUrl,
-        type: 'test',
-        target: 'me',
-      });
-
       await logNotification({
         type: 'test',
         dateKey: getIstDateString(),
@@ -1500,32 +1492,41 @@ app.post('/api/notifications/send-test', async (req, res) => {
         body: testBody,
         url: testUrl,
         target: 'me',
-        sentCount: 1,
-        failedCount: 0,
-        status: 'success',
+        sentCount: result.success ? 1 : 0,
+        failedCount: result.success ? 0 : 1,
+        status: result.success ? 'success' : 'failed',
         sentAt: Date.now(),
       });
 
       return res.json({ 
-        success: true, 
-        deliveredVia: result.success ? 'fcm_and_live_stream' : 'live_stream',
+        endpoint: '/api/notifications/send-test',
+        success: result.success, 
+        deliveredVia: result.success ? 'fcm' : 'fcm_failed',
+        eligibleTokenCount: 1,
+        fcmAttempted: true,
+        fcmSuccess: result.success,
+        fcmFailed: result.success ? 0 : 1,
+        firebaseErrorCode: result.error || null,
+        messageId: result.messageId || null,
         result 
       });
     }
 
     // Otherwise find admin tokens
     const { tokens } = await getTokensForTarget('me', authCheck.uid);
-    
-    emitLiveNotification({
-      title: testTitle,
-      body: testBody,
-      url: testUrl,
-      type: 'test',
-      target: 'me',
-    });
 
     if (tokens.length === 0) {
-      return res.json({ success: true, message: 'Test notification broadcasted to active admin sessions.' });
+      return res.json({ 
+        endpoint: '/api/notifications/send-test',
+        success: false, 
+        message: 'No registered device tokens found for admin in Firestore. Open VocabClash on your target device and enable notifications first.',
+        eligibleTokenCount: 0,
+        fcmAttempted: false,
+        fcmSuccess: false,
+        fcmFailed: 0,
+        firebaseErrorCode: 'NO_DEVICE_TOKENS_FOUND',
+        deliveredVia: 'lookup_empty',
+      });
     }
 
     const sendRes = await sendMulticastPush(tokens, {
@@ -1535,6 +1536,7 @@ app.post('/api/notifications/send-test', async (req, res) => {
       type: 'test',
     });
 
+    const isSuccess = sendRes.successCount > 0;
     await logNotification({
       type: 'test',
       dateKey: getIstDateString(),
@@ -1545,11 +1547,21 @@ app.post('/api/notifications/send-test', async (req, res) => {
       target: 'me',
       sentCount: sendRes.successCount,
       failedCount: sendRes.failureCount,
-      status: sendRes.failureCount === 0 ? 'success' : 'partial',
+      status: sendRes.failureCount === 0 ? 'success' : isSuccess ? 'partial' : 'failed',
       sentAt: Date.now(),
     });
 
-    res.json({ success: sendRes.successCount > 0, ...sendRes });
+    res.json({ 
+      endpoint: '/api/notifications/send-test',
+      success: isSuccess, 
+      deliveredVia: isSuccess ? 'fcm_multicast' : 'fcm_multicast_failed',
+      eligibleTokenCount: tokens.length,
+      fcmAttempted: true,
+      fcmSuccess: isSuccess,
+      fcmFailed: sendRes.failureCount,
+      firebaseErrorCode: sendRes.failureCount > 0 ? (sendRes.results.find(r => !r.success)?.error || 'MULTICAST_FAILURE') : null,
+      ...sendRes 
+    });
   } catch (err: any) {
     console.error('Error in /api/notifications/send-test:', err);
     res.status(500).json({ error: err?.message || 'Failed to send test push notification' });
