@@ -1,10 +1,4 @@
-// Explicitly configure Vercel Serverless Function Node.js runtime
-export const config = {
-  runtime: 'nodejs',
-  maxDuration: 15,
-};
-
-import { getNotificationSystemStatus } from '../../server/notificationScheduler.js';
+import { getNotificationSchedulerModule } from '../_utils/loadServerModules.js';
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -15,6 +9,7 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
+    const { getNotificationSystemStatus } = await getNotificationSchedulerModule();
     const status = getNotificationSystemStatus();
     return res.status(200).json({ success: true, ...status });
   } catch (err: any) {

@@ -977,7 +977,6 @@ export async function setupForegroundMessageListener(
 
   // 2. Setup Real-time Server-Sent Events (SSE) stream for instantaneous multi-device alerts
   let eventSource: EventSource | null = null;
-  let pollingInterval: any = null;
   let lastCheckedTime = Date.now() - 60000;
 
   const handleIncomingBroadcast = (ev: {
@@ -1064,12 +1063,23 @@ export async function setupForegroundMessageListener(
     }
   };
 
+  let failureCount = 0;
+  let pollTimeout: any = null;
+
   const startPolling = () => {
-    if (pollingInterval || isCleanedUp) return;
+    if (pollTimeout || isCleanedUp) return;
+
+    const scheduleNext = (delayMs: number) => {
+      if (isCleanedUp) return;
+      pollTimeout = setTimeout(poll, delayMs);
+    };
+
     const poll = async () => {
+      if (isCleanedUp) return;
       try {
         const res = await fetch(`/api/notifications/live-broadcast?since=${lastCheckedTime}`);
         if (res.ok) {
+          failureCount = 0;
           const data = await res.json();
           if (data.events && Array.isArray(data.events)) {
             for (const ev of data.events) {
@@ -1079,12 +1089,38 @@ export async function setupForegroundMessageListener(
           if (data.timestamp) {
             lastCheckedTime = data.timestamp;
           }
+          // On success, continue normal polling every 8 seconds
+          scheduleNext(8000);
+        } else {
+          failureCount++;
+          if (failureCount === 1) {
+            console.warn('[LiveBroadcast] Polling error (status ' + res.status + '). Backoff 1: retrying in 5s...');
+            scheduleNext(5000);
+          } else if (failureCount === 2) {
+            console.warn('[LiveBroadcast] Polling error (status ' + res.status + '). Backoff 2: retrying in 15s...');
+            scheduleNext(15000);
+          } else if (failureCount === 3) {
+            console.warn('[LiveBroadcast] Polling error (status ' + res.status + '). Backoff 3: retrying in 30s...');
+            scheduleNext(30000);
+          } else {
+            console.warn('[LiveBroadcast] Polling failed 3 consecutive times. Stopped polling to prevent log storms. Backend live broadcast offline.');
+          }
         }
-      } catch {}
+      } catch (err) {
+        failureCount++;
+        if (failureCount === 1) {
+          scheduleNext(5000);
+        } else if (failureCount === 2) {
+          scheduleNext(15000);
+        } else if (failureCount === 3) {
+          scheduleNext(30000);
+        } else {
+          console.warn('[LiveBroadcast] Polling network failures exceeded limit. Pausing polling.');
+        }
+      }
     };
 
     poll();
-    pollingInterval = setInterval(poll, 4000);
   };
 
   startStream();
@@ -1095,9 +1131,9 @@ export async function setupForegroundMessageListener(
       eventSource.close();
       eventSource = null;
     }
-    if (pollingInterval) {
-      clearInterval(pollingInterval);
-      pollingInterval = null;
+    if (pollTimeout) {
+      clearTimeout(pollTimeout);
+      pollTimeout = null;
     }
   };
 }

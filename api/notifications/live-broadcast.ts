@@ -1,10 +1,4 @@
-// Explicitly configure Vercel Serverless Function Node.js runtime
-export const config = {
-  runtime: 'nodejs',
-  maxDuration: 15,
-};
-
-import { getRecentBroadcastEvents } from '../../server/notificationScheduler.js';
+import { getNotificationSchedulerModule } from '../_utils/loadServerModules.js';
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -15,6 +9,7 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
+    const { getRecentBroadcastEvents } = await getNotificationSchedulerModule();
     const since = Number(req.query?.since) || (Date.now() - 60000);
     const events = getRecentBroadcastEvents(since);
     return res.status(200).json({ success: true, events, timestamp: Date.now() });

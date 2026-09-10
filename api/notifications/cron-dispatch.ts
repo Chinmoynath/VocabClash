@@ -1,11 +1,4 @@
-// Explicitly configure Vercel Serverless Function Node.js runtime
-export const config = {
-  runtime: 'nodejs',
-  maxDuration: 15,
-};
-
-import { verifyAdminAuth } from '../../server/firebaseAdmin.js';
-import { dispatchMorningReminder, dispatchEveningReminder } from '../../server/notificationScheduler.js';
+import { getFirebaseAdminModule, getNotificationSchedulerModule } from '../_utils/loadServerModules.js';
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -20,6 +13,9 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
+    const { verifyAdminAuth } = await getFirebaseAdminModule();
+    const { dispatchMorningReminder, dispatchEveningReminder } = await getNotificationSchedulerModule();
+
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
     const { slot, force, secret, idToken } = body;
     const cronSecret = process.env.CRON_SECRET || 'vocabclash_cron_internal_2026';

@@ -1,23 +1,4 @@
-// Explicitly configure Vercel Serverless Function Node.js runtime
-export const config = {
-  runtime: 'nodejs',
-  maxDuration: 15,
-};
-
-import {
-  verifyAdminAuth,
-  sendMulticastPush,
-  getFirebaseAdminApp,
-  checkFirebaseAdminCredentials,
-  ADMIN_EMAIL,
-} from '../../server/firebaseAdmin.js';
-import {
-  getTokensForTarget,
-  logNotification,
-  getIstDateString,
-  removeDeviceToken,
-  emitLiveNotification,
-} from '../../server/notificationScheduler.js';
+import { getFirebaseAdminModule, getNotificationSchedulerModule } from '../_utils/loadServerModules.js';
 
 export default async function handler(req: any, res: any) {
   let stage = 'start';
@@ -39,7 +20,26 @@ export default async function handler(req: any, res: any) {
     });
   }
 
+  let checkFirebaseAdminCredentialsFn: any = null;
+
   try {
+    const {
+      verifyAdminAuth,
+      sendMulticastPush,
+      getFirebaseAdminApp,
+      checkFirebaseAdminCredentials,
+      ADMIN_EMAIL,
+    } = await getFirebaseAdminModule();
+    checkFirebaseAdminCredentialsFn = checkFirebaseAdminCredentials;
+
+    const {
+      getTokensForTarget,
+      logNotification,
+      getIstDateString,
+      removeDeviceToken,
+      emitLiveNotification,
+    } = await getNotificationSchedulerModule();
+
     // 1. Auth verification stage
     stage = 'auth-verification';
     const authHeader = req.headers?.authorization || '';
@@ -186,7 +186,7 @@ export default async function handler(req: any, res: any) {
 
     let credsStatus;
     try {
-      credsStatus = checkFirebaseAdminCredentials?.();
+      credsStatus = checkFirebaseAdminCredentialsFn?.();
     } catch {}
 
     return res.status(500).json({
