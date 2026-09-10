@@ -30,10 +30,12 @@ export default async function handler(req: any, res: any) {
       },
     });
   } catch (err: any) {
-    return res.status(500).json({
+    return res.status(200).json({
       ok: false,
       success: false,
       endpoint: '/api/notifications/status',
+      activeTokensCount: 0,
+      logsCount: 0,
       error: err?.message || 'Failed to get status',
     });
   }

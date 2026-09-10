@@ -129,18 +129,12 @@ export function createGoogleProvider(): GoogleAuthProvider {
 
 export const googleProvider = createGoogleProvider();
 
-// Initialize Firestore with auto-detect long polling to establish fast streams and gracefully fallback
+// Initialize Firestore instance with project database ID
 let dbInstance: ReturnType<typeof getFirestore>;
 try {
-  dbInstance = initializeFirestore(
-    app,
-    {
-      experimentalAutoDetectLongPolling: true,
-    },
-    firebaseConfig.firestoreDatabaseId || undefined
-  );
-} catch {
   dbInstance = getFirestore(app, firebaseConfig.firestoreDatabaseId || undefined);
+} catch {
+  dbInstance = getFirestore(app);
 }
 
 export const db = dbInstance;
