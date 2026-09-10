@@ -1,5 +1,5 @@
-import { getNotificationSystemStatus } from '../_lib/notificationScheduler.js';
-import { checkFirebaseAdminCredentials } from '../_lib/firebaseAdmin.js';
+import { getNotificationSystemStatus } from '../_lib/notificationScheduler';
+import { checkFirebaseAdminCredentials } from '../_lib/firebaseAdmin';
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');

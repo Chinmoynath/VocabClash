@@ -1,4 +1,4 @@
-import { saveUserPreferences } from '../_lib/notificationScheduler.js';
+import { saveUserPreferences } from '../_lib/notificationScheduler';
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');

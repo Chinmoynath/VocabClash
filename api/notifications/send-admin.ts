@@ -3,14 +3,14 @@ import {
   sendMulticastPush,
   checkFirebaseAdminCredentials,
   validateNotificationInput,
-} from '../_lib/firebaseAdmin.js';
+} from '../_lib/firebaseAdmin';
 import {
   getTokensForTarget,
   logNotification,
   getIstDateString,
   removeDeviceToken,
   emitLiveNotification,
-} from '../_lib/notificationScheduler.js';
+} from '../_lib/notificationScheduler';
 
 export default async function handler(req: any, res: any) {
   // 1. CORS headers

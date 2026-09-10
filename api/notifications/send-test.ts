@@ -2,13 +2,13 @@ import {
   verifyAdminAuth,
   sendPushToToken,
   checkFirebaseAdminCredentials,
-} from '../_lib/firebaseAdmin.js';
+} from '../_lib/firebaseAdmin';
 import {
   getTokensForTarget,
   logNotification,
   getIstDateString,
   removeDeviceToken,
-} from '../_lib/notificationScheduler.js';
+} from '../_lib/notificationScheduler';
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
