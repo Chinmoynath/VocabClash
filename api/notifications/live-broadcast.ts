@@ -1,4 +1,4 @@
-import { getNotificationSchedulerModule } from '../_utils/loadServerModules.js';
+import { getRecentBroadcastEvents } from '../_lib/notificationScheduler.js';
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -9,7 +9,6 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const { getRecentBroadcastEvents } = await getNotificationSchedulerModule();
     const since = Number(req.query?.since) || (Date.now() - 60000);
     const events = getRecentBroadcastEvents(since);
     return res.status(200).json({ success: true, events, timestamp: Date.now() });

@@ -1,4 +1,4 @@
-import { getNotificationSchedulerModule } from '../_utils/loadServerModules.js';
+import { saveUserPreferences } from '../_lib/notificationScheduler.js';
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -13,7 +13,6 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const { saveUserPreferences } = await getNotificationSchedulerModule();
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
     const { uid, preferences } = body;
     if (!uid) {

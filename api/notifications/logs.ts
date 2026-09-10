@@ -1,4 +1,5 @@
-import { getFirebaseAdminModule, getNotificationSchedulerModule } from '../_utils/loadServerModules.js';
+import { verifyAdminAuth } from '../_lib/firebaseAdmin.js';
+import { getRecentNotificationLogs } from '../_lib/notificationScheduler.js';
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -9,9 +10,6 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const { verifyAdminAuth } = await getFirebaseAdminModule();
-    const { getRecentNotificationLogs } = await getNotificationSchedulerModule();
-
     const authHeader = req.headers.authorization || '';
     const idToken = authHeader.replace(/^Bearer\s+/i, '') || (req.query?.idToken as string);
 

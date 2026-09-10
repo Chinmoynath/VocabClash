@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build && esbuild server/firebaseAdmin.ts server/notificationScheduler.ts --bundle --platform=node --format=esm --packages=external --outdir=server && esbuild server/firebaseAdmin.ts server/notificationScheduler.ts --bundle --platform=node --format=cjs --packages=external --outdir=server --out-extension:.js=.cjs && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs && mkdir -p build && cp -r dist/* build/",
+    "build": "vite build && esbuild api/_lib/firebaseAdmin.ts api/_lib/notificationScheduler.ts --bundle --platform=node --format=esm --packages=external --allow-overwrite --outdir=api/_lib && esbuild server/firebaseAdmin.ts server/notificationScheduler.ts --bundle --platform=node --format=esm --packages=external --allow-overwrite --outdir=server && esbuild server/firebaseAdmin.ts server/notificationScheduler.ts --bundle --platform=node --format=cjs --packages=external --allow-overwrite --outdir=server --out-extension:.js=.cjs && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs && mkdir -p build && cp -r dist/* build/",
     "start": "node dist/server.cjs",
     "preview": "vite preview",
     "clean": "rm -rf dist build server.js",

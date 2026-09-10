@@ -1,4 +1,4 @@
-import { getNotificationSchedulerModule } from '../_utils/loadServerModules.js';
+import { registerDeviceToken } from '../_lib/notificationScheduler.js';
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -13,7 +13,6 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const { registerDeviceToken } = await getNotificationSchedulerModule();
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
     const { token, uid, platform, timezone, targetExam, userAgent } = body;
     if (!token) {

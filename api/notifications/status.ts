@@ -1,4 +1,4 @@
-import { getNotificationSchedulerModule } from '../_utils/loadServerModules.js';
+import { getNotificationSystemStatus } from '../_lib/notificationScheduler.js';
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -9,7 +9,6 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const { getNotificationSystemStatus } = await getNotificationSchedulerModule();
     const status = getNotificationSystemStatus();
     return res.status(200).json({ success: true, ...status });
   } catch (err: any) {
