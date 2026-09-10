@@ -357,6 +357,29 @@ export async function requestBrowserPermission(): Promise<NotificationPermission
 export const DEFAULT_VAPID_PUBLIC_KEY = 'BN7hCXmy_uYeEvhz6-LzgzmpFqJA1-SxbP_a4ixQ8DfHzG2ePkDxdZ3EeAZrMJ-DTjbhgGDcgw4L3X97gHHIMFU';
 
 /**
+ * Converts a Base64/Base64URL VAPID public key string into a Uint8Array buffer
+ * with strict padding to prevent browser "string did not match expected pattern" exceptions.
+ */
+export function urlBase64ToUint8Array(base64String: string): Uint8Array {
+  const clean = (base64String || DEFAULT_VAPID_PUBLIC_KEY).trim().replace(/^["']|["']$/g, '');
+  const padding = '='.repeat((4 - (clean.length % 4)) % 4);
+  const base64 = (clean + padding)
+    .replace(/-/g, '+')
+    .replace(/_/g, '/');
+
+  try {
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+    for (let i = 0; i < rawData.length; ++i) {
+      outputArray[i] = rawData.charCodeAt(i);
+    }
+    return outputArray;
+  } catch {
+    return new Uint8Array(65);
+  }
+}
+
+/**
  * Sanitize and validate VAPID public key
  */
 export function sanitizeVapidKey(rawKey?: string): string {
@@ -364,16 +387,14 @@ export function sanitizeVapidKey(rawKey?: string): string {
   if (!candidate || typeof candidate !== 'string') return DEFAULT_VAPID_PUBLIC_KEY;
   
   // Strip surrounding quotes and whitespace
-  let cleaned = candidate.trim().replace(/^["']|["']$/g, '').trim();
+  const cleaned = candidate.trim().replace(/^["']|["']$/g, '').trim();
   
   if (!cleaned || cleaned === 'undefined' || cleaned === 'null' || cleaned.includes('YOUR_') || cleaned.includes('xxx')) {
     return DEFAULT_VAPID_PUBLIC_KEY;
   }
 
   // A valid web push VAPID key is a Base64/Base64URL public key, typically 65 to 100 characters
-  // It should only contain valid Base64 / Base64URL characters: A-Z, a-z, 0-9, -, _, +, /, =
   if (cleaned.length < 50 || !/^[A-Za-z0-9\-_+/=]+$/.test(cleaned)) {
-    console.warn('[FCM] Provided VAPID key format is not standard Base64/Base64URL, using verified project default.');
     return DEFAULT_VAPID_PUBLIC_KEY;
   }
 
@@ -477,7 +498,20 @@ export async function registerFcmToken(
             console.warn('[FCM] Could not clear existing subscription:', unsubErr);
           }
 
-          // Retry with fresh subscription and sanitized VAPID key
+          // Direct native push subscription with Uint8Array key
+          try {
+            if (swRegistration && 'pushManager' in swRegistration) {
+              const appKey = urlBase64ToUint8Array(validVapid);
+              await swRegistration.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: appKey,
+              });
+            }
+          } catch (nativeSubErr) {
+            console.warn('[FCM] Native pushManager subscribe notice:', nativeSubErr);
+          }
+
+          // Retry getToken with fresh registration
           try {
             token = await getToken(messaging, {
               serviceWorkerRegistration: swRegistration,

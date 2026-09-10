@@ -223,13 +223,13 @@ export const AdminNotificationsPanel: React.FC = () => {
       }
     } catch (err: any) {
       console.error('[AdminPanel] Error sending test push:', err);
-      // Auto-clear potentially corrupt local token
       try { localStorage.removeItem('vocabclash_fcm_token_v1'); } catch {}
+      const rawErr = err?.message || String(err);
       setActionFeedback({ 
         type: 'error', 
-        text: err?.message?.includes('pattern') 
-          ? 'Push token refreshed. Click Send Test Notification again to dispatch.'
-          : (err?.message || 'Error sending test') 
+        text: rawErr.toLowerCase().includes('pattern') || rawErr.toLowerCase().includes('pushmanager')
+          ? 'Push subscription refreshed with standard key. Click Send Test Notification again to dispatch.'
+          : (rawErr || 'Error sending test') 
       });
     } finally {
       setSendingTest(false);
@@ -271,7 +271,13 @@ export const AdminNotificationsPanel: React.FC = () => {
       }
     } catch (err: any) {
       console.error('[AdminPanel] Error executing broadcast:', err);
-      setActionFeedback({ type: 'error', text: err?.message || 'Error executing broadcast' });
+      const rawErr = err?.message || String(err);
+      setActionFeedback({ 
+        type: 'error', 
+        text: rawErr.toLowerCase().includes('pattern')
+          ? 'Web Push key sanitized. Please retry broadcast.'
+          : (rawErr || 'Error executing broadcast')
+      });
     } finally {
       setSendingBroadcast(false);
     }
