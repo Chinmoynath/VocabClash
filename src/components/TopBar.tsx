@@ -1,5 +1,5 @@
 import React from 'react';
-import { Flame, Volume2, VolumeX, Shield, Crown, Bell } from 'lucide-react';
+import { Flame, Volume2, VolumeX, Shield, Crown } from 'lucide-react';
 import { PlayerProfile, UserSubscription, DailyStreakState } from '../types';
 import { soundManager } from '../utils/audio';
 import { extractCleanUserName } from '../utils/nameHelper';
@@ -15,9 +15,6 @@ interface TopBarProps {
   onOpenStreak: () => void;
   onOpenStats?: () => void;
   onOpenTour?: () => void;
-  onOpenNotifications?: () => void;
-  hasUnreadNotifications?: boolean;
-  onOpenAdminNotifications?: () => void;
   onOpenAdminImporter?: () => void;
   onOpenAdminArticles?: () => void;
   isAdmin?: boolean;
@@ -33,9 +30,6 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenPremium,
   onOpenStreak,
   onOpenStats,
-  onOpenNotifications,
-  hasUnreadNotifications = false,
-  onOpenAdminNotifications,
   onOpenAdminImporter,
   onOpenAdminArticles,
   isAdmin = false,
@@ -126,19 +120,6 @@ export const TopBar: React.FC<TopBarProps> = ({
         {/* Admin Quick Portal Access Icons */}
         {isAdmin && (
           <div className="flex items-center gap-1 sm:gap-1.5">
-            {onOpenAdminNotifications && (
-              <button
-                onClick={() => {
-                  soundManager.playTap();
-                  onOpenAdminNotifications();
-                }}
-                className="flex items-center gap-1 px-2 sm:px-2.5 py-1.5 rounded-full text-xs font-black bg-rose-600 hover:bg-rose-500 text-white shadow-sm transition-all cursor-pointer"
-                title="Open Push Notification Command Center (/admin/notifications)"
-              >
-                <span>🔔</span>
-                <span className="text-[10px] uppercase tracking-wider font-extrabold hidden md:inline">Push Alerts</span>
-              </button>
-            )}
             {onOpenAdminArticles && (
               <button
                 onClick={() => {
@@ -166,24 +147,6 @@ export const TopBar: React.FC<TopBarProps> = ({
               </button>
             )}
           </div>
-        )}
-
-        {/* User Notification Settings Bell */}
-        {onOpenNotifications && (
-          <button
-            onClick={() => {
-              soundManager.playTap();
-              onOpenNotifications();
-            }}
-            className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-amber-400 flex items-center justify-center border border-slate-700/80 transition-all shrink-0 active:scale-95 shadow-sm relative cursor-pointer"
-            title="Notifications & Practice Alerts"
-            aria-label="Open notifications"
-          >
-            <Bell className="w-4 h-4 text-amber-400/90" />
-            {hasUnreadNotifications && (
-              <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-slate-900 shadow-sm animate-pulse" />
-            )}
-          </button>
         )}
 
         {/* Audio Toggle */}

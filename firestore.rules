@@ -299,14 +299,5 @@ service cloud.firestore {
       allow read: if true;
       allow create, update, delete: if isPyqAdmin();
     }
-
-    // 12. Push Notification Dispatch Logs & Live Broadcasts
-    match /notification_logs/{logId} {
-      allow read, write: if isPyqAdmin();
-    }
-    match /broadcast_notifications/{broadcastId} {
-      allow read: if true;
-      allow write: if isPyqAdmin();
-    }
   }
 }

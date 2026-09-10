@@ -45,7 +45,7 @@ try {
 }
 
 // Initialize Firebase App
-export const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
 
 // Standard Firebase Auth instance with browser popup/redirect resolver and multi-tier persistence
 let authInstance: ReturnType<typeof getAuth>;
@@ -129,12 +129,18 @@ export function createGoogleProvider(): GoogleAuthProvider {
 
 export const googleProvider = createGoogleProvider();
 
-// Initialize Firestore instance with project database ID
+// Initialize Firestore with auto-detect long polling to establish fast streams and gracefully fallback
 let dbInstance: ReturnType<typeof getFirestore>;
 try {
-  dbInstance = getFirestore(app, firebaseConfig.firestoreDatabaseId || undefined);
+  dbInstance = initializeFirestore(
+    app,
+    {
+      experimentalAutoDetectLongPolling: true,
+    },
+    firebaseConfig.firestoreDatabaseId || undefined
+  );
 } catch {
-  dbInstance = getFirestore(app);
+  dbInstance = getFirestore(app, firebaseConfig.firestoreDatabaseId || undefined);
 }
 
 export const db = dbInstance;

@@ -23,8 +23,7 @@ import {
   Mail,
   Scale,
   BarChart3,
-  BookOpen,
-  Bell
+  BookOpen
 } from 'lucide-react';
 import { SupportModal } from './SupportModal';
 import { LegalAccountModal } from './LegalAccountModal';
@@ -106,7 +105,6 @@ interface ProfileModalProps {
   onOpenStreak: () => void;
   onOpenStats?: () => void;
   onOpenTour?: () => void;
-  onOpenNotifications?: () => void;
   onOpenEditProfile?: () => void;
   onUserChange?: (user: FirebaseUser | null) => void;
   onManualSync?: () => void;
@@ -127,7 +125,6 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   onOpenStreak,
   onOpenStats,
   onOpenTour,
-  onOpenNotifications,
   onOpenEditProfile,
   onUserChange,
   onManualSync,
@@ -503,33 +500,6 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
             )}
           </div>
         </div>
-
-        {/* Notification Reminders Settings Button */}
-        {onOpenNotifications && !isEditing && (
-          <button
-            onClick={() => {
-              soundManager.playTap();
-              onOpenNotifications();
-            }}
-            className="w-full bg-gradient-to-r from-slate-850 to-slate-800 hover:from-slate-800 hover:to-slate-750 border border-slate-700/90 text-slate-200 font-bold p-2.5 rounded-xl text-xs flex items-center justify-between shadow-sm transition-all"
-          >
-            <div className="flex items-center gap-2.5">
-              <div className="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center">
-                <Bell className="w-4 h-4" />
-              </div>
-              <div className="text-left">
-                <div className="text-slate-100 font-bold flex items-center gap-1.5">
-                  <span>Daily Reminders & Push Alerts</span>
-                  <span className="text-[9px] bg-amber-950 text-amber-300 border border-amber-800/80 px-1.5 py-0.2 rounded font-mono font-normal">
-                    FCM
-                  </span>
-                </div>
-                <div className="text-[10px] text-amber-400">9 AM Vocab Goal & 7 PM Streak Saver</div>
-              </div>
-            </div>
-            <ChevronRight className="w-4 h-4 text-slate-400" />
-          </button>
-        )}
 
         {/* How VocabClash Works Guide Button */}
         {onOpenTour && !isEditing && (

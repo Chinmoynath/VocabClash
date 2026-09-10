@@ -1,31 +1,7 @@
 {
-  "functions": {
-    "api/**/*.ts": {
-      "includeFiles": "{api/_lib/**,firebase-applet-config.json}",
-      "maxDuration": 15
-    }
-  },
-  "headers": [
-    {
-      "source": "/firebase-messaging-sw.js",
-      "headers": [
-        { "key": "Content-Type", "value": "application/javascript; charset=utf-8" },
-        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" },
-        { "key": "Service-Worker-Allowed", "value": "/" }
-      ]
-    },
-    {
-      "source": "/sw.js",
-      "headers": [
-        { "key": "Content-Type", "value": "application/javascript; charset=utf-8" },
-        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" },
-        { "key": "Service-Worker-Allowed", "value": "/" }
-      ]
-    }
-  ],
   "rewrites": [
     {
-      "source": "/((?!api/|firebase-messaging-sw\\.js|sw\\.js|manifest\\.json|.*\\..*).*)",
+      "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
   ]

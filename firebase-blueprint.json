@@ -258,56 +258,6 @@
         "createdAt": { "type": "number", "description": "Creation timestamp in ms" }
       },
       "required": ["matchId", "player1Uid", "player2Uid", "status", "createdAt"]
-    },
-    "NotificationToken": {
-      "title": "NotificationToken",
-      "description": "Registered FCM push notification token for web, PWA, TWA, or mobile device",
-      "type": "object",
-      "properties": {
-        "token": { "type": "string", "description": "FCM device registration token" },
-        "platform": { "type": "string", "description": "web, android_twa, or capacitor" },
-        "enabled": { "type": "boolean", "description": "Whether push notifications are currently active" },
-        "timezone": { "type": "string", "description": "User local timezone (e.g. Asia/Kolkata)" },
-        "userAgent": { "type": "string", "description": "Browser user agent string" },
-        "createdAt": { "type": "number", "description": "Timestamp created in ms" },
-        "updatedAt": { "type": "number", "description": "Timestamp updated in ms" },
-        "lastSeenAt": { "type": "number", "description": "Timestamp last seen in ms" }
-      },
-      "required": ["token", "enabled", "createdAt", "updatedAt"]
-    },
-    "NotificationPreferences": {
-      "title": "NotificationPreferences",
-      "description": "User notification preferences and schedule toggles",
-      "type": "object",
-      "properties": {
-        "enabled": { "type": "boolean", "description": "Master push toggle" },
-        "morningReminder": { "type": "boolean", "description": "9:00 AM IST daily vocab goal reminder" },
-        "eveningStreakReminder": { "type": "boolean", "description": "7:00 PM IST streak saver / revision reminder" },
-        "announcements": { "type": "boolean", "description": "Important exam & feature updates" },
-        "updatedAt": { "type": "number", "description": "Timestamp updated in ms" }
-      },
-      "required": ["enabled", "morningReminder", "eveningStreakReminder", "announcements", "updatedAt"]
-    },
-    "NotificationLog": {
-      "title": "NotificationLog",
-      "description": "Authoritative log of dispatched push notifications with idempotency keys",
-      "type": "object",
-      "properties": {
-        "id": { "type": "string", "description": "Unique notification log ID" },
-        "type": { "type": "string", "description": "morning, evening_streak, mistake_revision, admin, or test" },
-        "uid": { "type": "string", "description": "Recipient UID or segment identifier" },
-        "dateKey": { "type": "string", "description": "Date key in Asia/Kolkata (YYYY-MM-DD)" },
-        "slot": { "type": "string", "description": "morning, evening, or custom" },
-        "title": { "type": "string", "description": "Notification title" },
-        "body": { "type": "string", "description": "Notification message body" },
-        "url": { "type": "string", "description": "Destination route on click" },
-        "target": { "type": "string", "description": "Target audience (me, all, or segment)" },
-        "sentCount": { "type": "number", "description": "Number of devices sent" },
-        "failedCount": { "type": "number", "description": "Number of device delivery errors" },
-        "status": { "type": "string", "description": "success, partial, or failed" },
-        "sentAt": { "type": "number", "description": "Dispatch timestamp in ms" }
-      },
-      "required": ["id", "type", "title", "body", "sentAt", "status"]
     }
   },
   "firestore": {
@@ -322,18 +272,6 @@
     "/users/{userId}": {
       "schema": "UserProfile",
       "description": "Private user profile and synchronization state"
-    },
-    "/users/{userId}/notificationTokens/{tokenId}": {
-      "schema": "NotificationToken",
-      "description": "Device FCM push notification tokens for user"
-    },
-    "/users/{userId}/preferences/{prefId}": {
-      "schema": "NotificationPreferences",
-      "description": "User notification preferences"
-    },
-    "/notification_logs/{logId}": {
-      "schema": "NotificationLog",
-      "description": "Authoritative notification send logs and idempotency tracking"
     },
     "/leaderboard_users/{userId}": {
       "schema": "LeaderboardUserDoc",

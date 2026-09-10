@@ -120,24 +120,14 @@ self.addEventListener('push', (event) => {
     body: 'Complete your 5-minute daily Govt Exam vocab quiz to maintain your streak!',
     icon: '/icon-192.png',
     badge: '/icon-192.png',
-    data: { url: '/pyq-drill', type: 'general' }
+    data: { url: '/?mode=daily' }
   };
 
   if (event.data) {
     try {
-      const parsed = event.data.json();
-      data.title = parsed.notification?.title || parsed.data?.title || parsed.title || data.title;
-      data.body = parsed.notification?.body || parsed.data?.body || parsed.body || data.body;
-      data.icon = parsed.notification?.icon || parsed.data?.icon || parsed.icon || data.icon;
-      data.data = {
-        url: parsed.data?.url || parsed.data?.click_action || parsed.url || '/pyq-drill',
-        type: parsed.data?.type || 'general'
-      };
+      data = { ...data, ...event.data.json() };
     } catch (e) {
-      const text = event.data.text();
-      if (text) {
-        data.body = text;
-      }
+      data.body = event.data.text() || data.body;
     }
   }
 
@@ -145,12 +135,10 @@ self.addEventListener('push', (event) => {
     body: data.body,
     icon: data.icon || '/icon-192.png',
     badge: data.badge || '/icon-192.png',
-    vibrate: [150, 75, 150],
-    data: data.data || { url: '/pyq-drill' },
-    tag: `vocabclash_${Date.now()}`,
-    renotify: true,
+    vibrate: [100, 50, 100],
+    data: data.data || { url: '/' },
     actions: [
-      { action: 'play', title: '⚔️ Practice Now' },
+      { action: 'play', title: '⚔️ Battle Now' },
       { action: 'close', title: 'Dismiss' }
     ]
   };
@@ -163,22 +151,13 @@ self.addEventListener('push', (event) => {
 // 7. NOTIFICATION CLICK HANDLER
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  if (event.action === 'close') {
-    return;
-  }
-
-  const rawUrl = event.notification.data?.url || '/pyq-drill';
-  const targetUrl = new URL(rawUrl, self.location.origin).href;
+  const targetUrl = event.notification.data?.url || '/';
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {
         if (client.url && 'focus' in client) {
-          client.focus();
-          if ('navigate' in client && client.url !== targetUrl) {
-            return client.navigate(targetUrl);
-          }
-          return;
+          return client.focus();
         }
       }
       if (self.clients.openWindow) {

@@ -36,9 +36,6 @@ interface DesktopSidebarProps {
   onOpenTour?: () => void;
   onOpenGuides?: () => void;
   onOpenArticles?: () => void;
-  onOpenNotifications?: () => void;
-  hasUnreadNotifications?: boolean;
-  onOpenAdminNotifications?: () => void;
   isAdmin?: boolean;
   onOpenAdminArticles?: () => void;
   onOpenAdminImporter?: () => void;
@@ -59,9 +56,6 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
   onOpenTour,
   onOpenGuides,
   onOpenArticles,
-  onOpenNotifications,
-  hasUnreadNotifications = false,
-  onOpenAdminNotifications,
   isAdmin = false,
   onOpenAdminArticles,
   onOpenAdminImporter,
@@ -114,296 +108,281 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
     <aside 
       id="vocabclash-desktop-sidebar"
       aria-label="Main Navigation Sidebar"
-      className="hidden md:flex flex-col w-64 lg:w-72 bg-slate-950 border-r border-slate-800/80 shrink-0 h-full select-none z-20 overflow-y-auto overflow-x-hidden overscroll-contain"
-      style={{ scrollbarWidth: 'thin', scrollbarColor: '#334155 transparent' }}
+      className="hidden md:flex flex-col w-64 lg:w-72 bg-slate-950 border-r border-slate-800/80 p-4 shrink-0 h-full justify-between select-none z-20"
     >
-      <div className="flex flex-col justify-between min-h-full p-3.5 space-y-4">
-        {/* Top: Brand & Logo */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between px-1">
-            <div className="flex items-center gap-2.5">
-              <VocabClashLogo size="md" className="rounded-xl shadow-md ring-1 ring-amber-400/30" />
-              <div>
-                <div className="flex items-center gap-1.5">
-                  <span className="font-black text-base text-white tracking-tight">VocabClash</span>
-                  <span className="text-[9px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-1 py-0.2 rounded font-bold uppercase tracking-wider">
-                    Govt PYQs
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-400 flex items-center gap-1.5 mt-0.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  <span>Live Arena Active</span>
-                </p>
+      {/* Top: Brand & Logo */}
+      <div className="space-y-6">
+        <div className="flex items-center justify-between px-1">
+          <div className="flex items-center gap-2.5">
+            <VocabClashLogo size="md" className="rounded-xl shadow-md ring-1 ring-amber-400/30" />
+            <div>
+              <div className="flex items-center gap-1.5">
+                <span className="font-black text-base text-white tracking-tight">VocabClash</span>
+                <span className="text-[9px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-1 py-0.2 rounded font-bold uppercase tracking-wider">
+                  Govt PYQs
+                </span>
               </div>
+              <p className="text-[11px] text-slate-400 flex items-center gap-1.5 mt-0.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span>Live Arena Active</span>
+              </p>
             </div>
           </div>
-
-          {/* Navigation Items */}
-          <nav className="space-y-1">
-            {navItems.map(item => {
-              const isActive = currentTab === item.id;
-              const Icon = item.icon;
-
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => {
-                    soundManager.playTap();
-                    onSelectTab(item.id);
-                  }}
-                  className={`w-full flex items-center justify-between px-3 py-2 rounded-xl border text-left transition-all group ${
-                    isActive
-                      ? `${item.activeBg} font-bold shadow-sm ring-1 ring-white/10`
-                      : 'bg-transparent border-transparent hover:bg-slate-900 hover:border-slate-800/60 text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div className={`p-1.5 rounded-lg ${isActive ? 'bg-slate-900/90' : 'bg-slate-900/60 group-hover:bg-slate-850'}`}>
-                      <Icon className={`w-4 h-4 ${isActive ? item.color : 'text-slate-400 group-hover:text-slate-200'}`} />
-                    </div>
-                    <div className="min-w-0 truncate">
-                      <div className={`text-xs font-semibold truncate ${isActive ? 'text-white' : 'text-slate-300'}`}>
-                        {item.label}
-                      </div>
-                      <div className="text-[10px] text-slate-500 truncate">
-                        {item.sublabel}
-                      </div>
-                    </div>
-                  </div>
-
-                  {item.badge && item.badge > 0 ? (
-                    <span className="bg-rose-600 text-white text-[10px] font-extrabold px-1.5 py-0.5 rounded-full border border-rose-900 shadow-sm shrink-0">
-                      {item.badge}
-                    </span>
-                  ) : null}
-                </button>
-              );
-            })}
-          </nav>
         </div>
 
-        {/* Bottom: Quick Stats, Admin Studio & User Profile Box */}
-        <div className="space-y-2.5 pt-3 border-t border-slate-800/80">
-          
-          {/* Quick Streak, Stats & Tour trigger */}
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              onClick={() => {
-                soundManager.playTap();
-                onOpenStreak();
-              }}
-              className={`flex items-center gap-1.5 p-2 rounded-xl border text-xs font-bold transition-all ${
-                dailyStreak.currentStreak > 0
-                  ? 'bg-orange-950/40 border-orange-600/50 text-orange-300 hover:border-orange-400'
-                  : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-slate-300'
-              }`}
-              title="View Daily Streak Challenge"
-            >
-              <Flame className={`w-4 h-4 shrink-0 ${dailyStreak.currentStreak > 0 ? 'text-orange-400 fill-orange-400 animate-bounce' : 'text-slate-500'}`} />
-              <div className="text-left leading-tight truncate">
-                <span className="font-mono">{dailyStreak.currentStreak}d</span> Streak
-              </div>
-            </button>
+        {/* Navigation Items */}
+        <nav className="space-y-1.5">
+          {navItems.map(item => {
+            const isActive = currentTab === item.id;
+            const Icon = item.icon;
 
-            {onOpenGuides ? (
+            return (
               <button
+                key={item.id}
                 onClick={() => {
                   soundManager.playTap();
-                  onOpenGuides();
+                  onSelectTab(item.id);
                 }}
-                className="flex items-center gap-1.5 p-2 rounded-xl bg-slate-900/80 hover:bg-slate-850 border border-amber-500/30 hover:border-amber-400/70 text-xs font-bold text-slate-200 transition-all text-left group"
-                title="SSC Vocabulary Guides & 2018-2025 PYQ Analysis"
+                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl border text-left transition-all group ${
+                  isActive
+                    ? `${item.activeBg} font-bold shadow-sm ring-1 ring-white/10`
+                    : 'bg-transparent border-transparent hover:bg-slate-900 hover:border-slate-800/60 text-slate-400 hover:text-slate-200'
+                }`}
               >
-                <BookOpen className="w-4 h-4 text-amber-400 shrink-0 group-hover:scale-110 transition-transform" />
-                <div className="text-left leading-tight truncate">
-                  <span className="text-amber-400 font-bold">Guides</span> Hub
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className={`p-1.5 rounded-lg ${isActive ? 'bg-slate-900/90' : 'bg-slate-900/60 group-hover:bg-slate-850'}`}>
+                    <Icon className={`w-4 h-4 ${isActive ? item.color : 'text-slate-400 group-hover:text-slate-200'}`} />
+                  </div>
+                  <div className="min-w-0 truncate">
+                    <div className={`text-xs font-semibold truncate ${isActive ? 'text-white' : 'text-slate-300'}`}>
+                      {item.label}
+                    </div>
+                    <div className="text-[10px] text-slate-500 truncate">
+                      {item.sublabel}
+                    </div>
+                  </div>
                 </div>
+
+                {item.badge && item.badge > 0 ? (
+                  <span className="bg-rose-600 text-white text-[10px] font-extrabold px-1.5 py-0.5 rounded-full border border-rose-900 shadow-sm shrink-0">
+                    {item.badge}
+                  </span>
+                ) : null}
               </button>
-            ) : onOpenStats ? (
-              <button
-                onClick={() => {
-                  soundManager.playTap();
-                  onOpenStats();
-                }}
-                className="flex items-center gap-1.5 p-2 rounded-xl bg-slate-900/80 hover:bg-slate-850 border border-amber-500/30 hover:border-amber-400/70 text-xs font-bold text-slate-200 transition-all text-left"
-                title="View Daily Solved Questions, Accuracy & Graph"
-              >
-                <BarChart3 className="w-4 h-4 text-amber-400 shrink-0" />
-                <div className="text-left leading-tight truncate">
-                  <span className="text-amber-400 font-mono font-black">{player.pyqScore || 0}</span> Stats
-                </div>
-              </button>
-            ) : onOpenTour ? (
-              <button
-                onClick={() => {
-                  soundManager.playTap();
-                  onOpenTour();
-                }}
-                className="flex items-center gap-1.5 p-2 rounded-xl bg-slate-900/80 hover:bg-slate-850 border border-slate-800 hover:border-slate-700 text-xs font-bold text-slate-300 transition-all text-left"
-                title="Overview & How It Works"
-              >
-                <HelpCircle className="w-4 h-4 text-sky-400 shrink-0" />
-                <span className="truncate">Guide</span>
-              </button>
-            ) : null}
-          </div>
+            );
+          })}
+        </nav>
+      </div>
 
-          {/* Editorial Articles & Guides Hub Trigger */}
-          {onOpenArticles && (
-            <button
-              onClick={() => {
-                soundManager.playTap();
-                onOpenArticles();
-              }}
-              className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-slate-900/70 hover:bg-slate-850 border border-slate-800/80 hover:border-amber-500/40 text-left transition-all group cursor-pointer"
-              title="Read in-depth SSC vocab articles, PYQ trends & exam strategies"
-            >
-              <div className="flex items-center gap-2.5 min-w-0">
-                <div className="p-1 rounded-lg bg-amber-500/10 text-amber-400 group-hover:scale-105 transition-transform">
-                  <BookOpen className="w-3.5 h-3.5" />
-                </div>
-                <div className="min-w-0">
-                  <div className="text-xs font-bold text-slate-200 group-hover:text-amber-300 transition-colors truncate">
-                    Articles & Guides
-                  </div>
-                  <div className="text-[10px] text-slate-500 truncate">
-                    SSC preparation blog
-                  </div>
-                </div>
-              </div>
-              <span className="text-[10px] font-bold text-amber-400/80 group-hover:text-amber-300 shrink-0">
-                /articles →
-              </span>
-            </button>
-          )}
-
-          {/* Admin Quick Access Trigger (Visible only for admin users) */}
-          {isAdmin && (
-            <div className="p-2 rounded-xl bg-purple-950/40 border border-purple-500/30 space-y-1.5">
-              <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-wider text-purple-300">
-                <span>Admin Studio</span>
-                <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" />
-              </div>
-              <div className="grid grid-cols-3 gap-1 pt-0.5">
-                {onOpenAdminNotifications && (
-                  <button
-                    onClick={() => {
-                      soundManager.playTap();
-                      onOpenAdminNotifications();
-                    }}
-                    className="px-1.5 py-1.5 rounded-lg bg-rose-900/60 hover:bg-rose-800 text-rose-200 text-[10px] font-bold transition flex flex-col items-center justify-center gap-0.5 border border-rose-500/40 cursor-pointer"
-                    title="Open Push Notifications Command Center"
-                  >
-                    <span>🔔</span> Push
-                  </button>
-                )}
-                {onOpenAdminArticles && (
-                  <button
-                    onClick={() => {
-                      soundManager.playTap();
-                      onOpenAdminArticles();
-                    }}
-                    className="px-1.5 py-1.5 rounded-lg bg-purple-900/60 hover:bg-purple-800 text-purple-200 text-[10px] font-bold transition flex flex-col items-center justify-center gap-0.5 border border-purple-500/40 cursor-pointer"
-                    title="Open Article Publishing Studio"
-                  >
-                    <span>✍️</span> Articles
-                  </button>
-                )}
-                {onOpenAdminImporter && (
-                  <button
-                    onClick={() => {
-                      soundManager.playTap();
-                      onOpenAdminImporter();
-                    }}
-                    className="px-1.5 py-1.5 rounded-lg bg-amber-900/40 hover:bg-amber-800/60 text-amber-300 text-[10px] font-bold transition flex flex-col items-center justify-center gap-0.5 border border-amber-500/40 cursor-pointer"
-                    title="Open PYQ Importer"
-                  >
-                    <span>📁</span> PYQ
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Premium VIP Banner if not VIP */}
-          {!subscription.isPremium ? (
-            <button
-              onClick={() => {
-                soundManager.playTap();
-                onOpenPremium();
-              }}
-              className="w-full bg-gradient-to-r from-purple-950/80 to-indigo-950/80 border border-purple-500/40 hover:border-purple-400/80 p-2.5 rounded-xl flex items-center justify-between text-left transition-all group shadow-sm cursor-pointer"
-            >
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-lg bg-purple-600/30 text-purple-300 flex items-center justify-center shrink-0 border border-purple-500/40">
-                  <Crown className="w-3.5 h-3.5 text-amber-300 fill-amber-300/40" />
-                </div>
-                <div>
-                  <div className="text-xs font-black text-white group-hover:text-purple-200">
-                    Upgrade to VIP
-                  </div>
-                  <div className="text-[10px] text-purple-300/80">
-                    ₹19/mo • Ad-Free + Unlimited
-                  </div>
-                </div>
-              </div>
-            </button>
-          ) : (
-            <div className="bg-purple-950/50 border border-purple-500/40 p-2 rounded-xl flex items-center justify-between text-xs text-purple-300">
-              <span className="flex items-center gap-1.5 font-bold">
-                <Crown className="w-3.5 h-3.5 text-amber-400 fill-amber-400/40" />
-                VIP Member Active
-              </span>
-              <span className="text-[10px] font-mono bg-purple-900/60 px-1.5 py-0.2 rounded border border-purple-500/30">PRO</span>
-            </div>
-          )}
-
-          {/* User Card */}
-          <div
+      {/* Bottom: Quick Stats & User Profile Box */}
+      <div className="space-y-3 pt-4 border-t border-slate-800/80">
+        
+        {/* Quick Streak, Stats & Tour trigger */}
+        <div className="grid grid-cols-2 gap-2">
+          <button
             onClick={() => {
               soundManager.playTap();
-              onOpenProfile();
+              onOpenStreak();
             }}
-            className="bg-slate-900/90 hover:bg-slate-850 border border-slate-800/80 hover:border-slate-700 p-2.5 rounded-2xl flex items-center justify-between cursor-pointer transition-all group"
+            className={`flex items-center gap-1.5 p-2 rounded-xl border text-xs font-bold transition-all ${
+              dailyStreak.currentStreak > 0
+                ? 'bg-orange-950/40 border-orange-600/50 text-orange-300 hover:border-orange-400'
+                : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-slate-300'
+            }`}
+            title="View Daily Streak Challenge"
+          >
+            <Flame className={`w-4 h-4 shrink-0 ${dailyStreak.currentStreak > 0 ? 'text-orange-400 fill-orange-400 animate-bounce' : 'text-slate-500'}`} />
+            <div className="text-left leading-tight truncate">
+              <span className="font-mono">{dailyStreak.currentStreak}d</span> Streak
+            </div>
+          </button>
+
+          {onOpenGuides ? (
+            <button
+              onClick={() => {
+                soundManager.playTap();
+                onOpenGuides();
+              }}
+              className="flex items-center gap-1.5 p-2 rounded-xl bg-slate-900/80 hover:bg-slate-850 border border-amber-500/30 hover:border-amber-400/70 text-xs font-bold text-slate-200 transition-all text-left group"
+              title="SSC Vocabulary Guides & 2018-2025 PYQ Analysis"
+            >
+              <BookOpen className="w-4 h-4 text-amber-400 shrink-0 group-hover:scale-110 transition-transform" />
+              <div className="text-left leading-tight truncate">
+                <span className="text-amber-400 font-bold">Guides</span> Hub
+              </div>
+            </button>
+          ) : onOpenStats ? (
+            <button
+              onClick={() => {
+                soundManager.playTap();
+                onOpenStats();
+              }}
+              className="flex items-center gap-1.5 p-2 rounded-xl bg-slate-900/80 hover:bg-slate-850 border border-amber-500/30 hover:border-amber-400/70 text-xs font-bold text-slate-200 transition-all text-left"
+              title="View Daily Solved Questions, Accuracy & Graph"
+            >
+              <BarChart3 className="w-4 h-4 text-amber-400 shrink-0" />
+              <div className="text-left leading-tight truncate">
+                <span className="text-amber-400 font-mono font-black">{player.pyqScore || 0}</span> Stats
+              </div>
+            </button>
+          ) : onOpenTour ? (
+            <button
+              onClick={() => {
+                soundManager.playTap();
+                onOpenTour();
+              }}
+              className="flex items-center gap-1.5 p-2 rounded-xl bg-slate-900/80 hover:bg-slate-850 border border-slate-800 hover:border-slate-700 text-xs font-bold text-slate-300 transition-all text-left"
+              title="Overview & How It Works"
+            >
+              <HelpCircle className="w-4 h-4 text-sky-400 shrink-0" />
+              <span className="truncate">Guide</span>
+            </button>
+          ) : null}
+        </div>
+
+        {/* Editorial Articles & Guides Hub Trigger */}
+        {onOpenArticles && (
+          <button
+            onClick={() => {
+              soundManager.playTap();
+              onOpenArticles();
+            }}
+            className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-slate-900/70 hover:bg-slate-850 border border-slate-800/80 hover:border-amber-500/40 text-left transition-all group cursor-pointer"
+            title="Read in-depth SSC vocab articles, PYQ trends & exam strategies"
           >
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className="relative shrink-0">
-                {player.photoURL ? (
-                  <img
-                    src={player.photoURL}
-                    alt={player.name}
-                    className="w-8 h-8 rounded-full object-cover shadow-sm border border-amber-400/50"
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-amber-600 to-amber-400 flex items-center justify-center text-sm shadow-sm border border-amber-300/40">
-                    {player.avatar}
-                  </div>
-                )}
-                <div className="absolute -bottom-1 -right-1 bg-indigo-600 text-[8px] font-bold px-1 rounded-full border border-indigo-400">
-                  Lv.{player.level}
-                </div>
+              <div className="p-1 rounded-lg bg-amber-500/10 text-amber-400 group-hover:scale-105 transition-transform">
+                <BookOpen className="w-3.5 h-3.5" />
               </div>
-
-              <div className="min-w-0 flex-1">
-                <div className="text-xs font-bold text-slate-100 group-hover:text-amber-400 transition-colors truncate">
-                  {extractCleanUserName(player.name, player.email)}
+              <div className="min-w-0">
+                <div className="text-xs font-bold text-slate-200 group-hover:text-amber-300 transition-colors truncate">
+                  Articles & Guides
                 </div>
-                <div className="text-[10px] text-amber-400/90 font-mono flex items-center gap-1">
-                  <Shield className="w-3 h-3 text-amber-400 shrink-0" />
-                  <span>{player.rankPoints} LP</span>
-                  <span className="text-slate-500">•</span>
-                  <span className="text-slate-400 truncate">{player.tierTitle.replace(/[^\w\s]/gi, '')}</span>
+                <div className="text-[10px] text-slate-500 truncate">
+                  SSC preparation blog
                 </div>
               </div>
             </div>
+            <span className="text-[10px] font-bold text-amber-400/80 group-hover:text-amber-300 shrink-0">
+              /articles →
+            </span>
+          </button>
+        )}
 
-            <div className="text-[10px] text-slate-400 group-hover:text-white transition-colors">
-              {currentUser ? '⚙️' : <LogIn className="w-3.5 h-3.5 text-indigo-400" />}
+        {/* Admin Quick Access Trigger (Visible only for admin users) */}
+        {isAdmin && (
+          <div className="p-2.5 rounded-xl bg-purple-950/40 border border-purple-500/30 space-y-1.5">
+            <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-wider text-purple-300">
+              <span>Admin Studio</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" />
+            </div>
+            <div className="grid grid-cols-2 gap-1.5 pt-0.5">
+              {onOpenAdminArticles && (
+                <button
+                  onClick={() => {
+                    soundManager.playTap();
+                    onOpenAdminArticles();
+                  }}
+                  className="px-2 py-1.5 rounded-lg bg-purple-900/60 hover:bg-purple-800 text-purple-200 text-[11px] font-bold transition flex items-center justify-center gap-1 border border-purple-500/40"
+                  title="Open Article Publishing Studio"
+                >
+                  <span>✍️</span> Articles
+                </button>
+              )}
+              {onOpenAdminImporter && (
+                <button
+                  onClick={() => {
+                    soundManager.playTap();
+                    onOpenAdminImporter();
+                  }}
+                  className="px-2 py-1.5 rounded-lg bg-amber-900/40 hover:bg-amber-800/60 text-amber-300 text-[11px] font-bold transition flex items-center justify-center gap-1 border border-amber-500/40"
+                  title="Open PYQ Importer"
+                >
+                  <span>📁</span> PYQ
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Premium VIP Banner if not VIP */}
+        {!subscription.isPremium ? (
+          <button
+            onClick={() => {
+              soundManager.playTap();
+              onOpenPremium();
+            }}
+            className="w-full bg-gradient-to-r from-purple-950/80 to-indigo-950/80 border border-purple-500/40 hover:border-purple-400/80 p-2.5 rounded-xl flex items-center justify-between text-left transition-all group shadow-sm"
+          >
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-purple-600/30 text-purple-300 flex items-center justify-center shrink-0 border border-purple-500/40">
+                <Crown className="w-3.5 h-3.5 text-amber-300 fill-amber-300/40" />
+              </div>
+              <div>
+                <div className="text-xs font-black text-white group-hover:text-purple-200">
+                  Upgrade to VIP
+                </div>
+                <div className="text-[10px] text-purple-300/80">
+                  ₹19/mo • Ad-Free + Unlimited
+                </div>
+              </div>
+            </div>
+          </button>
+        ) : (
+          <div className="bg-purple-950/50 border border-purple-500/40 p-2 rounded-xl flex items-center justify-between text-xs text-purple-300">
+            <span className="flex items-center gap-1.5 font-bold">
+              <Crown className="w-3.5 h-3.5 text-amber-400 fill-amber-400/40" />
+              VIP Member Active
+            </span>
+            <span className="text-[10px] font-mono bg-purple-900/60 px-1.5 py-0.2 rounded border border-purple-500/30">PRO</span>
+          </div>
+        )}
+
+        {/* User Card */}
+        <div
+          onClick={() => {
+            soundManager.playTap();
+            onOpenProfile();
+          }}
+          className="bg-slate-900/90 hover:bg-slate-850 border border-slate-800/80 hover:border-slate-700 p-2.5 rounded-2xl flex items-center justify-between cursor-pointer transition-all group"
+        >
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="relative shrink-0">
+              {player.photoURL ? (
+                <img
+                  src={player.photoURL}
+                  alt={player.name}
+                  className="w-8 h-8 rounded-full object-cover shadow-sm border border-amber-400/50"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-amber-600 to-amber-400 flex items-center justify-center text-sm shadow-sm border border-amber-300/40">
+                  {player.avatar}
+                </div>
+              )}
+              <div className="absolute -bottom-1 -right-1 bg-indigo-600 text-[8px] font-bold px-1 rounded-full border border-indigo-400">
+                Lv.{player.level}
+              </div>
+            </div>
+
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-bold text-slate-100 group-hover:text-amber-400 transition-colors truncate">
+                {extractCleanUserName(player.name, player.email)}
+              </div>
+              <div className="text-[10px] text-amber-400/90 font-mono flex items-center gap-1">
+                <Shield className="w-3 h-3 text-amber-400 shrink-0" />
+                <span>{player.rankPoints} LP</span>
+                <span className="text-slate-500">•</span>
+                <span className="text-slate-400 truncate">{player.tierTitle.replace(/[^\w\s]/gi, '')}</span>
+              </div>
             </div>
           </div>
 
+          <div className="text-[10px] text-slate-400 group-hover:text-white transition-colors">
+            {currentUser ? '⚙️' : <LogIn className="w-3.5 h-3.5 text-indigo-400" />}
+          </div>
         </div>
+
       </div>
     </aside>
   );
