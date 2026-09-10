@@ -191,7 +191,8 @@ export const AdminNotificationsPanel: React.FC = () => {
     setLoading(true);
     try {
       const statusRes = await fetch('/api/notifications/status');
-      if (statusRes.ok) {
+      const sContentType = statusRes.headers.get('content-type') || '';
+      if (statusRes.ok && sContentType.includes('application/json')) {
         const sData = await statusRes.json();
         setStatusData(sData);
       }
@@ -201,7 +202,8 @@ export const AdminNotificationsPanel: React.FC = () => {
         const logsRes = await fetch('/api/notifications/logs', {
           headers: { Authorization: `Bearer ${idToken}` },
         });
-        if (logsRes.ok) {
+        const lContentType = logsRes.headers.get('content-type') || '';
+        if (logsRes.ok && lContentType.includes('application/json')) {
           const lData = await logsRes.json();
           setLogs(lData.logs || []);
         }
@@ -227,51 +229,67 @@ export const AdminNotificationsPanel: React.FC = () => {
       const idToken = await getAdminIdToken();
       if (!idToken) throw new Error('You must be signed in as admin to send test notifications');
 
-      // Check / register real FCM token on this browser
-      let token = getSavedFcmToken();
-      if (!token) {
-        const regRes = await registerFcmToken(auth.currentUser?.uid, 'ALL');
-        if (!regRes.success) {
-          throw new Error(regRes.error || 'Failed to register FCM push token on this device');
-        }
-        token = regRes.token || null;
-      }
+      // Use locally saved FCM token if present; otherwise pass undefined to let backend lookup admin's active device tokens
+      const localToken = getSavedFcmToken() || undefined;
 
-      const res = await fetch('/api/notifications/send-test', {
+      const endpoint = '/api/notifications/send-test';
+      const sendUrl = typeof window !== 'undefined'
+        ? new URL(endpoint, window.location.origin).toString()
+        : endpoint;
+
+      console.log('[AdminPush] Dispatching test notification to:', sendUrl, {
+        origin: typeof window !== 'undefined' ? window.location.origin : '',
+        hasLocalToken: Boolean(localToken),
+      });
+
+      const res = await fetch(sendUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${idToken}`,
         },
         body: JSON.stringify({
-          token: token || undefined,
-          title,
-          body,
-          url,
+          token: localToken,
+          title: (title || '').trim() || 'VocabClash Test Alert ⚡',
+          body: (body || '').trim() || 'This is a test notification verifying your FCM service worker connection!',
+          url: (url || '').trim() || '/pyq-drill',
         }),
       });
 
-      const data = await res.json();
-      if (res.ok && data.success) {
-        try {
-          await displayNativeNotification(title || 'VocabClash Test Alert ⚡', {
-            body: body || 'This is a test notification verifying your FCM service worker connection!',
-            url: url || '/pyq-drill',
-          });
-        } catch {}
+      const contentType = res.headers.get('content-type') || '';
+      let data: any = null;
 
+      if (contentType.includes('application/json')) {
+        try {
+          data = await res.json();
+        } catch {
+          const rawText = await res.text().catch(() => '');
+          throw new Error(`Server returned non-JSON body (HTTP ${res.status}): ${rawText.slice(0, 150)}`);
+        }
+      } else {
+        const rawText = await res.text().catch(() => '');
+        throw new Error(`Server endpoint returned HTTP ${res.status} (${contentType || 'plain text'}): ${rawText.slice(0, 150) || 'Route missing or unreachable on production'}`);
+      }
+
+      if (res.ok && data?.success) {
         if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
           try { navigator.vibrate([150, 75, 150]); } catch {}
         }
 
+        const deliveryMsg = data.deliveredVia === 'fcm'
+          ? 'Delivered directly to this device via FCM'
+          : data.deliveredVia === 'fcm_multicast'
+          ? `Dispatched to ${data.successCount || 1} registered device(s)`
+          : data.message || 'Notification dispatched via backend FCM';
+
         setActionFeedback({
           type: 'success',
-          text: '⚡ Test notification dispatched successfully via FCM & live broadcast!',
+          text: `⚡ Test notification sent successfully! (${deliveryMsg})`,
         });
         fetchStatusAndLogs();
         runDiagnostics();
       } else {
-        throw new Error(data.error || 'Failed to send test push');
+        throw new Error(data?.error || `Failed to send test push (HTTP ${res.status})`);
       }
     } catch (err: any) {
       console.error('[AdminPanel] Error sending test push [AdminNotificationsPanel.tsx]:', {
@@ -297,30 +315,49 @@ export const AdminNotificationsPanel: React.FC = () => {
       const idToken = await getAdminIdToken();
       if (!idToken) throw new Error('You must be signed in as admin to broadcast notifications');
 
-      const res = await fetch('/api/notifications/send-admin', {
+      const endpoint = '/api/notifications/send-admin';
+      const sendUrl = typeof window !== 'undefined'
+        ? new URL(endpoint, window.location.origin).toString()
+        : endpoint;
+
+      const res = await fetch(sendUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${idToken}`,
         },
         body: JSON.stringify({
-          title,
-          body,
-          url,
+          title: (title || '').trim(),
+          body: (body || '').trim(),
+          url: (url || '').trim() || '/pyq-drill',
           target,
           type: 'admin',
         }),
       });
 
-      const data = await res.json();
-      if (res.ok && data.success) {
+      const contentType = res.headers.get('content-type') || '';
+      let data: any = null;
+
+      if (contentType.includes('application/json')) {
+        try {
+          data = await res.json();
+        } catch {
+          const rawText = await res.text().catch(() => '');
+          throw new Error(`Server returned non-JSON body (HTTP ${res.status}): ${rawText.slice(0, 150)}`);
+        }
+      } else {
+        const rawText = await res.text().catch(() => '');
+        throw new Error(`Server endpoint returned HTTP ${res.status} (${contentType || 'plain text'}): ${rawText.slice(0, 150) || 'Route missing or unreachable on production'}`);
+      }
+
+      if (res.ok && data?.success) {
         setActionFeedback({
           type: 'success',
           text: `📢 Successfully broadcasted push notification! (Delivered: ${data.sentCount || 1} devices, Failures: ${data.failureCount || 0})`,
         });
         fetchStatusAndLogs();
       } else {
-        throw new Error(data.error || 'Failed to send broadcast push');
+        throw new Error(data?.error || `Failed to send broadcast push (HTTP ${res.status})`);
       }
     } catch (err: any) {
       console.error('[AdminPanel] Error executing broadcast:', err);
@@ -339,7 +376,12 @@ export const AdminNotificationsPanel: React.FC = () => {
     setActionFeedback(null);
     try {
       const idToken = await getAdminIdToken();
-      const res = await fetch('/api/notifications/cron-dispatch', {
+      const endpoint = '/api/notifications/cron-dispatch';
+      const sendUrl = typeof window !== 'undefined'
+        ? new URL(endpoint, window.location.origin).toString()
+        : endpoint;
+
+      const res = await fetch(sendUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -349,15 +391,29 @@ export const AdminNotificationsPanel: React.FC = () => {
         }),
       });
 
-      const data = await res.json();
-      if (res.ok && data.success) {
+      const contentType = res.headers.get('content-type') || '';
+      let data: any = null;
+
+      if (contentType.includes('application/json')) {
+        try {
+          data = await res.json();
+        } catch {
+          const rawText = await res.text().catch(() => '');
+          throw new Error(`Server returned non-JSON body (HTTP ${res.status}): ${rawText.slice(0, 150)}`);
+        }
+      } else {
+        const rawText = await res.text().catch(() => '');
+        throw new Error(`Server endpoint returned HTTP ${res.status} (${contentType || 'plain text'}): ${rawText.slice(0, 150) || 'Route missing or unreachable on production'}`);
+      }
+
+      if (res.ok && data?.success) {
         setActionFeedback({
           type: 'success',
           text: `⏰ Triggered ${slot} slot! Sent: ${data.sentCount || 0}, Failed: ${data.failedCount || 0}`,
         });
         fetchStatusAndLogs();
       } else {
-        throw new Error(data.error || 'Failed to trigger cron');
+        throw new Error(data?.error || `Failed to trigger cron (HTTP ${res.status})`);
       }
     } catch (err: any) {
       setActionFeedback({ type: 'error', text: err?.message || 'Error triggering scheduler' });
