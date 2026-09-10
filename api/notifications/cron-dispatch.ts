@@ -1,43 +1,11 @@
-import path from 'path';
-import fs from 'fs';
-import { pathToFileURL } from 'url';
+// Explicitly configure Vercel Serverless Function Node.js runtime
+export const config = {
+  runtime: 'nodejs',
+  maxDuration: 15,
+};
 
-async function loadServerModule(moduleName: string) {
-  const possiblePaths = [
-    path.resolve(process.cwd(), 'server', `${moduleName}.js`),
-    path.resolve(process.cwd(), `${moduleName}.js`),
-    path.resolve(process.cwd(), 'server', `${moduleName}.ts`),
-    path.resolve(process.cwd(), `${moduleName}.ts`),
-  ];
-
-  for (const p of possiblePaths) {
-    if (fs.existsSync(p)) {
-      try {
-        return await import(pathToFileURL(p).href);
-      } catch {}
-    }
-  }
-
-  try {
-    return await import(`../../server/${moduleName}.js`);
-  } catch {
-    try {
-      return await import(`../../server/${moduleName}.ts`);
-    } catch {
-      return await import(`../../server/${moduleName}`);
-    }
-  }
-}
-
-async function loadDeps() {
-  const adminMod = await loadServerModule('firebaseAdmin');
-  const schedMod = await loadServerModule('notificationScheduler');
-  return {
-    verifyAdminAuth: adminMod.verifyAdminAuth,
-    dispatchMorningReminder: schedMod.dispatchMorningReminder,
-    dispatchEveningReminder: schedMod.dispatchEveningReminder,
-  };
-}
+import { verifyAdminAuth } from '../../server/firebaseAdmin.js';
+import { dispatchMorningReminder, dispatchEveningReminder } from '../../server/notificationScheduler.js';
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -52,7 +20,6 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const { verifyAdminAuth, dispatchMorningReminder, dispatchEveningReminder } = await loadDeps();
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
     const { slot, force, secret, idToken } = body;
     const cronSecret = process.env.CRON_SECRET || 'vocabclash_cron_internal_2026';

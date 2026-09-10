@@ -1,33 +1,10 @@
-import path from 'path';
-import fs from 'fs';
-import { pathToFileURL } from 'url';
+// Explicitly configure Vercel Serverless Function Node.js runtime
+export const config = {
+  runtime: 'nodejs',
+  maxDuration: 15,
+};
 
-async function loadScheduler() {
-  const possiblePaths = [
-    path.resolve(process.cwd(), 'server/notificationScheduler.js'),
-    path.resolve(process.cwd(), 'notificationScheduler.js'),
-    path.resolve(process.cwd(), 'server/notificationScheduler.ts'),
-    path.resolve(process.cwd(), 'notificationScheduler.ts'),
-  ];
-
-  for (const p of possiblePaths) {
-    if (fs.existsSync(p)) {
-      try {
-        return await import(pathToFileURL(p).href);
-      } catch {}
-    }
-  }
-
-  try {
-    return await import('../../server/notificationScheduler.js');
-  } catch {
-    try {
-      return await import('../../server/notificationScheduler.ts');
-    } catch {
-      return await import('../../server/notificationScheduler');
-    }
-  }
-}
+import { registerDeviceToken } from '../../server/notificationScheduler.js';
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -42,7 +19,6 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const { registerDeviceToken } = await loadScheduler();
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
     const { token, uid, platform, timezone, targetExam, userAgent } = body;
     if (!token) {

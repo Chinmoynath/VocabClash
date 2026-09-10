@@ -1,56 +1,23 @@
-import path from 'path';
-import fs from 'fs';
-import { pathToFileURL } from 'url';
-
 // Explicitly configure Vercel Serverless Function Node.js runtime
 export const config = {
   runtime: 'nodejs',
   maxDuration: 15,
 };
 
-async function loadServerModule(moduleName: string) {
-  const possiblePaths = [
-    path.resolve(process.cwd(), 'server', `${moduleName}.js`),
-    path.resolve(process.cwd(), `${moduleName}.js`),
-    path.resolve(process.cwd(), 'server', `${moduleName}.ts`),
-    path.resolve(process.cwd(), `${moduleName}.ts`),
-  ];
-
-  for (const p of possiblePaths) {
-    if (fs.existsSync(p)) {
-      try {
-        return await import(pathToFileURL(p).href);
-      } catch {}
-    }
-  }
-
-  try {
-    return await import(`../../server/${moduleName}.js`);
-  } catch {
-    try {
-      return await import(`../../server/${moduleName}.ts`);
-    } catch {
-      return await import(`../../server/${moduleName}`);
-    }
-  }
-}
-
-async function loadModules() {
-  const adminMod = await loadServerModule('firebaseAdmin');
-  const schedMod = await loadServerModule('notificationScheduler');
-  return {
-    verifyAdminAuth: adminMod.verifyAdminAuth,
-    sendMulticastPush: adminMod.sendMulticastPush,
-    getFirebaseAdminApp: adminMod.getFirebaseAdminApp,
-    checkFirebaseAdminCredentials: adminMod.checkFirebaseAdminCredentials,
-    ADMIN_EMAIL: adminMod.ADMIN_EMAIL,
-    getTokensForTarget: schedMod.getTokensForTarget,
-    logNotification: schedMod.logNotification,
-    getIstDateString: schedMod.getIstDateString,
-    removeDeviceToken: schedMod.removeDeviceToken,
-    emitLiveNotification: schedMod.emitLiveNotification,
-  };
-}
+import {
+  verifyAdminAuth,
+  sendMulticastPush,
+  getFirebaseAdminApp,
+  checkFirebaseAdminCredentials,
+  ADMIN_EMAIL,
+} from '../../server/firebaseAdmin.js';
+import {
+  getTokensForTarget,
+  logNotification,
+  getIstDateString,
+  removeDeviceToken,
+  emitLiveNotification,
+} from '../../server/notificationScheduler.js';
 
 export default async function handler(req: any, res: any) {
   let stage = 'start';
@@ -72,25 +39,7 @@ export default async function handler(req: any, res: any) {
     });
   }
 
-  let checkCreds: (() => any) | undefined;
-
   try {
-    stage = 'module-load';
-    const modules = await loadModules();
-    checkCreds = modules.checkFirebaseAdminCredentials;
-    const {
-      verifyAdminAuth,
-      sendMulticastPush,
-      getFirebaseAdminApp,
-      checkFirebaseAdminCredentials,
-      ADMIN_EMAIL,
-      getTokensForTarget,
-      logNotification,
-      getIstDateString,
-      removeDeviceToken,
-      emitLiveNotification,
-    } = modules;
-
     // 1. Auth verification stage
     stage = 'auth-verification';
     const authHeader = req.headers?.authorization || '';
@@ -237,7 +186,7 @@ export default async function handler(req: any, res: any) {
 
     let credsStatus;
     try {
-      credsStatus = checkCreds?.();
+      credsStatus = checkFirebaseAdminCredentials?.();
     } catch {}
 
     return res.status(500).json({
