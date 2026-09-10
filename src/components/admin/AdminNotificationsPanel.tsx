@@ -125,13 +125,14 @@ export const AdminNotificationsPanel: React.FC = () => {
   const [testAuditResult, setTestAuditResult] = useState<{
     endpoint: string;
     httpStatus: number;
-    contentType: string;
+    stage: string;
     eligibleTokenCount: number;
-    fcmAttempted: boolean;
-    fcmSuccess: boolean;
-    fcmFailed: number;
+    attempted: boolean;
+    successful: boolean;
+    failed: number;
     firebaseErrorCode: string | null;
     messageId: string | null;
+    credentialsStatus?: any;
     timestamp: string;
   } | null>(null);
 
@@ -282,17 +283,18 @@ export const AdminNotificationsPanel: React.FC = () => {
         throw new Error(`Server endpoint returned HTTP ${res.status} (${contentType || 'plain text'}): ${rawText.slice(0, 150) || 'Route missing or unreachable on production'}`);
       }
 
-      // Record live backend audit payload for Requirement 6
+      // Record live backend audit payload for Requirement 16
       const auditPayload = {
-        endpoint,
+        endpoint: data?.endpoint || endpoint,
         httpStatus: res.status,
-        contentType,
+        stage: data?.stage || (res.ok ? 'send-completed' : 'server-stage-unknown'),
         eligibleTokenCount: data?.eligibleTokenCount ?? (localToken ? 1 : (statusData?.activeTokensCount || 0)),
-        fcmAttempted: Boolean(data?.fcmAttempted ?? true),
-        fcmSuccess: Boolean(res.ok && data?.success),
-        fcmFailed: data?.fcmFailed ?? (data?.success ? 0 : 1),
+        attempted: Boolean(data?.attempted ?? data?.fcmAttempted ?? true),
+        successful: Boolean(res.ok && (data?.successful ?? data?.success)),
+        failed: data?.failed ?? (data?.success ? 0 : 1),
         firebaseErrorCode: data?.firebaseErrorCode || (data?.success ? null : (data?.error || 'UNKNOWN_ERROR')),
         messageId: data?.messageId || data?.result?.messageId || null,
+        credentialsStatus: data?.credentialsStatus || null,
         timestamp: new Date().toLocaleTimeString('en-US', { timeZone: 'Asia/Kolkata' }),
       };
       setTestAuditResult(auditPayload);
@@ -590,63 +592,79 @@ export const AdminNotificationsPanel: React.FC = () => {
         </div>
       )}
 
-      {/* Requirement 6: Manual Test Send Backend Response Audit */}
+      {/* Requirement 16: Manual Test Send Backend Response Audit */}
       {testAuditResult && (
         <div className="p-4 rounded-2xl bg-slate-900 border border-slate-700 text-xs font-mono space-y-3 shadow-xl">
           <div className="flex items-center justify-between border-b border-slate-800 pb-2">
             <div className="flex items-center gap-2 text-slate-200 font-sans font-bold text-xs">
               <Activity className="w-4 h-4 text-sky-400" />
-              <span>Manual Test Send Audit Log ({testAuditResult.timestamp})</span>
+              <span>Production Server FCM Dispatch Result ({testAuditResult.timestamp})</span>
             </div>
             <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold font-sans ${
-              testAuditResult.fcmSuccess 
+              testAuditResult.successful 
                 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' 
                 : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
             }`}>
-              {testAuditResult.fcmSuccess ? 'FCM_SUCCESS' : 'FCM_FAILED'}
+              {testAuditResult.successful ? 'FCM_SUCCESS' : 'FCM_FAILED'}
             </span>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px]">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 text-[11px]">
             <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
-              <span className="text-slate-400 block text-[10px]">Endpoint:</span>
+              <span className="text-slate-400 block text-[10px]">Server endpoint:</span>
               <span className="text-sky-300 font-bold">{testAuditResult.endpoint}</span>
             </div>
             <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
-              <span className="text-slate-400 block text-[10px]">HTTP Status:</span>
+              <span className="text-slate-400 block text-[10px]">HTTP status:</span>
               <span className={`font-bold ${testAuditResult.httpStatus === 200 ? 'text-emerald-400' : 'text-rose-400'}`}>
                 {testAuditResult.httpStatus}
               </span>
             </div>
             <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
-              <span className="text-slate-400 block text-[10px]">Content-Type:</span>
-              <span className="text-slate-200 truncate block">{testAuditResult.contentType || 'none'}</span>
+              <span className="text-slate-400 block text-[10px]">Stage:</span>
+              <span className="text-purple-300 font-bold">{testAuditResult.stage}</span>
             </div>
             <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
-              <span className="text-slate-400 block text-[10px]">Eligible Tokens:</span>
+              <span className="text-slate-400 block text-[10px]">Eligible tokens:</span>
               <span className="text-amber-300 font-bold">{testAuditResult.eligibleTokenCount}</span>
             </div>
             <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
-              <span className="text-slate-400 block text-[10px]">FCM Attempted:</span>
-              <span className="text-slate-200 font-bold">{testAuditResult.fcmAttempted ? 'Yes' : 'No'}</span>
+              <span className="text-slate-400 block text-[10px]">Attempted:</span>
+              <span className="text-slate-200 font-bold">{testAuditResult.attempted ? 'Yes' : 'No'}</span>
             </div>
             <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
-              <span className="text-slate-400 block text-[10px]">FCM Success:</span>
-              <span className={`font-bold ${testAuditResult.fcmSuccess ? 'text-emerald-400' : 'text-rose-400'}`}>
-                {testAuditResult.fcmSuccess ? 'true' : 'false'}
+              <span className="text-slate-400 block text-[10px]">Successful:</span>
+              <span className={`font-bold ${testAuditResult.successful ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {testAuditResult.successful ? 'true' : 'false'}
               </span>
             </div>
             <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
-              <span className="text-slate-400 block text-[10px]">FCM Failed:</span>
-              <span className={`font-bold ${testAuditResult.fcmFailed > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
-                {testAuditResult.fcmFailed}
+              <span className="text-slate-400 block text-[10px]">Failed:</span>
+              <span className={`font-bold ${testAuditResult.failed > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                {testAuditResult.failed}
               </span>
             </div>
             <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
-              <span className="text-slate-400 block text-[10px]">Firebase Error Code:</span>
+              <span className="text-slate-400 block text-[10px]">Firebase message ID:</span>
+              <span className="text-cyan-300 truncate block font-bold" title={testAuditResult.messageId || 'none'}>
+                {testAuditResult.messageId ? testAuditResult.messageId.split('/').pop() : 'none'}
+              </span>
+            </div>
+            <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 col-span-2">
+              <span className="text-slate-400 block text-[10px]">Error code / reason:</span>
               <span className={`font-bold ${testAuditResult.firebaseErrorCode ? 'text-rose-400' : 'text-emerald-400'}`}>
-                {testAuditResult.firebaseErrorCode || 'NONE'}
+                {testAuditResult.firebaseErrorCode || 'NONE (OK)'}
               </span>
             </div>
+            {testAuditResult.credentialsStatus && (
+              <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 col-span-2">
+                <span className="text-slate-400 block text-[10px]">Production Server Credentials:</span>
+                <span className="text-slate-300 text-[10px]">
+                  Project: <strong className="text-sky-300">{testAuditResult.credentialsStatus.projectId}</strong> | 
+                  ClientEmail: <strong className={testAuditResult.credentialsStatus.hasClientEmail ? 'text-emerald-400' : 'text-rose-400'}>{testAuditResult.credentialsStatus.hasClientEmail ? 'PRESENT' : 'MISSING'}</strong> | 
+                  PrivateKey: <strong className={testAuditResult.credentialsStatus.hasPrivateKey ? 'text-emerald-400' : 'text-rose-400'}>{testAuditResult.credentialsStatus.hasPrivateKey ? 'PRESENT' : 'MISSING'}</strong>
+                </span>
+              </div>
+            )}
           </div>
         </div>
       )}

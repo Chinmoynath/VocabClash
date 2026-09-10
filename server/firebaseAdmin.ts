@@ -6,58 +6,167 @@ import path from 'path';
 import fs from 'fs';
 
 export const ADMIN_EMAIL = 'nathchinmoy777@gmail.com';
+export const DEFAULT_PROJECT_ID = 'tactile-world-jq6d2';
 
-let isInitialized = false;
+export interface FirebaseCredentialsStatus {
+  projectId: string;
+  hasProjectId: boolean;
+  hasClientEmail: boolean;
+  hasPrivateKey: boolean;
+  hasServiceAccountKey: boolean;
+  hasGoogleAppCredentials: boolean;
+  keyFormat: 'pem' | 'escaped_newlines' | 'invalid' | 'none';
+  authType: 'service_account_env' | 'service_account_json' | 'google_app_credentials' | 'project_id_only' | 'none';
+  hasPrivilegedCredentials: boolean;
+  error?: string;
+}
+
+/**
+ * Inspect server environment variables without exposing secret values
+ */
+export function checkFirebaseAdminCredentials(): FirebaseCredentialsStatus {
+  const projectId = (
+    process.env.FIREBASE_PROJECT_ID ||
+    process.env.GCP_PROJECT ||
+    process.env.GCLOUD_PROJECT ||
+    DEFAULT_PROJECT_ID
+  ).trim();
+
+  const clientEmail = (process.env.FIREBASE_CLIENT_EMAIL || '').trim();
+  let rawPrivateKey = process.env.FIREBASE_PRIVATE_KEY || '';
+  const serviceAccountKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY || '';
+  const googleAppCreds = process.env.GOOGLE_APPLICATION_CREDENTIALS || '';
+
+  let keyFormat: FirebaseCredentialsStatus['keyFormat'] = 'none';
+  if (rawPrivateKey) {
+    if (rawPrivateKey.includes('\\n')) {
+      keyFormat = 'escaped_newlines';
+    } else if (rawPrivateKey.includes('-----BEGIN PRIVATE KEY-----')) {
+      keyFormat = 'pem';
+    } else {
+      keyFormat = 'invalid';
+    }
+  }
+
+  let authType: FirebaseCredentialsStatus['authType'] = 'none';
+  let hasPrivilegedCredentials = false;
+
+  if (clientEmail && rawPrivateKey) {
+    authType = 'service_account_env';
+    hasPrivilegedCredentials = true;
+  } else if (serviceAccountKey) {
+    authType = 'service_account_json';
+    hasPrivilegedCredentials = true;
+  } else if (googleAppCreds) {
+    authType = 'google_app_credentials';
+    hasPrivilegedCredentials = true;
+  } else {
+    authType = 'project_id_only';
+    hasPrivilegedCredentials = false;
+  }
+
+  return {
+    projectId,
+    hasProjectId: Boolean(process.env.FIREBASE_PROJECT_ID),
+    hasClientEmail: Boolean(clientEmail),
+    hasPrivateKey: Boolean(rawPrivateKey),
+    hasServiceAccountKey: Boolean(serviceAccountKey),
+    hasGoogleAppCredentials: Boolean(googleAppCreds),
+    keyFormat,
+    authType,
+    hasPrivilegedCredentials,
+  };
+}
+
+/**
+ * Format private key safely: unwraps quotes and handles literal \n strings
+ */
+function sanitizePrivateKey(rawKey: string): string {
+  if (!rawKey) return '';
+  let key = rawKey.trim();
+  if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
+    key = key.slice(1, -1).trim();
+  }
+  if (key.includes('\\n')) {
+    key = key.replace(/\\n/g, '\n');
+  }
+  return key;
+}
 
 export function getFirebaseAdminApp(): App {
   const existingApps = getApps();
-  if (isInitialized && existingApps.length > 0) {
+  if (existingApps.length > 0) {
     return existingApps[0]!;
   }
 
+  const credStatus = checkFirebaseAdminCredentials();
+  const projectId = credStatus.projectId;
+
   try {
-    let projectId = 'tactile-world-jq6d2';
-    
-    // Check if firebase-applet-config exists
-    const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
-    if (fs.existsSync(configPath)) {
-      try {
-        const raw = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-        if (raw.projectId) {
-          projectId = raw.projectId;
-        }
-      } catch {}
+    // 1. Check direct service account environment variables (standard Vercel setup)
+    if (process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
+      const formattedKey = sanitizePrivateKey(process.env.FIREBASE_PRIVATE_KEY);
+      console.log(`[Firebase Admin] Initializing with FIREBASE_CLIENT_EMAIL and formatted private key (${projectId})`);
+      initializeApp({
+        credential: cert({
+          projectId,
+          clientEmail: process.env.FIREBASE_CLIENT_EMAIL.trim(),
+          privateKey: formattedKey,
+        }),
+        projectId,
+      });
+      return getApps()[0]!;
     }
 
+    // 2. Check full JSON / base64 service account string
     if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
-      const sa = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
+      let saString = process.env.FIREBASE_SERVICE_ACCOUNT_KEY.trim();
+      if (saString.startsWith('ey')) {
+        // Base64 encoded JSON
+        try {
+          saString = Buffer.from(saString, 'base64').toString('utf8');
+        } catch {}
+      }
+      const sa = JSON.parse(saString);
+      if (sa.private_key) {
+        sa.private_key = sanitizePrivateKey(sa.private_key);
+      }
+      console.log(`[Firebase Admin] Initializing with FIREBASE_SERVICE_ACCOUNT_KEY (${sa.project_id || projectId})`);
       initializeApp({
         credential: cert(sa),
         projectId: sa.project_id || projectId,
       });
-    } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+      return getApps()[0]!;
+    }
+
+    // 3. Check GOOGLE_APPLICATION_CREDENTIALS file path
+    if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+      console.log(`[Firebase Admin] Initializing with applicationDefault credentials (${projectId})`);
       initializeApp({
         credential: applicationDefault(),
         projectId,
       });
-    } else {
-      initializeApp({
-        projectId,
-      });
+      return getApps()[0]!;
     }
 
-    isInitialized = true;
-    console.log(`[Firebase Admin] Initialized successfully for project: ${projectId}`);
+    // 4. Fallback: Initialize with Project ID only
+    console.warn(`[Firebase Admin] No service account credentials detected in environment. Initializing default project instance for: ${projectId}`);
+    initializeApp({
+      projectId,
+    });
     return getApps()[0]!;
-  } catch (err) {
+  } catch (err: any) {
     const apps = getApps();
     if (apps.length > 0) {
-      isInitialized = true;
       return apps[0]!;
     }
-    console.warn('[Firebase Admin] Notice initializing default admin instance:', err);
-    initializeApp({ projectId: 'tactile-world-jq6d2' });
-    isInitialized = true;
+    console.error('[Firebase Admin] Error initializing privileged credential:', {
+      name: err?.name,
+      message: err?.message,
+      code: err?.code,
+    });
+    // Ultimate fallback to ensure no crash
+    initializeApp({ projectId });
     return getApps()[0]!;
   }
 }
@@ -76,6 +185,7 @@ export function getAdminFirestoreDatabaseId(): string {
 }
 
 let adminDbInstance: ReturnType<typeof getFirestore> | null = null;
+let firestoreSettingsApplied = false;
 
 export function getAdminFirestore() {
   if (adminDbInstance) {
@@ -85,16 +195,22 @@ export function getAdminFirestore() {
   const databaseId = getAdminFirestoreDatabaseId();
   try {
     const db = getFirestore(app, databaseId);
-    try {
-      db.settings({ ignoreUndefinedProperties: true });
-    } catch {}
+    if (!firestoreSettingsApplied) {
+      try {
+        db.settings({ ignoreUndefinedProperties: true });
+        firestoreSettingsApplied = true;
+      } catch {}
+    }
     adminDbInstance = db;
     return db;
   } catch {
     const db = getFirestore(app);
-    try {
-      db.settings({ ignoreUndefinedProperties: true });
-    } catch {}
+    if (!firestoreSettingsApplied) {
+      try {
+        db.settings({ ignoreUndefinedProperties: true });
+        firestoreSettingsApplied = true;
+      } catch {}
+    }
     adminDbInstance = db;
     return db;
   }
@@ -238,12 +354,19 @@ export async function sendPushToToken(token: string, payload: FcmPayload): Promi
   };
 
   try {
+    console.log(`[push] firebase admin initialized - sending FCM to token (...${token.slice(-8)})`);
     const messaging = getAdminMessaging();
     const response = await messaging.send(message);
+    console.log(`[push] FCM send completed, messageId: ${response}`);
     return { token, success: true, messageId: response };
   } catch (err: any) {
     const errMsg = err?.message || String(err);
-    const errCode = err?.code || '';
+    const errCode = err?.code || err?.errorInfo?.code || '';
+    console.error(`[push] FCM send failed for token (...${token.slice(-8)}):`, {
+      name: err?.name,
+      code: errCode,
+      message: errMsg,
+    });
     const isUnregistered =
       errCode.includes('registration-token-not-registered') ||
       errCode.includes('invalid-registration-token') ||
