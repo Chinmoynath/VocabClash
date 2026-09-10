@@ -13,6 +13,6 @@ export default async function handler(req: any, res: any) {
     const events = getRecentBroadcastEvents(since);
     return res.status(200).json({ success: true, events, timestamp: Date.now() });
   } catch (err: any) {
-    return res.status(500).json({ success: false, error: err?.message || 'Failed to fetch broadcast events' });
+    return res.status(200).json({ success: true, events: [], timestamp: Date.now(), error: err?.message });
   }
 }

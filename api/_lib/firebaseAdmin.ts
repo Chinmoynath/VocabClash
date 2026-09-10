@@ -1,9 +1,4 @@
-import { initializeApp, getApps, cert, applicationDefault } from 'firebase-admin/app';
-import type { App } from 'firebase-admin/app';
-import { getAuth, type Auth } from 'firebase-admin/auth';
-import { getMessaging, type Messaging, type Message, type MulticastMessage } from 'firebase-admin/messaging';
-import { getFirestore, type Firestore } from 'firebase-admin/firestore';
-
+// Firebase Admin Module with safe dynamic imports for Vercel Serverless & Node runtimes
 export const ADMIN_EMAIL = 'nathchinmoy777@gmail.com';
 export const DEFAULT_PROJECT_ID = 'tactile-world-jq6d2';
 export const DEFAULT_DATABASE_ID = 'ai-studio-vocabclashgovtex-f49a3d8d-a36c-4264-be13-35bd86c794c3';
@@ -96,20 +91,36 @@ export function checkFirebaseAdminCredentials(): FirebaseCredentialsStatus {
   };
 }
 
-let cachedAdminApp: App | null = null;
-let cachedAuth: Auth | null = null;
-let cachedFirestore: Firestore | null = null;
-let cachedMessaging: Messaging | null = null;
+let cachedAdminSdk: any = null;
+async function getAdminSdk(): Promise<any> {
+  if (cachedAdminSdk) return cachedAdminSdk;
+  try {
+    const mod = await import('firebase-admin');
+    cachedAdminSdk = mod.default || mod;
+    return cachedAdminSdk;
+  } catch (err) {
+    console.warn('[Firebase Admin] Dynamic import failed:', err);
+    return null;
+  }
+}
+
+let cachedAdminApp: any = null;
+let cachedAuth: any = null;
+let cachedFirestore: any = null;
+let cachedMessaging: any = null;
 let firestoreSettingsApplied = false;
 
 /**
  * Lazy initialization of Firebase Admin app.
  * Returns null if privileged credentials are not configured in environment.
  */
-export function getFirebaseAdminApp(): App | null {
-  const existingApps = getApps();
+export async function getFirebaseAdminAppAsync(): Promise<any> {
+  const admin = await getAdminSdk();
+  if (!admin) return null;
+
+  const existingApps = admin.apps || [];
   if (existingApps.length > 0) {
-    return existingApps[0]!;
+    return existingApps[0];
   }
   if (cachedAdminApp) {
     return cachedAdminApp;
@@ -125,8 +136,8 @@ export function getFirebaseAdminApp(): App | null {
   try {
     if (process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
       const formattedKey = sanitizePrivateKey(process.env.FIREBASE_PRIVATE_KEY);
-      cachedAdminApp = initializeApp({
-        credential: cert({
+      cachedAdminApp = admin.initializeApp({
+        credential: admin.credential.cert({
           projectId,
           clientEmail: process.env.FIREBASE_CLIENT_EMAIL.trim(),
           privateKey: formattedKey,
@@ -147,16 +158,16 @@ export function getFirebaseAdminApp(): App | null {
       if (sa.private_key) {
         sa.private_key = sanitizePrivateKey(sa.private_key);
       }
-      cachedAdminApp = initializeApp({
-        credential: cert(sa),
+      cachedAdminApp = admin.initializeApp({
+        credential: admin.credential.cert(sa),
         projectId: sa.project_id || projectId,
       });
       return cachedAdminApp;
     }
 
     if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-      cachedAdminApp = initializeApp({
-        credential: applicationDefault(),
+      cachedAdminApp = admin.initializeApp({
+        credential: admin.credential.applicationDefault(),
         projectId,
       });
       return cachedAdminApp;
@@ -172,16 +183,22 @@ export function getFirebaseAdminApp(): App | null {
   }
 }
 
+export function getFirebaseAdminApp(): any {
+  return cachedAdminApp;
+}
+
 export function getAdminFirestoreDatabaseId(): string {
   return process.env.FIREBASE_DATABASE_ID || DEFAULT_DATABASE_ID;
 }
 
-export function getAdminAuth(): Auth | null {
+export async function getAdminAuthAsync(): Promise<any> {
   if (cachedAuth) return cachedAuth;
-  const app = getFirebaseAdminApp();
+  const admin = await getAdminSdk();
+  if (!admin) return null;
+  const app = await getFirebaseAdminAppAsync();
   if (!app) return null;
   try {
-    cachedAuth = getAuth(app);
+    cachedAuth = admin.auth(app);
     return cachedAuth;
   } catch (err) {
     console.error('[Firebase Admin] getAdminAuth failed:', err);
@@ -189,13 +206,19 @@ export function getAdminAuth(): Auth | null {
   }
 }
 
-export function getAdminFirestore(): Firestore | null {
+export function getAdminAuth(): any {
+  return cachedAuth;
+}
+
+export async function getAdminFirestoreAsync(): Promise<any> {
   if (cachedFirestore) return cachedFirestore;
-  const app = getFirebaseAdminApp();
+  const admin = await getAdminSdk();
+  if (!admin) return null;
+  const app = await getFirebaseAdminAppAsync();
   if (!app) return null;
   const databaseId = getAdminFirestoreDatabaseId();
   try {
-    const db = getFirestore(app, databaseId);
+    const db = admin.firestore(app);
     if (!firestoreSettingsApplied) {
       try {
         db.settings({ ignoreUndefinedProperties: true });
@@ -204,35 +227,33 @@ export function getAdminFirestore(): Firestore | null {
     }
     cachedFirestore = db;
     return db;
-  } catch {
-    try {
-      const db = getFirestore(app);
-      if (!firestoreSettingsApplied) {
-        try {
-          db.settings({ ignoreUndefinedProperties: true });
-          firestoreSettingsApplied = true;
-        } catch {}
-      }
-      cachedFirestore = db;
-      return db;
-    } catch (err) {
-      console.error('[Firebase Admin] getAdminFirestore failed:', err);
-      return null;
-    }
+  } catch (err) {
+    console.error('[Firebase Admin] getAdminFirestore failed:', err);
+    return null;
   }
 }
 
-export function getAdminMessaging(): Messaging | null {
+export function getAdminFirestore(): any {
+  return cachedFirestore;
+}
+
+export async function getAdminMessagingAsync(): Promise<any> {
   if (cachedMessaging) return cachedMessaging;
-  const app = getFirebaseAdminApp();
+  const admin = await getAdminSdk();
+  if (!admin) return null;
+  const app = await getFirebaseAdminAppAsync();
   if (!app) return null;
   try {
-    cachedMessaging = getMessaging(app);
+    cachedMessaging = admin.messaging(app);
     return cachedMessaging;
   } catch (err) {
     console.error('[Firebase Admin] getAdminMessaging failed:', err);
     return null;
   }
+}
+
+export function getAdminMessaging(): any {
+  return cachedMessaging;
 }
 
 export interface AdminAuthVerificationResult {
@@ -271,7 +292,7 @@ export async function verifyAdminAuth(authHeaderOrToken?: string): Promise<Admin
     };
   }
 
-  const auth = getAdminAuth();
+  const auth = await getAdminAuthAsync();
   if (!auth) {
     try {
       const parts = token.split('.');
@@ -443,7 +464,7 @@ export async function sendPushToToken(token: string, payload: FcmPayload): Promi
     };
   }
 
-  const messaging = getAdminMessaging();
+  const messaging = await getAdminMessagingAsync();
   if (!messaging) {
     return {
       token,
@@ -458,7 +479,7 @@ export async function sendPushToToken(token: string, payload: FcmPayload): Promi
   const type = payload.type || 'general';
   const icon = payload.icon || 'https://vocabclash.in/icon-192.png';
 
-  const message: Message = {
+  const message: any = {
     token,
     notification: {
       title,
@@ -533,7 +554,7 @@ export async function sendMulticastPush(
     return { successCount: 0, failureCount: 0, unregisteredTokens: [], results: [] };
   }
 
-  const messaging = getAdminMessaging();
+  const messaging = await getAdminMessagingAsync();
   const uniqueTokens = Array.from(new Set(tokens.filter(Boolean)));
   const results: SendResult[] = [];
   const unregisteredTokens: string[] = [];
@@ -578,7 +599,7 @@ export async function sendMulticastPush(
     const batch = realFcmTokens.slice(i, i + BATCH_SIZE);
 
     try {
-      const multicastMessage: MulticastMessage = {
+      const multicastMessage: any = {
         tokens: batch,
         notification: {
           title: payload.title,

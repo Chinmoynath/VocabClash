@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { getAdminFirestore, sendPushToToken, sendMulticastPush, ADMIN_EMAIL } from './firebaseAdmin';
+import { getAdminFirestoreAsync, sendPushToToken, sendMulticastPush, ADMIN_EMAIL } from './firebaseAdmin';
 import type { FcmPayload } from './firebaseAdmin';
 
 export interface DeviceTokenRecord {
@@ -156,7 +156,7 @@ export async function registerDeviceToken(record: {
 
   // Sync to Firestore if Firestore DB is available and accessible
   try {
-    const db = getAdminFirestore();
+    const db = await getAdminFirestoreAsync();
     if (db && record.uid && record.uid !== 'anonymous') {
       const tokenDocRef = db.collection('users').doc(record.uid).collection('notificationTokens').doc(encodeURIComponent(record.token.slice(-32)));
       await tokenDocRef.set({
@@ -186,7 +186,7 @@ export async function removeDeviceToken(token: string): Promise<void> {
 
   if (existing?.uid && existing.uid !== 'anonymous') {
     try {
-      const db = getAdminFirestore();
+      const db = await getAdminFirestoreAsync();
       if (db) {
         const tokenDocRef = db.collection('users').doc(existing.uid).collection('notificationTokens').doc(encodeURIComponent(token.slice(-32)));
         await tokenDocRef.delete();
@@ -216,7 +216,7 @@ export async function saveUserPreferences(uid: string, prefs: Partial<UserPrefer
   memoryPreferences.set(uid, updated);
 
   try {
-    const db = getAdminFirestore();
+    const db = await getAdminFirestoreAsync();
     if (db) {
       await db.collection('users').doc(uid).collection('preferences').doc('notifications').set({
         enabled: updated.enabled ?? true,
@@ -244,7 +244,7 @@ export async function logNotification(log: Omit<NotificationLogItem, 'id'>): Pro
   }
 
   try {
-    const db = getAdminFirestore();
+    const db = await getAdminFirestoreAsync();
     if (db) {
       await db.collection('notification_logs').doc(id).set(item);
     }
@@ -258,7 +258,7 @@ export async function logNotification(log: Omit<NotificationLogItem, 'id'>): Pro
  */
 export async function getRecentNotificationLogs(limitCount: number = 30): Promise<NotificationLogItem[]> {
   try {
-    const db = getAdminFirestore();
+    const db = await getAdminFirestoreAsync();
     if (db) {
       const snap = await db.collection('notification_logs').orderBy('sentAt', 'desc').limit(limitCount).get();
       if (!snap.empty) {
@@ -277,7 +277,7 @@ export async function getTokensForTarget(target: string, adminUid?: string): Pro
   // Sync from Firestore to memory if memory is empty
   if (memoryTokens.size === 0) {
     try {
-      const db = getAdminFirestore();
+      const db = await getAdminFirestoreAsync();
       if (db) {
         const usersSnap = await db.collection('users').limit(100).get();
         for (const userDoc of usersSnap.docs) {

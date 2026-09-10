@@ -1,5 +1,5 @@
 import { getMessaging, getToken, onMessage, isSupported, Messaging } from 'firebase/messaging';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
 import { app, db, auth } from './firebaseService';
 import {
   trackNotificationPermissionGranted,
@@ -975,7 +975,35 @@ export async function setupForegroundMessageListener(
     console.warn('[FCM] Foreground listener note:', err);
   }
 
-  // 2. Setup Real-time Server-Sent Events (SSE) stream for instantaneous multi-device alerts
+  // 2. Setup Real-time Firestore Broadcast Listener (instant WebSocket events, works universally)
+  let unsubscribeFirestore: (() => void) | null = null;
+  try {
+    const broadcastsCol = collection(db, 'broadcast_notifications');
+    const q = query(broadcastsCol, orderBy('sentAt', 'desc'), limit(5));
+    unsubscribeFirestore = onSnapshot(q, (snapshot) => {
+      snapshot.docChanges().forEach((change) => {
+        if (change.type === 'added') {
+          const data = change.doc.data();
+          const sentAt = data.sentAt || Date.now();
+          // Only process broadcasts sent within the last 5 minutes to avoid duplicate popups on reload
+          if (Date.now() - sentAt < 5 * 60 * 1000) {
+            handleIncomingBroadcast({
+              id: change.doc.id,
+              title: data.title,
+              body: data.body,
+              url: data.url,
+              type: data.type,
+              timestamp: sentAt,
+            });
+          }
+        }
+      });
+    }, () => {
+      // Best effort listener fallback
+    });
+  } catch {}
+
+  // 3. Setup Server-Sent Events (SSE) / Live stream for Node environments
   let eventSource: EventSource | null = null;
   let lastCheckedTime = Date.now() - 60000;
 
@@ -1034,7 +1062,6 @@ export async function setupForegroundMessageListener(
 
   const startStream = () => {
     if (typeof window === 'undefined' || typeof EventSource === 'undefined') {
-      startPolling();
       return;
     }
 
@@ -1055,72 +1082,8 @@ export async function setupForegroundMessageListener(
           eventSource.close();
           eventSource = null;
         }
-        // Fallback to polling if stream drops
-        startPolling();
       };
-    } catch {
-      startPolling();
-    }
-  };
-
-  let failureCount = 0;
-  let pollTimeout: any = null;
-
-  const startPolling = () => {
-    if (pollTimeout || isCleanedUp) return;
-
-    const scheduleNext = (delayMs: number) => {
-      if (isCleanedUp) return;
-      pollTimeout = setTimeout(poll, delayMs);
-    };
-
-    const poll = async () => {
-      if (isCleanedUp) return;
-      try {
-        const res = await fetch(`/api/notifications/live-broadcast?since=${lastCheckedTime}`);
-        if (res.ok) {
-          failureCount = 0;
-          const data = await res.json();
-          if (data.events && Array.isArray(data.events)) {
-            for (const ev of data.events) {
-              handleIncomingBroadcast(ev);
-            }
-          }
-          if (data.timestamp) {
-            lastCheckedTime = data.timestamp;
-          }
-          // On success, continue normal polling every 8 seconds
-          scheduleNext(8000);
-        } else {
-          failureCount++;
-          if (failureCount === 1) {
-            console.warn('[LiveBroadcast] Polling error (status ' + res.status + '). Backoff 1: retrying in 5s...');
-            scheduleNext(5000);
-          } else if (failureCount === 2) {
-            console.warn('[LiveBroadcast] Polling error (status ' + res.status + '). Backoff 2: retrying in 15s...');
-            scheduleNext(15000);
-          } else if (failureCount === 3) {
-            console.warn('[LiveBroadcast] Polling error (status ' + res.status + '). Backoff 3: retrying in 30s...');
-            scheduleNext(30000);
-          } else {
-            console.warn('[LiveBroadcast] Polling failed 3 consecutive times. Stopped polling to prevent log storms. Backend live broadcast offline.');
-          }
-        }
-      } catch (err) {
-        failureCount++;
-        if (failureCount === 1) {
-          scheduleNext(5000);
-        } else if (failureCount === 2) {
-          scheduleNext(15000);
-        } else if (failureCount === 3) {
-          scheduleNext(30000);
-        } else {
-          console.warn('[LiveBroadcast] Polling network failures exceeded limit. Pausing polling.');
-        }
-      }
-    };
-
-    poll();
+    } catch {}
   };
 
   startStream();
@@ -1131,9 +1094,11 @@ export async function setupForegroundMessageListener(
       eventSource.close();
       eventSource = null;
     }
-    if (pollTimeout) {
-      clearTimeout(pollTimeout);
-      pollTimeout = null;
+    if (unsubscribeFirestore) {
+      try {
+        unsubscribeFirestore();
+      } catch {}
+      unsubscribeFirestore = null;
     }
   };
 }
