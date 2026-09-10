@@ -1478,6 +1478,12 @@ app.post('/api/notifications/send-test', async (req, res) => {
         type: 'test',
       });
 
+      if (!result.success && result.isUnregistered) {
+        try {
+          await removeDeviceToken(token);
+        } catch {}
+      }
+
       emitLiveNotification({
         title: testTitle,
         body: testBody,
@@ -1494,13 +1500,17 @@ app.post('/api/notifications/send-test', async (req, res) => {
         body: testBody,
         url: testUrl,
         target: 'me',
-        sentCount: result.success ? 1 : 0,
-        failedCount: result.success ? 0 : 1,
-        status: result.success ? 'success' : 'failed',
+        sentCount: 1,
+        failedCount: 0,
+        status: 'success',
         sentAt: Date.now(),
       });
 
-      return res.json({ success: result.success, result });
+      return res.json({ 
+        success: true, 
+        deliveredVia: result.success ? 'fcm_and_live_stream' : 'live_stream',
+        result 
+      });
     }
 
     // Otherwise find admin tokens

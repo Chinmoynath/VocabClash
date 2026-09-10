@@ -448,7 +448,7 @@ export async function registerFcmToken(
       } catch {}
     }
 
-    // 3. Obtain FCM Messaging token safely with robust error protection
+    // 3. Obtain FCM Messaging token safely with robust error protection and self-healing
     let token: string | null = null;
     try {
       const messaging = await getMessagingInstance();
@@ -457,28 +457,40 @@ export async function registerFcmToken(
         const validVapid = sanitizeVapidKey(rawVapid);
 
         try {
-          if (validVapid) {
+          token = await getToken(messaging, {
+            serviceWorkerRegistration: swRegistration,
+            vapidKey: validVapid,
+          });
+        } catch (innerTokenErr: any) {
+          console.warn('[FCM] Primary getToken notice (stale subscription / key mismatch):', innerTokenErr?.message || innerTokenErr);
+          
+          // Self-healing: If an old or mismatched PushSubscription was registered on this browser, unsubscribe it
+          try {
+            if (swRegistration && 'pushManager' in swRegistration) {
+              const oldSub = await swRegistration.pushManager.getSubscription();
+              if (oldSub) {
+                console.log('[FCM] Clearing stale browser PushSubscription...');
+                await oldSub.unsubscribe();
+              }
+            }
+          } catch (unsubErr) {
+            console.warn('[FCM] Could not clear existing subscription:', unsubErr);
+          }
+
+          // Retry with fresh subscription and sanitized VAPID key
+          try {
             token = await getToken(messaging, {
               serviceWorkerRegistration: swRegistration,
               vapidKey: validVapid,
             });
-          } else {
-            // Attempt standard token retrieval without invalid VAPID argument
-            token = await getToken(messaging, {
-              serviceWorkerRegistration: swRegistration,
-            });
-          }
-        } catch (innerTokenErr: any) {
-          console.warn('[FCM] Primary getToken failed:', innerTokenErr?.message || innerTokenErr);
-          
-          // If first attempt failed with VAPID key mismatch/pattern error, retry once cleanly without vapidKey
-          if (validVapid) {
+          } catch (retryVapidErr) {
+            console.warn('[FCM] Retry with VAPID noted, trying standard registration:', retryVapidErr);
             try {
               token = await getToken(messaging, {
                 serviceWorkerRegistration: swRegistration,
               });
-            } catch (retryErr) {
-              console.warn('[FCM] Fallback getToken without VAPID also noted:', retryErr);
+            } catch (finalRetryErr) {
+              console.warn('[FCM] Standard getToken notice:', finalRetryErr);
             }
           }
         }

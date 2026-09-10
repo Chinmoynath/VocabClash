@@ -217,14 +217,18 @@ export const AdminNotificationsPanel: React.FC = () => {
         });
         fetchStatusAndLogs();
       } else {
+        // If there was an issue with a stale token, clear it so next attempt generates fresh registration
+        try { localStorage.removeItem('vocabclash_fcm_token_v1'); } catch {}
         throw new Error(data.error || 'Failed to send test push');
       }
     } catch (err: any) {
       console.error('[AdminPanel] Error sending test push:', err);
+      // Auto-clear potentially corrupt local token
+      try { localStorage.removeItem('vocabclash_fcm_token_v1'); } catch {}
       setActionFeedback({ 
         type: 'error', 
         text: err?.message?.includes('pattern') 
-          ? 'Push token note: System auto-switched to Live Stream mode for vocabclash.in. Check VAPID diagnostics below.'
+          ? 'Push token refreshed. Click Send Test Notification again to dispatch.'
           : (err?.message || 'Error sending test') 
       });
     } finally {
