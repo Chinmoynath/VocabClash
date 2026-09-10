@@ -112,6 +112,7 @@ export const AdminNotificationsPanel: React.FC = () => {
   const [showConfirmModal, setShowConfirmModal] = useState(false);
 
   useEffect(() => {
+    fetchStatusAndLogs();
     const unsub = auth.onAuthStateChanged((user) => {
       setCurrentUser(user);
       const email = user?.email?.toLowerCase().trim() || '';
@@ -121,7 +122,15 @@ export const AdminNotificationsPanel: React.FC = () => {
         fetchStatusAndLogs();
       }
     });
-    return () => unsub();
+
+    const interval = setInterval(() => {
+      fetchStatusAndLogs();
+    }, 10000);
+
+    return () => {
+      unsub();
+      clearInterval(interval);
+    };
   }, []);
 
   const getAdminIdToken = async (): Promise<string | null> => {
@@ -274,9 +283,7 @@ export const AdminNotificationsPanel: React.FC = () => {
       const rawErr = err?.message || String(err);
       setActionFeedback({ 
         type: 'error', 
-        text: rawErr.toLowerCase().includes('pattern')
-          ? 'Web Push key sanitized. Please retry broadcast.'
-          : (rawErr || 'Error executing broadcast')
+        text: rawErr || 'Error executing broadcast'
       });
     } finally {
       setSendingBroadcast(false);
