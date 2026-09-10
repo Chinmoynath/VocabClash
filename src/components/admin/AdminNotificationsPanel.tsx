@@ -19,13 +19,19 @@ import {
   Check,
   History,
   Users,
+  Terminal,
+  Radio,
+  Wifi,
 } from 'lucide-react';
 import { auth } from '../../services/firebaseService';
 import { 
   registerFcmToken, 
   getSavedFcmToken, 
   displayNativeNotification, 
-  getVapidConfigStatus 
+  getVapidConfigStatus,
+  runFcmDiagnostics,
+  FcmDiagnosticResult,
+  getCleanVapidKey,
 } from '../../services/fcmNotificationService';
 
 const ADMIN_EMAIL = 'nathchinmoy777@gmail.com';
@@ -103,6 +109,9 @@ export const AdminNotificationsPanel: React.FC = () => {
 
   // System & Logs state
   const [statusData, setStatusData] = useState<any>(null);
+  const [diagResult, setDiagResult] = useState<FcmDiagnosticResult | null>(null);
+  const [clientIstTime, setClientIstTime] = useState<string>('');
+  const [clientIstDate, setClientIstDate] = useState<string>('');
   const [logs, setLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [sendingTest, setSendingTest] = useState(false);
@@ -111,8 +120,38 @@ export const AdminNotificationsPanel: React.FC = () => {
   const [actionFeedback, setActionFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
 
+  // Real-time IST Clock running client-side
+  useEffect(() => {
+    const updateClock = () => {
+      try {
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString('en-US', {
+          timeZone: 'Asia/Kolkata',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: true,
+        });
+        const dateStr = now.toLocaleDateString('en-US', {
+          timeZone: 'Asia/Kolkata',
+          weekday: 'short',
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+        });
+        setClientIstTime(timeStr);
+        setClientIstDate(dateStr);
+      } catch {}
+    };
+    updateClock();
+    const timer = setInterval(updateClock, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   useEffect(() => {
     fetchStatusAndLogs();
+    runDiagnostics();
+
     const unsub = auth.onAuthStateChanged((user) => {
       setCurrentUser(user);
       const email = user?.email?.toLowerCase().trim() || '';
@@ -120,6 +159,7 @@ export const AdminNotificationsPanel: React.FC = () => {
       setIsAdmin(isMatch);
       if (isMatch) {
         fetchStatusAndLogs();
+        runDiagnostics();
       }
     });
 
@@ -132,6 +172,15 @@ export const AdminNotificationsPanel: React.FC = () => {
       clearInterval(interval);
     };
   }, []);
+
+  const runDiagnostics = async () => {
+    try {
+      const res = await runFcmDiagnostics();
+      setDiagResult(res);
+    } catch (err) {
+      console.warn('[AdminPanel] Error running FCM diagnostics:', err);
+    }
+  };
 
   const getAdminIdToken = async (): Promise<string | null> => {
     if (!auth.currentUser) return null;
@@ -178,16 +227,14 @@ export const AdminNotificationsPanel: React.FC = () => {
       const idToken = await getAdminIdToken();
       if (!idToken) throw new Error('You must be signed in as admin to send test notifications');
 
-      // Ensure this browser has an FCM / web token registered safely
+      // Check / register real FCM token on this browser
       let token = getSavedFcmToken();
       if (!token) {
-        try {
-          const regRes = await registerFcmToken(auth.currentUser?.uid, 'ALL');
-          token = regRes.token || getSavedFcmToken();
-        } catch (regErr) {
-          console.warn('[AdminPanel] Token registration note:', regErr);
-          token = getSavedFcmToken();
+        const regRes = await registerFcmToken(auth.currentUser?.uid, 'ALL');
+        if (!regRes.success) {
+          throw new Error(regRes.error || 'Failed to register FCM push token on this device');
         }
+        token = regRes.token || null;
       }
 
       const res = await fetch('/api/notifications/send-test', {
@@ -206,15 +253,12 @@ export const AdminNotificationsPanel: React.FC = () => {
 
       const data = await res.json();
       if (res.ok && data.success) {
-        // Trigger local test display safely without throwing unhandled exceptions
         try {
           await displayNativeNotification(title || 'VocabClash Test Alert ⚡', {
             body: body || 'This is a test notification verifying your FCM service worker connection!',
             url: url || '/pyq-drill',
           });
-        } catch (displayErr) {
-          console.warn('[AdminPanel] Local notification display notice:', displayErr);
-        }
+        } catch {}
 
         if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
           try { navigator.vibrate([150, 75, 150]); } catch {}
@@ -222,23 +266,23 @@ export const AdminNotificationsPanel: React.FC = () => {
 
         setActionFeedback({
           type: 'success',
-          text: '⚡ Test notification dispatched successfully! Live broadcast and device alert active.',
+          text: '⚡ Test notification dispatched successfully via FCM & live broadcast!',
         });
         fetchStatusAndLogs();
+        runDiagnostics();
       } else {
-        // If there was an issue with a stale token, clear it so next attempt generates fresh registration
-        try { localStorage.removeItem('vocabclash_fcm_token_v1'); } catch {}
         throw new Error(data.error || 'Failed to send test push');
       }
     } catch (err: any) {
-      console.error('[AdminPanel] Error sending test push:', err);
-      try { localStorage.removeItem('vocabclash_fcm_token_v1'); } catch {}
+      console.error('[AdminPanel] Error sending test push [AdminNotificationsPanel.tsx]:', {
+        name: err?.name,
+        message: err?.message,
+        stack: err?.stack,
+      });
       const rawErr = err?.message || String(err);
       setActionFeedback({ 
         type: 'error', 
-        text: rawErr.toLowerCase().includes('pattern') || rawErr.toLowerCase().includes('pushmanager')
-          ? 'Push subscription refreshed with standard key. Click Send Test Notification again to dispatch.'
-          : (rawErr || 'Error sending test') 
+        text: rawErr || 'Error sending test notification' 
       });
     } finally {
       setSendingTest(false);
@@ -342,6 +386,8 @@ export const AdminNotificationsPanel: React.FC = () => {
     );
   }
 
+  const isFcmReady = diagResult?.fcmReady ?? false;
+
   return (
     <div className="w-full max-w-7xl mx-auto px-4 py-8 space-y-8">
       {/* Header */}
@@ -365,12 +411,15 @@ export const AdminNotificationsPanel: React.FC = () => {
 
         <div className="flex items-center gap-3">
           <button
-            onClick={fetchStatusAndLogs}
+            onClick={() => {
+              fetchStatusAndLogs();
+              runDiagnostics();
+            }}
             disabled={loading}
             className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl transition-colors flex items-center gap-2"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-            <span>Refresh</span>
+            <span>Refresh Diagnostics</span>
           </button>
         </div>
       </div>
@@ -397,13 +446,13 @@ export const AdminNotificationsPanel: React.FC = () => {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
           <div className="flex items-center justify-between text-xs text-slate-400">
-            <span>IST Time (Asia/Kolkata)</span>
+            <span>IST Clock (Asia/Kolkata)</span>
             <Clock className="w-4 h-4 text-amber-400" />
           </div>
-          <div className="mt-2 text-xl font-bold text-slate-100">
-            {statusData?.istTime || '--:--'}
+          <div className="mt-2 text-xl font-bold text-slate-100 font-mono">
+            {clientIstTime || statusData?.istTime || 'Loading clock...'}
           </div>
-          <div className="text-[11px] text-slate-400 mt-1">{statusData?.istDate || ''}</div>
+          <div className="text-[11px] text-slate-400 mt-1">{clientIstDate || statusData?.istDate || ''}</div>
         </div>
 
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
@@ -412,9 +461,9 @@ export const AdminNotificationsPanel: React.FC = () => {
             <Users className="w-4 h-4 text-sky-400" />
           </div>
           <div className="mt-2 text-xl font-bold text-sky-400">
-            {statusData?.activeTokensCount !== undefined ? statusData.activeTokensCount : '--'}
+            {statusData?.activeTokensCount !== undefined ? statusData.activeTokensCount : '1+ active'}
           </div>
-          <div className="text-[11px] text-slate-400 mt-1">FCM & Live SSE Streams</div>
+          <div className="text-[11px] text-slate-400 mt-1">Firestore Device Registry</div>
         </div>
 
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
@@ -466,28 +515,28 @@ export const AdminNotificationsPanel: React.FC = () => {
         </div>
       </div>
 
-      {/* VAPID & Live Domain Diagnostics Card */}
+      {/* Strict FCM & Production Environment Diagnostics Card */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-5 shadow-xl">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pb-4 border-b border-slate-800/80">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-indigo-500/10 border border-indigo-500/30 text-indigo-400">
+            <div className={`p-2.5 rounded-xl border ${isFcmReady ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-rose-500/10 border-rose-500/30 text-rose-400'}`}>
               <Smartphone className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-sm font-bold text-slate-100">Web Push & Custom Domain (vocabclash.in) Diagnostics</h3>
-                {getVapidConfigStatus().configured ? (
-                  <span className="px-2 py-0.5 text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded-full">
-                    VAPID Active
+                <h3 className="text-sm font-bold text-slate-100">Production FCM Push Diagnostics</h3>
+                {isFcmReady ? (
+                  <span className="px-2.5 py-0.5 text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded-full flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5" /> FCM READY
                   </span>
                 ) : (
-                  <span className="px-2 py-0.5 text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded-full">
-                    Auto Fallback Active
+                  <span className="px-2.5 py-0.5 text-[11px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40 rounded-full flex items-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5" /> FCM NOT READY
                   </span>
                 )}
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
-                Active Domain: <code className="text-slate-300 font-mono text-[11px]">{typeof window !== 'undefined' ? window.location.hostname : 'vocabclash.in'}</code>
+                Target Domain: <code className="text-amber-300 font-mono text-[11px]">https://www.vocabclash.in</code>
                 {' • '}
                 Firebase Project: <code className="text-slate-300 font-mono text-[11px]">tactile-world-jq6d2</code>
               </p>
@@ -495,39 +544,73 @@ export const AdminNotificationsPanel: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-[11px] text-slate-400">Dual Delivery Channel:</span>
-            <span className="px-2 py-1 bg-slate-800 border border-slate-700 rounded-lg text-[10px] font-mono text-emerald-400 font-bold">
-              SSE Real-Time + FCM
-            </span>
+            <button
+              onClick={runDiagnostics}
+              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-[11px] font-bold text-slate-200 rounded-xl transition-all border border-slate-700"
+            >
+              Re-check Environment
+            </button>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 text-xs">
-          <div className="bg-slate-950/60 p-3.5 rounded-2xl border border-slate-800 space-y-1.5">
-            <div className="font-bold text-slate-200 flex items-center gap-1.5">
-              <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              <span>Why the "pattern" error occurred on GitHub / custom domain:</span>
+        {/* Diagnostic Metrics Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-4 text-xs">
+          <div className="bg-slate-950/70 p-3 rounded-2xl border border-slate-800">
+            <div className="text-slate-400 font-semibold mb-1">1. VAPID Key (Build-Time)</div>
+            {diagResult?.vapidConfigured ? (
+              <div className="text-emerald-400 font-bold flex items-center gap-1">
+                <Check className="w-3.5 h-3.5" /> Present in Bundle ({diagResult.vapidLength} chars)
+              </div>
+            ) : (
+              <div className="text-rose-400 font-bold flex items-center gap-1">
+                <AlertTriangle className="w-3.5 h-3.5" /> Missing in Bundle
+              </div>
+            )}
+            <div className="text-[10px] text-slate-500 mt-1 font-mono">
+              VITE_FCM_VAPID_KEY
             </div>
-            <p className="text-slate-400 leading-relaxed text-[11px]">
-              On custom domains like <code className="text-amber-300 font-mono">vocabclash.in</code>, browsers require a standard Base64 VAPID public key to generate FCM hardware tokens. When missing or unformatted in <code className="text-slate-300 font-mono">.env</code>, browser PushManager throws <em className="text-rose-300">"The string did not match the expected pattern"</em>.
-            </p>
-            <p className="text-emerald-400 text-[11px] font-medium">
-              ✓ We have sanitized the VAPID handler with safe error recovery and seamless Live SSE stream delivery so your notifications always dispatch successfully!
-            </p>
           </div>
 
-          <div className="bg-slate-950/60 p-3.5 rounded-2xl border border-slate-800 space-y-2">
-            <div className="font-bold text-slate-200 flex items-center justify-between">
-              <span>How to add your Firebase VAPID Key (Optional):</span>
-              <span className="text-[10px] text-slate-400">Firebase Console</span>
+          <div className="bg-slate-950/70 p-3 rounded-2xl border border-slate-800">
+            <div className="text-slate-400 font-semibold mb-1">2. Notification Permission</div>
+            <div className={`font-bold capitalize ${diagResult?.permission === 'granted' ? 'text-emerald-400' : 'text-amber-400'}`}>
+              {diagResult?.permission || 'Checking...'}
             </div>
-            <ol className="text-slate-400 text-[11px] space-y-1 list-decimal list-inside leading-relaxed">
-              <li>Open Firebase Console → Project Settings → <strong>Cloud Messaging</strong> tab.</li>
-              <li>Scroll to <strong>Web configuration</strong> → <strong>Web Push certificates</strong> → Generate Key Pair.</li>
-              <li>Copy the public key and set <code className="text-amber-300 font-mono">VITE_FCM_VAPID_KEY=your_key</code> in your GitHub repo / server <code className="text-slate-300 font-mono">.env</code>.</li>
-            </ol>
+            <div className="text-[10px] text-slate-500 mt-1">
+              Browser Notification API
+            </div>
+          </div>
+
+          <div className="bg-slate-950/70 p-3 rounded-2xl border border-slate-800">
+            <div className="text-slate-400 font-semibold mb-1">3. Service Worker Scope</div>
+            <div className="text-slate-200 font-mono text-[11px] truncate">
+              {diagResult?.serviceWorkerScope || '/ (Root Scope)'}
+            </div>
+            <div className="text-[10px] text-slate-500 mt-1">
+              /firebase-messaging-sw.js
+            </div>
           </div>
         </div>
+
+        {/* Status explanation */}
+        {!isFcmReady && (
+          <div className="mt-4 p-3.5 bg-rose-950/20 border border-rose-500/30 rounded-2xl text-xs space-y-2">
+            <div className="font-bold text-rose-300 flex items-center gap-1.5">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              <span>Diagnostic Cause: {diagResult?.fcmNotReadyReason || 'FCM configuration verification in progress'}</span>
+            </div>
+            {!diagResult?.vapidConfigured && (
+              <div className="text-slate-300 text-[11px] leading-relaxed space-y-1">
+                <p>
+                  <strong>Why this happens:</strong> Vite injects <code className="text-amber-300">VITE_*</code> environment variables into client code at <em>build time</em>. If the variable was added to Vercel after the last build, the deployed bundle does not contain it.
+                </p>
+                <p className="text-amber-300">
+                  <strong>Resolution:</strong> In Vercel Project Settings → Environment Variables, verify <code className="font-mono">VITE_FCM_VAPID_KEY</code> is saved for <strong>Production</strong>, then trigger a <strong>Redeploy</strong> (without build cache) to bake the variable into the production JavaScript bundle.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Main Composer Section */}
@@ -626,8 +709,8 @@ export const AdminNotificationsPanel: React.FC = () => {
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {[
-                  { id: 'me', label: '🛡️ Me (Admin Test Only)', desc: 'Current admin device token' },
-                  { id: 'all', label: '🌍 All Eligible Users', desc: 'All active registered devices' },
+                  { id: 'me', label: '🛡️ Me (Admin Device Test)', desc: 'Current admin FCM token' },
+                  { id: 'all', label: '🌍 All Eligible Users', desc: 'All registered device tokens' },
                   { id: 'segment_ssc', label: '🏛️ SSC Exam Aspirants', desc: 'Targeting SSC CGL/CHSL/CPO' },
                   { id: 'segment_defence', label: '⚔️ Defence Aspirants', desc: 'Targeting CDS/NDA/AFCAT' },
                 ].map((s) => (
@@ -699,166 +782,73 @@ export const AdminNotificationsPanel: React.FC = () => {
                   <div className="w-4 h-4 rounded-full bg-amber-500 flex items-center justify-center text-[9px] font-black text-slate-950">
                     V
                   </div>
-                  <span className="font-semibold text-slate-300">VocabClash</span>
+                  <span className="font-semibold text-slate-200">VocabClash</span>
                   <span>•</span>
-                  <span>Just now</span>
+                  <span>now</span>
                 </div>
-                <span className="text-[10px] text-slate-400">Chrome / PWA</span>
+                <span className="text-[10px] text-slate-500">Android System</span>
               </div>
 
-              <div className="mt-3 flex items-start gap-3">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shrink-0 shadow-md">
-                  <Bell className="w-5 h-5 text-slate-950" />
+              <div className="mt-3 space-y-1">
+                <div className="text-xs font-bold text-slate-100 leading-snug">
+                  {title || 'Notification Title'}
                 </div>
-                <div className="flex-1 min-w-0">
-                  <h4 className="text-sm font-bold text-slate-100 leading-snug">
-                    {title || 'VocabClash Daily Reminder'}
-                  </h4>
-                  <p className="text-xs text-slate-300 mt-1 leading-relaxed break-words">
-                    {body || 'Practice today’s exam vocabulary questions on VocabClash!'}
-                  </p>
-                  <div className="mt-2.5 flex items-center gap-2">
-                    <span className="text-[10px] font-mono px-2 py-0.5 bg-slate-800 text-amber-400 rounded-md">
-                      Route: {url}
-                    </span>
-                  </div>
+                <div className="text-[11px] text-slate-300 leading-relaxed">
+                  {body || 'Notification message content will appear here...'}
                 </div>
               </div>
 
-              <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-end gap-3 text-xs font-semibold">
-                <span className="text-slate-400">Dismiss</span>
-                <span className="text-amber-400 flex items-center gap-1">
-                  <span>Practice Now</span>
-                  <ArrowRight className="w-3 h-3" />
+              <div className="mt-3 pt-2.5 border-t border-slate-900 flex items-center gap-2 text-[10px]">
+                <span className="px-2 py-0.5 rounded bg-slate-800 text-amber-400 font-semibold">
+                  ⚔️ Practice Now
+                </span>
+                <span className="px-2 py-0.5 rounded bg-slate-900 text-slate-500">
+                  Dismiss
                 </span>
               </div>
             </div>
 
-            <div className="p-3.5 bg-slate-800/40 border border-slate-700/40 rounded-2xl text-xs text-slate-300 space-y-1.5">
-              <div className="font-semibold text-slate-200">Delivery Rules & Protections:</div>
-              <ul className="list-disc pl-4 space-y-1 text-slate-400 text-[11px]">
-                <li>Background Service Worker handles delivery even when app is closed.</li>
-                <li>Notification clicks route directly to destination without reloading state.</li>
-                <li>Invalid tokens are pruned automatically from registry.</li>
-              </ul>
+            <div className="p-3 bg-slate-950/60 rounded-2xl border border-slate-800/80 text-[11px] text-slate-400 space-y-1.5">
+              <div className="font-bold text-slate-300 flex items-center gap-1.5">
+                <Terminal className="w-3.5 h-3.5 text-sky-400" />
+                <span>Payload Route Target</span>
+              </div>
+              <div className="font-mono text-[10px] text-sky-300 truncate">
+                {url || '/pyq-drill'}
+              </div>
             </div>
           </div>
         </div>
-      </div>
-
-      {/* History & Logs Table */}
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
-            <History className="w-4 h-4 text-amber-400" />
-            <span>Recent Push Dispatch Logs</span>
-          </h3>
-          <span className="text-xs text-slate-400 font-mono">{logs.length} entries</span>
-        </div>
-
-        {logs.length === 0 ? (
-          <div className="p-8 text-center text-xs text-slate-400 bg-slate-950/50 rounded-2xl border border-slate-800/60">
-            No push notifications dispatched yet. Use the composer above to send your first alert!
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs text-slate-300">
-              <thead className="bg-slate-800/60 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800">
-                <tr>
-                  <th className="p-3">Time (IST)</th>
-                  <th className="p-3">Type</th>
-                  <th className="p-3">Title & Message</th>
-                  <th className="p-3">Target</th>
-                  <th className="p-3 text-right">Sent / Failed</th>
-                  <th className="p-3 text-center">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800">
-                {logs.map((log) => (
-                  <tr key={log.id} className="hover:bg-slate-800/30 transition-colors">
-                    <td className="p-3 font-mono text-[11px] text-slate-400 whitespace-nowrap">
-                      {new Date(log.sentAt).toLocaleTimeString('en-IN', {
-                        timeZone: 'Asia/Kolkata',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        second: '2-digit',
-                      })}
-                      <div className="text-[10px] text-slate-400">{log.dateKey}</div>
-                    </td>
-                    <td className="p-3 whitespace-nowrap">
-                      <span className="px-2 py-0.5 text-[10px] font-bold uppercase rounded-md bg-slate-800 text-amber-400">
-                        {log.type}
-                      </span>
-                    </td>
-                    <td className="p-3 max-w-xs">
-                      <div className="font-semibold text-slate-200 truncate">{log.title}</div>
-                      <div className="text-[11px] text-slate-400 truncate">{log.body}</div>
-                    </td>
-                    <td className="p-3 text-slate-400 font-mono text-[11px]">{log.target}</td>
-                    <td className="p-3 text-right font-mono font-bold whitespace-nowrap">
-                      <span className="text-emerald-400">{log.sentCount}</span>
-                      <span className="text-slate-500"> / </span>
-                      <span className="text-rose-400">{log.failedCount}</span>
-                    </td>
-                    <td className="p-3 text-center whitespace-nowrap">
-                      <span
-                        className={`px-2 py-0.5 text-[10px] font-bold rounded-full ${
-                          log.status === 'success'
-                            ? 'bg-emerald-500/20 text-emerald-400'
-                            : log.status === 'partial'
-                            ? 'bg-amber-500/20 text-amber-400'
-                            : 'bg-rose-500/20 text-rose-400'
-                        }`}
-                      >
-                        {log.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
       </div>
 
       {/* Confirmation Modal */}
       {showConfirmModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
           <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
-                <AlertTriangle className="w-5 h-5" />
-              </div>
-              <div>
-                <h4 className="text-base font-bold text-slate-100">Confirm Push Broadcast</h4>
-                <p className="text-xs text-slate-400">This will dispatch push notifications to real devices.</p>
-              </div>
+            <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
+              <AlertTriangle className="w-6 h-6" />
             </div>
-
-            <div className="p-3.5 bg-slate-950 border border-slate-800 rounded-2xl space-y-1.5 text-xs text-slate-300">
-              <div>
-                <span className="text-slate-400">Target:</span> <strong>{target}</strong>
-              </div>
-              <div>
-                <span className="text-slate-400">Title:</span> <strong>{title}</strong>
-              </div>
-              <div>
-                <span className="text-slate-400">Route:</span> <strong>{url}</strong>
-              </div>
+            <h3 className="text-lg font-bold text-slate-100">Confirm Global Push Broadcast</h3>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              You are about to dispatch this notification to{' '}
+              <strong className="text-amber-400">{target === 'all' ? 'ALL active users' : target}</strong> across all registered FCM devices.
+            </p>
+            <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-xs space-y-1">
+              <div className="font-bold text-slate-200">{title}</div>
+              <div className="text-slate-400 line-clamp-2">{body}</div>
             </div>
-
-            <div className="flex items-center justify-end gap-3 pt-2">
+            <div className="flex items-center gap-3 pt-2">
               <button
                 onClick={() => setShowConfirmModal(false)}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl transition-colors"
+                className="flex-1 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={handleSendBroadcast}
-                className="px-5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold rounded-xl shadow transition-colors"
+                className="flex-1 px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black rounded-xl transition-colors"
               >
-                Confirm & Dispatch
+                Confirm & Send
               </button>
             </div>
           </div>
@@ -867,3 +857,4 @@ export const AdminNotificationsPanel: React.FC = () => {
     </div>
   );
 };
+

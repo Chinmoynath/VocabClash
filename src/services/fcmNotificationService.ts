@@ -353,68 +353,139 @@ export async function requestBrowserPermission(): Promise<NotificationPermission
   });
 }
 
-// Production Web Push VAPID Public Key for Firebase Project tactile-world-jq6d2
-export const DEFAULT_VAPID_PUBLIC_KEY = 'BN7hCXmy_uYeEvhz6-LzgzmpFqJA1-SxbP_a4ixQ8DfHzG2ePkDxdZ3EeAZrMJ-DTjbhgGDcgw4L3X97gHHIMFU';
-
 /**
- * Converts a Base64/Base64URL VAPID public key string into a Uint8Array buffer
- * with strict padding to prevent browser "string did not match expected pattern" exceptions.
+ * Reads and sanitizes VITE_FCM_VAPID_KEY from Vite's import.meta.env
  */
-export function urlBase64ToUint8Array(base64String: string): Uint8Array {
-  const clean = (base64String || DEFAULT_VAPID_PUBLIC_KEY).trim().replace(/^["']|["']$/g, '');
-  const padding = '='.repeat((4 - (clean.length % 4)) % 4);
-  const base64 = (clean + padding)
-    .replace(/-/g, '+')
-    .replace(/_/g, '/');
-
-  try {
-    const rawData = window.atob(base64);
-    const outputArray = new Uint8Array(rawData.length);
-    for (let i = 0; i < rawData.length; ++i) {
-      outputArray[i] = rawData.charCodeAt(i);
-    }
-    return outputArray;
-  } catch {
-    return new Uint8Array(65);
+export function getCleanVapidKey(): string | undefined {
+  if (typeof window === 'undefined') return undefined;
+  const envVal = (import.meta as any).env?.VITE_FCM_VAPID_KEY;
+  if (!envVal || typeof envVal !== 'string') return undefined;
+  let key = envVal.trim();
+  // Strip any accidental 'VITE_FCM_VAPID_KEY=' prefix
+  if (key.startsWith('VITE_FCM_VAPID_KEY=')) {
+    key = key.replace(/^VITE_FCM_VAPID_KEY=/, '').trim();
   }
+  // Strip enclosing quotes or newlines
+  key = key.replace(/^["']|["']$/g, '').trim();
+  if (!key || key === 'undefined' || key === 'null' || key.includes('YOUR_') || key.includes('xxx')) {
+    return undefined;
+  }
+  return key;
 }
 
 /**
- * Sanitize and validate VAPID public key
+ * Check VAPID configuration status from Vite build environment
  */
-export function sanitizeVapidKey(rawKey?: string): string {
-  const candidate = rawKey || (import.meta as any).env?.VITE_FCM_VAPID_KEY || DEFAULT_VAPID_PUBLIC_KEY;
-  if (!candidate || typeof candidate !== 'string') return DEFAULT_VAPID_PUBLIC_KEY;
-  
-  // Strip surrounding quotes and whitespace
-  const cleaned = candidate.trim().replace(/^["']|["']$/g, '').trim();
-  
-  if (!cleaned || cleaned === 'undefined' || cleaned === 'null' || cleaned.includes('YOUR_') || cleaned.includes('xxx')) {
-    return DEFAULT_VAPID_PUBLIC_KEY;
+export function getVapidConfigStatus(): { configured: boolean; keyPreview?: string; keyLength: number } {
+  const key = getCleanVapidKey();
+  if (!key) {
+    return {
+      configured: false,
+      keyLength: 0,
+    };
   }
-
-  // A valid web push VAPID key is a Base64/Base64URL public key, typically 65 to 100 characters
-  if (cleaned.length < 50 || !/^[A-Za-z0-9\-_+/=]+$/.test(cleaned)) {
-    return DEFAULT_VAPID_PUBLIC_KEY;
-  }
-
-  return cleaned;
-}
-
-/**
- * Check VAPID configuration status
- */
-export function getVapidConfigStatus(): { configured: boolean; keyPreview?: string } {
-  const rawKey = (import.meta as any).env?.VITE_FCM_VAPID_KEY;
-  const sanitized = sanitizeVapidKey(rawKey);
   return {
     configured: true,
-    keyPreview: `${sanitized.slice(0, 8)}...${sanitized.slice(-6)}`,
+    keyPreview: `${key.slice(0, 8)}...${key.slice(-6)}`,
+    keyLength: key.length,
+  };
+}
+
+export interface FcmDiagnosticResult {
+  vapidConfigured: boolean;
+  vapidLength: number;
+  origin: string;
+  permission: NotificationPermission | 'unsupported';
+  isMessagingSupported: boolean;
+  serviceWorkerRegistered: boolean;
+  serviceWorkerScope?: string;
+  serviceWorkerScriptUrl?: string;
+  hasStoredToken: boolean;
+  storedTokenPreview?: string;
+  fcmReady: boolean;
+  fcmNotReadyReason?: string;
+}
+
+/**
+ * Run safe non-sensitive FCM and push diagnostic checks and log to browser console
+ */
+export async function runFcmDiagnostics(): Promise<FcmDiagnosticResult> {
+  const vapidKey = getCleanVapidKey();
+  const vapidConfigured = Boolean(vapidKey);
+  const vapidLength = vapidKey?.length ?? 0;
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const permission = getNotificationPermission();
+
+  // Safe Console Logs required by Diagnostic Plan
+  console.log('[FCM] VAPID configured:', vapidConfigured);
+  console.log('[FCM] VAPID length:', vapidLength);
+  console.log('[FCM] Origin:', origin);
+  console.log('[FCM] Notification permission:', permission);
+
+  let messagingSupported = false;
+  try {
+    messagingSupported = await checkNotificationSupport();
+  } catch {}
+  console.log('[FCM] Firebase Messaging supported:', messagingSupported);
+
+  let swRegistered = false;
+  let swScope: string | undefined;
+  let swScriptUrl: string | undefined;
+
+  if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+    try {
+      const reg = await navigator.serviceWorker.getRegistration('/');
+      if (reg) {
+        swRegistered = true;
+        swScope = reg.scope;
+        swScriptUrl = reg.active?.scriptURL || reg.installing?.scriptURL || reg.waiting?.scriptURL;
+        console.log('[FCM] Service Worker registration scope:', swScope);
+        console.log('[FCM] Active Service Worker script URL:', swScriptUrl);
+      } else {
+        console.log('[FCM] No active Service Worker registration found for root scope (/)');
+      }
+    } catch (swErr) {
+      console.warn('[FCM] Error checking service worker registration:', swErr);
+    }
+  }
+
+  const storedToken = getSavedFcmToken();
+  const hasStoredToken = Boolean(storedToken && !storedToken.startsWith('web_'));
+  const storedTokenPreview = storedToken ? `${storedToken.slice(0, 10)}...${storedToken.slice(-6)}` : undefined;
+
+  let fcmReady = false;
+  let fcmNotReadyReason: string | undefined;
+
+  if (permission !== 'granted') {
+    fcmNotReadyReason = `Notification permission not granted (current status: ${permission})`;
+  } else if (!vapidConfigured) {
+    fcmNotReadyReason = 'Production build does not contain VITE_FCM_VAPID_KEY.';
+  } else if (!messagingSupported) {
+    fcmNotReadyReason = 'Firebase Messaging is not supported in this browser environment.';
+  } else if (!hasStoredToken) {
+    fcmNotReadyReason = 'FCM token has not been generated yet. Click "Enable Reminders" to register.';
+  } else {
+    fcmReady = true;
+  }
+
+  return {
+    vapidConfigured,
+    vapidLength,
+    origin,
+    permission,
+    isMessagingSupported: messagingSupported,
+    serviceWorkerRegistered: swRegistered,
+    serviceWorkerScope: swScope,
+    serviceWorkerScriptUrl: swScriptUrl,
+    hasStoredToken,
+    storedTokenPreview,
+    fcmReady,
+    fcmNotReadyReason,
   };
 }
 
 /**
- * Register service worker for Firebase Messaging and retrieve FCM token
+ * Register service worker for Firebase Messaging and retrieve real FCM token
  */
 export async function registerFcmToken(
   customUid?: string,
@@ -450,95 +521,76 @@ export async function registerFcmToken(
 
     trackNotificationPermissionGranted('custom_prompt');
 
-    // 2. Ensure Service Worker is registered
+    // 2. Check VAPID presence from Vite build environment
+    const vapidKey = getCleanVapidKey();
+    if (!vapidKey) {
+      const errMsg = 'Production build does not contain VITE_FCM_VAPID_KEY.';
+      console.error('[FCM] registerFcmToken failed:', errMsg);
+      return {
+        success: false,
+        error: errMsg,
+        permission,
+      };
+    }
+
+    // 3. Ensure Service Worker is registered
     let swRegistration: ServiceWorkerRegistration | undefined;
     if ('serviceWorker' in navigator) {
       try {
         swRegistration = await navigator.serviceWorker.register('/firebase-messaging-sw.js', { scope: '/' });
-      } catch {
-        try {
-          swRegistration = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
-        } catch (swErr) {
-          console.warn('[FCM] Service worker registration note:', swErr);
-        }
+        await navigator.serviceWorker.ready;
+      } catch (swErr: any) {
+        console.error('[FCM] Service Worker registration failed [fcmNotificationService.ts]:', {
+          name: swErr?.name,
+          message: swErr?.message,
+          stack: swErr?.stack,
+        });
+        return {
+          success: false,
+          error: `Service Worker registration failed: ${swErr?.message || swErr}`,
+          permission,
+        };
       }
-      try {
-        if (swRegistration) {
-          await navigator.serviceWorker.ready;
-        }
-      } catch {}
     }
 
-    // 3. Obtain FCM Messaging token safely with robust error protection and self-healing
+    // 4. Obtain FCM Messaging token safely using Firebase SDK
+    const messaging = await getMessagingInstance();
+    if (!messaging) {
+      return {
+        success: false,
+        error: 'Firebase Messaging is not supported or failed to initialize in this browser.',
+        permission,
+      };
+    }
+
     let token: string | null = null;
     try {
-      const messaging = await getMessagingInstance();
-      if (messaging) {
-        const rawVapid = (import.meta as any).env?.VITE_FCM_VAPID_KEY;
-        const validVapid = sanitizeVapidKey(rawVapid);
-
-        try {
-          token = await getToken(messaging, {
-            serviceWorkerRegistration: swRegistration,
-            vapidKey: validVapid,
-          });
-        } catch (innerTokenErr: any) {
-          console.warn('[FCM] Primary getToken notice (stale subscription / key mismatch):', innerTokenErr?.message || innerTokenErr);
-          
-          // Self-healing: If an old or mismatched PushSubscription was registered on this browser, unsubscribe it
-          try {
-            if (swRegistration && 'pushManager' in swRegistration) {
-              const oldSub = await swRegistration.pushManager.getSubscription();
-              if (oldSub) {
-                console.log('[FCM] Clearing stale browser PushSubscription...');
-                await oldSub.unsubscribe();
-              }
-            }
-          } catch (unsubErr) {
-            console.warn('[FCM] Could not clear existing subscription:', unsubErr);
-          }
-
-          // Direct native push subscription with Uint8Array key
-          try {
-            if (swRegistration && 'pushManager' in swRegistration) {
-              const appKey = urlBase64ToUint8Array(validVapid);
-              await swRegistration.pushManager.subscribe({
-                userVisibleOnly: true,
-                applicationServerKey: appKey,
-              });
-            }
-          } catch (nativeSubErr) {
-            console.warn('[FCM] Native pushManager subscribe notice:', nativeSubErr);
-          }
-
-          // Retry getToken with fresh registration
-          try {
-            token = await getToken(messaging, {
-              serviceWorkerRegistration: swRegistration,
-              vapidKey: validVapid,
-            });
-          } catch (retryVapidErr) {
-            console.warn('[FCM] Retry with VAPID noted, trying standard registration:', retryVapidErr);
-            try {
-              token = await getToken(messaging, {
-                serviceWorkerRegistration: swRegistration,
-              });
-            } catch (finalRetryErr) {
-              console.warn('[FCM] Standard getToken notice:', finalRetryErr);
-            }
-          }
-        }
-      }
-    } catch (tokenErr) {
-      console.warn('[FCM] FCM getToken note:', tokenErr);
+      token = await getToken(messaging, {
+        serviceWorkerRegistration: swRegistration,
+        vapidKey,
+      });
+    } catch (tokenErr: any) {
+      console.error('[FCM] Error in getToken [fcmNotificationService.ts]:', {
+        name: tokenErr?.name,
+        message: tokenErr?.message,
+        stack: tokenErr?.stack,
+      });
+      return {
+        success: false,
+        error: `FCM getToken failed: ${tokenErr?.message || tokenErr}`,
+        permission,
+      };
     }
 
-    // Fallback client token if FCM server token is not generated in current environment
     if (!token) {
-      token = `web_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+      return {
+        success: false,
+        error: 'Firebase Messaging returned empty token.',
+        permission,
+      };
     }
 
-    // 4. Cache token in localStorage
+    // 5. Cache token in localStorage
     try {
       localStorage.setItem(STORAGE_KEY_TOKEN, token);
     } catch {}
@@ -546,7 +598,7 @@ export async function registerFcmToken(
     const uid = customUid || auth.currentUser?.uid || 'anonymous';
     const now = Date.now();
 
-    // 5. Save to user document in Firestore if logged in
+    // 6. Save to user document in Firestore if logged in
     if (uid && uid !== 'anonymous') {
       try {
         const tokenId = encodeURIComponent(token.slice(-32));
@@ -572,7 +624,7 @@ export async function registerFcmToken(
       }
     }
 
-    // 6. Register token with backend server
+    // 7. Register token with backend server
     try {
       await fetch('/api/notifications/register-token', {
         method: 'POST',
@@ -590,25 +642,17 @@ export async function registerFcmToken(
       console.warn('[FCM] Server token registration note:', apiErr);
     }
 
-    // 7. Fire immediate welcome/confirmation notification to give real user feedback
+    // 8. Fire immediate welcome/confirmation notification to give real user feedback
     try {
       if ('Notification' in window && Notification.permission === 'granted') {
         if (swRegistration && 'showNotification' in swRegistration) {
           await swRegistration.showNotification('VocabClash Daily Alerts Active! ⚔️', {
             body: 'You will receive 9:00 AM Vocab Booster and 7:00 PM Streak Protector alerts.',
-            icon: 'https://vocabclash.in/icon-192.png',
-            badge: 'https://vocabclash.in/icon-192.png',
+            icon: 'https://www.vocabclash.in/icon-192.png',
+            badge: 'https://www.vocabclash.in/icon-192.png',
             tag: 'vocabclash_welcome',
             data: { url: '/pyq-drill' },
           });
-        } else {
-          // Safe fallback for browsers without active service worker
-          try {
-            new Notification('VocabClash Daily Alerts Active! ⚔️', {
-              body: 'You will receive 9:00 AM Vocab Booster and 7:00 PM Streak Protector alerts.',
-              icon: 'https://vocabclash.in/icon-192.png',
-            });
-          } catch {}
         }
       }
     } catch (notifErr) {
@@ -617,12 +661,14 @@ export async function registerFcmToken(
 
     return { success: true, token, permission };
   } catch (err: any) {
-    console.warn('[FCM] Token registration non-fatal note:', err);
-    // Even if registration threw, return safe fallback token so user experience is not disrupted
-    const fallbackToken = `web_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    console.error('[FCM] Fatal error in registerFcmToken [fcmNotificationService.ts]:', {
+      name: err?.name,
+      message: err?.message,
+      stack: err?.stack,
+    });
     return {
-      success: true,
-      token: fallbackToken,
+      success: false,
+      error: err?.message || 'Token registration failed',
       permission: getNotificationPermission(),
     };
   }
