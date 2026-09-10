@@ -1,4 +1,4 @@
-import { getNotificationSystemStatus } from '../../server/notificationScheduler';
+import { getNotificationSystemStatus } from '../../server/notificationScheduler.ts';
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');

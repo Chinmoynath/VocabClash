@@ -1,5 +1,5 @@
-import { verifyAdminAuth } from '../../server/firebaseAdmin';
-import { getRecentNotificationLogs } from '../../server/notificationScheduler';
+import { verifyAdminAuth } from '../../server/firebaseAdmin.ts';
+import { getRecentNotificationLogs } from '../../server/notificationScheduler.ts';
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');

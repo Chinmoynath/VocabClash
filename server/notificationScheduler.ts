@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events';
-import { getFirebaseAdminApp, getAdminFirestore, sendPushToToken, sendMulticastPush, FcmPayload, ADMIN_EMAIL } from './firebaseAdmin';
+import { getFirebaseAdminApp, getAdminFirestore, sendPushToToken, sendMulticastPush, ADMIN_EMAIL } from './firebaseAdmin.ts';
+import type { FcmPayload } from './firebaseAdmin.ts';
 
 export interface DeviceTokenRecord {
   token: string;

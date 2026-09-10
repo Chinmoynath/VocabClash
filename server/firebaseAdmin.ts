@@ -1,6 +1,8 @@
-import { initializeApp, getApps, cert, applicationDefault, App } from 'firebase-admin/app';
+import { initializeApp, getApps, cert, applicationDefault } from 'firebase-admin/app';
+import type { App } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
-import { getMessaging, Message, MulticastMessage } from 'firebase-admin/messaging';
+import { getMessaging } from 'firebase-admin/messaging';
+import type { Message, MulticastMessage } from 'firebase-admin/messaging';
 import { getFirestore } from 'firebase-admin/firestore';
 import path from 'path';
 import fs from 'fs';

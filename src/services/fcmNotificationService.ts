@@ -411,11 +411,14 @@ export interface FcmDiagnosticResult {
   permission: NotificationPermission | 'unsupported';
   isMessagingSupported: boolean;
   serviceWorkerRegistered: boolean;
+  serviceWorkerActive?: boolean;
   serviceWorkerScope?: string;
   serviceWorkerScriptUrl?: string;
   hasStoredToken: boolean;
+  savedTokenPresent?: boolean;
   storedTokenPreview?: string;
   tokenVerified?: boolean;
+  tokenObtained?: boolean;
   fcmReady: boolean;
   fcmNotReadyReason?: string;
   diagnosticError?: DiagnosticErrorDetails;
@@ -583,11 +586,14 @@ export async function runFcmDiagnostics(): Promise<FcmDiagnosticResult> {
     permission,
     isMessagingSupported: messagingSupported,
     serviceWorkerRegistered: swRegistered,
+    serviceWorkerActive: swRegistered,
     serviceWorkerScope: swScope,
     serviceWorkerScriptUrl: swScriptUrl,
     hasStoredToken,
+    savedTokenPresent: hasStoredToken,
     storedTokenPreview,
     tokenVerified,
+    tokenObtained: tokenVerified,
     fcmReady,
     fcmNotReadyReason,
     diagnosticError,

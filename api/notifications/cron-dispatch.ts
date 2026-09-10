@@ -1,5 +1,5 @@
-import { verifyAdminAuth } from '../../server/firebaseAdmin';
-import { dispatchMorningReminder, dispatchEveningReminder } from '../../server/notificationScheduler';
+import { verifyAdminAuth } from '../../server/firebaseAdmin.ts';
+import { dispatchMorningReminder, dispatchEveningReminder } from '../../server/notificationScheduler.ts';
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');

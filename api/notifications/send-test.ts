@@ -4,13 +4,13 @@ import {
   getFirebaseAdminApp,
   checkFirebaseAdminCredentials,
   ADMIN_EMAIL,
-} from '../../server/firebaseAdmin';
+} from '../../server/firebaseAdmin.ts';
 import {
   getTokensForTarget,
   logNotification,
   getIstDateString,
   removeDeviceToken,
-} from '../../server/notificationScheduler';
+} from '../../server/notificationScheduler.ts';
 
 // Explicitly configure Vercel Serverless Function Node.js runtime
 export const config = {

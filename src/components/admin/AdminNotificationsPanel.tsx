@@ -829,10 +829,15 @@ export const AdminNotificationsPanel: React.FC = () => {
 
           <div className="bg-slate-950/70 p-3 rounded-2xl border border-slate-800">
             <div className="text-slate-400 font-semibold mb-1">3. Service Worker</div>
-            <div className={`font-bold flex items-center gap-1 ${diagResult?.serviceWorkerActive ? 'text-emerald-400' : 'text-amber-400'}`}>
-              {diagResult?.serviceWorkerActive ? <Check className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
-              {diagResult?.serviceWorkerActive ? 'Registered & Active' : 'Not Active'}
-            </div>
+            {(() => {
+              const swOk = Boolean(diagResult?.serviceWorkerRegistered || diagResult?.serviceWorkerActive);
+              return (
+                <div className={`font-bold flex items-center gap-1 ${swOk ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  {swOk ? <Check className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
+                  {swOk ? 'Registered & Active' : 'Not Active'}
+                </div>
+              );
+            })()}
             <div className="text-[10px] text-slate-500 mt-1 font-mono truncate">
               /firebase-messaging-sw.js
             </div>
@@ -840,10 +845,15 @@ export const AdminNotificationsPanel: React.FC = () => {
 
           <div className="bg-slate-950/70 p-3 rounded-2xl border border-slate-800">
             <div className="text-slate-400 font-semibold mb-1">4. getToken()</div>
-            <div className={`font-bold flex items-center gap-1 ${diagResult?.tokenObtained ? 'text-emerald-400' : 'text-rose-400'}`}>
-              {diagResult?.tokenObtained ? <Check className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
-              {diagResult?.tokenObtained ? 'Verified' : 'Failed'}
-            </div>
+            {(() => {
+              const tokenOk = Boolean(diagResult?.tokenVerified || diagResult?.tokenObtained);
+              return (
+                <div className={`font-bold flex items-center gap-1 ${tokenOk ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {tokenOk ? <Check className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
+                  {tokenOk ? 'Verified' : 'Failed'}
+                </div>
+              );
+            })()}
             <div className="text-[10px] text-slate-500 mt-1 font-mono truncate">
               PushManager.subscribe()
             </div>
@@ -851,12 +861,17 @@ export const AdminNotificationsPanel: React.FC = () => {
 
           <div className="bg-slate-950/70 p-3 rounded-2xl border border-slate-800">
             <div className="text-slate-400 font-semibold mb-1">5. Token Storage</div>
-            <div className={`font-bold flex items-center gap-1 ${diagResult?.savedTokenPresent ? 'text-emerald-400' : 'text-amber-400'}`}>
-              {diagResult?.savedTokenPresent ? <Check className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
-              {diagResult?.savedTokenPresent ? 'Persisted' : 'None'}
-            </div>
+            {(() => {
+              const storageOk = Boolean(diagResult?.hasStoredToken || diagResult?.savedTokenPresent);
+              return (
+                <div className={`font-bold flex items-center gap-1 ${storageOk ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  {storageOk ? <Check className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
+                  {storageOk ? 'Persisted' : 'None'}
+                </div>
+              );
+            })()}
             <div className="text-[10px] text-slate-500 mt-1 font-mono truncate">
-              fcm_token cache
+              {diagResult?.storedTokenPreview ? `${diagResult.storedTokenPreview}` : 'fcm_token cache'}
             </div>
           </div>
         </div>

@@ -1,4 +1,4 @@
-import { getRecentBroadcastEvents } from '../../server/notificationScheduler';
+import { getRecentBroadcastEvents } from '../../server/notificationScheduler.ts';
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
