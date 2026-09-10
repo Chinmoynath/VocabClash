@@ -1,4 +1,14 @@
-import { getNotificationSystemStatus } from '../../server/notificationScheduler.ts';
+async function loadScheduler() {
+  try {
+    return await import('../../server/notificationScheduler.ts');
+  } catch {
+    try {
+      return await import('../../server/notificationScheduler.js');
+    } catch {
+      return await import('../../server/notificationScheduler');
+    }
+  }
+}
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -9,6 +19,7 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
+    const { getNotificationSystemStatus } = await loadScheduler();
     const status = getNotificationSystemStatus();
     return res.status(200).json({ success: true, ...status });
   } catch (err: any) {

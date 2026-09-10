@@ -1,5 +1,15 @@
-import { verifyAdminAuth } from '../../server/firebaseAdmin.ts';
-import { getRecentNotificationLogs } from '../../server/notificationScheduler.ts';
+async function loadDeps() {
+  const adminMod = await import('../../server/firebaseAdmin.ts').catch(() =>
+    import('../../server/firebaseAdmin.js').catch(() => import('../../server/firebaseAdmin'))
+  );
+  const schedMod = await import('../../server/notificationScheduler.ts').catch(() =>
+    import('../../server/notificationScheduler.js').catch(() => import('../../server/notificationScheduler'))
+  );
+  return {
+    verifyAdminAuth: adminMod.verifyAdminAuth,
+    getRecentNotificationLogs: schedMod.getRecentNotificationLogs,
+  };
+}
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -10,6 +20,7 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
+    const { verifyAdminAuth, getRecentNotificationLogs } = await loadDeps();
     const authHeader = req.headers.authorization || '';
     const idToken = authHeader.replace(/^Bearer\s+/i, '') || (req.query?.idToken as string);
 

@@ -1,4 +1,14 @@
-import { registerDeviceToken } from '../../server/notificationScheduler.ts';
+async function loadScheduler() {
+  try {
+    return await import('../../server/notificationScheduler.ts');
+  } catch {
+    try {
+      return await import('../../server/notificationScheduler.js');
+    } catch {
+      return await import('../../server/notificationScheduler');
+    }
+  }
+}
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -13,6 +23,7 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
+    const { registerDeviceToken } = await loadScheduler();
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
     const { token, uid, platform, timezone, targetExam, userAgent } = body;
     if (!token) {

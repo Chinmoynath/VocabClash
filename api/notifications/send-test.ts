@@ -1,22 +1,28 @@
-import {
-  verifyAdminAuth,
-  sendPushToToken,
-  getFirebaseAdminApp,
-  checkFirebaseAdminCredentials,
-  ADMIN_EMAIL,
-} from '../../server/firebaseAdmin.ts';
-import {
-  getTokensForTarget,
-  logNotification,
-  getIstDateString,
-  removeDeviceToken,
-} from '../../server/notificationScheduler.ts';
-
 // Explicitly configure Vercel Serverless Function Node.js runtime
 export const config = {
   runtime: 'nodejs',
   maxDuration: 15,
 };
+
+async function loadModules() {
+  const adminMod = await import('../../server/firebaseAdmin.ts').catch(() =>
+    import('../../server/firebaseAdmin.js').catch(() => import('../../server/firebaseAdmin'))
+  );
+  const schedMod = await import('../../server/notificationScheduler.ts').catch(() =>
+    import('../../server/notificationScheduler.js').catch(() => import('../../server/notificationScheduler'))
+  );
+  return {
+    verifyAdminAuth: adminMod.verifyAdminAuth,
+    sendPushToToken: adminMod.sendPushToToken,
+    getFirebaseAdminApp: adminMod.getFirebaseAdminApp,
+    checkFirebaseAdminCredentials: adminMod.checkFirebaseAdminCredentials,
+    ADMIN_EMAIL: adminMod.ADMIN_EMAIL,
+    getTokensForTarget: schedMod.getTokensForTarget,
+    logNotification: schedMod.logNotification,
+    getIstDateString: schedMod.getIstDateString,
+    removeDeviceToken: schedMod.removeDeviceToken,
+  };
+}
 
 export default async function handler(req: any, res: any) {
   let stage = 'start';
@@ -38,7 +44,24 @@ export default async function handler(req: any, res: any) {
     });
   }
 
+  let checkCreds: (() => any) | undefined;
+
   try {
+    stage = 'module-load';
+    const modules = await loadModules();
+    checkCreds = modules.checkFirebaseAdminCredentials;
+    const {
+      verifyAdminAuth,
+      sendPushToToken,
+      getFirebaseAdminApp,
+      checkFirebaseAdminCredentials,
+      ADMIN_EMAIL,
+      getTokensForTarget,
+      logNotification,
+      getIstDateString,
+      removeDeviceToken,
+    } = modules;
+
     // 1. Auth Verification Stage
     stage = 'auth-verification';
     console.log('[push] stage: auth-verification');
@@ -209,7 +232,7 @@ export default async function handler(req: any, res: any) {
 
     let credsStatus;
     try {
-      credsStatus = checkFirebaseAdminCredentials();
+      credsStatus = checkCreds?.();
     } catch {}
 
     return res.status(500).json({

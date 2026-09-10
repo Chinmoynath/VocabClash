@@ -1,5 +1,16 @@
-import { verifyAdminAuth } from '../../server/firebaseAdmin.ts';
-import { dispatchMorningReminder, dispatchEveningReminder } from '../../server/notificationScheduler.ts';
+async function loadDeps() {
+  const adminMod = await import('../../server/firebaseAdmin.ts').catch(() =>
+    import('../../server/firebaseAdmin.js').catch(() => import('../../server/firebaseAdmin'))
+  );
+  const schedMod = await import('../../server/notificationScheduler.ts').catch(() =>
+    import('../../server/notificationScheduler.js').catch(() => import('../../server/notificationScheduler'))
+  );
+  return {
+    verifyAdminAuth: adminMod.verifyAdminAuth,
+    dispatchMorningReminder: schedMod.dispatchMorningReminder,
+    dispatchEveningReminder: schedMod.dispatchEveningReminder,
+  };
+}
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -14,6 +25,7 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
+    const { verifyAdminAuth, dispatchMorningReminder, dispatchEveningReminder } = await loadDeps();
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
     const { slot, force, secret, idToken } = body;
     const cronSecret = process.env.CRON_SECRET || 'vocabclash_cron_internal_2026';
