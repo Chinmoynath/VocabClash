@@ -393,6 +393,7 @@ export const AdminNotificationsPanel: React.FC = () => {
       const endpoint = '/api/notifications/send-admin';
       let serverSuccess = false;
       let serverData: any = null;
+      let serverErrorMsg: string | null = null;
 
       try {
         const res = await fetch(endpoint, {
@@ -413,62 +414,71 @@ export const AdminNotificationsPanel: React.FC = () => {
         const contentType = res.headers.get('content-type') || '';
         if (contentType.includes('application/json')) {
           serverData = await res.json();
-          if (res.ok && serverData?.success) {
+          if (res.ok && (serverData?.ok || serverData?.success)) {
             serverSuccess = true;
+          } else {
+            serverErrorMsg = serverData?.message || serverData?.error || `Server responded with HTTP ${res.status}`;
           }
+        } else {
+          const rawText = await res.text();
+          serverErrorMsg = `HTTP ${res.status}: ${rawText.slice(0, 100)}`;
         }
-      } catch (srvErr) {
-        console.warn('[AdminPanel] Serverless broadcast endpoint error, executing direct Firestore sync:', srvErr);
+      } catch (srvErr: any) {
+        serverErrorMsg = srvErr?.message || 'Network request failed';
       }
 
       if (serverSuccess) {
         setActionFeedback({
           type: 'success',
-          text: `📢 Successfully broadcasted push notification! (Delivered: ${serverData?.sentCount || 1} devices, Failures: ${serverData?.failureCount || 0})`,
+          text: `📢 Broadcast dispatched! (Delivered: ${serverData?.sentCount || 1} devices, Failures: ${serverData?.failureCount || 0})`,
         });
       } else {
-        // Direct Firestore Realtime Broadcast fallback
-        const broadcastDoc = {
-          title: broadcastTitle,
-          body: broadcastBody,
-          url: broadcastUrl,
-          target: broadcastTarget,
-          type: 'admin',
-          sentAt: Date.now(),
-          createdBy: auth.currentUser?.email || 'admin',
-        };
-
-        await addDoc(collection(db, 'broadcast_notifications'), broadcastDoc);
-
-        const logId = `admin_live_${Date.now()}`;
-        await setDoc(doc(db, 'notification_logs', logId), {
-          id: logId,
-          type: 'admin',
-          title: broadcastTitle,
-          body: broadcastBody,
-          url: broadcastUrl,
-          target: broadcastTarget,
-          status: 'success',
-          sentAt: Date.now(),
-          sentCount: 1,
-          failedCount: 0,
-          dateKey: new Date().toISOString().slice(0, 10),
-          slot: 'custom',
-        });
-
-        // Trigger native notification locally for immediate visual confirmation
+        // Direct Firestore Realtime Broadcast fallback for client continuity
         try {
-          await displayNativeNotification(broadcastTitle, {
+          const broadcastDoc = {
+            title: broadcastTitle,
             body: broadcastBody,
             url: broadcastUrl,
-            tag: `vocabclash_broadcast_${Date.now()}`,
-          });
-        } catch {}
+            target: broadcastTarget,
+            type: 'admin',
+            sentAt: Date.now(),
+            createdBy: auth.currentUser?.email || 'admin',
+          };
 
-        setActionFeedback({
-          type: 'success',
-          text: '📢 Broadcast active! Dispatched to connected users via real-time live channel & saved to database.',
-        });
+          await addDoc(collection(db, 'broadcast_notifications'), broadcastDoc);
+
+          const logId = `admin_live_${Date.now()}`;
+          await setDoc(doc(db, 'notification_logs', logId), {
+            id: logId,
+            type: 'admin',
+            title: broadcastTitle,
+            body: broadcastBody,
+            url: broadcastUrl,
+            target: broadcastTarget,
+            status: 'success',
+            sentAt: Date.now(),
+            sentCount: 1,
+            failedCount: 0,
+            dateKey: new Date().toISOString().slice(0, 10),
+            slot: 'custom',
+          });
+
+          // Trigger native notification locally for immediate visual confirmation
+          try {
+            await displayNativeNotification(broadcastTitle, {
+              body: broadcastBody,
+              url: broadcastUrl,
+              tag: `vocabclash_broadcast_${Date.now()}`,
+            });
+          } catch {}
+
+          setActionFeedback({
+            type: 'warning',
+            text: `⚠️ Push API notice (${serverErrorMsg || 'offline'}). Broadcast saved to Firestore & live feed.`,
+          });
+        } catch (fErr: any) {
+          throw new Error(serverErrorMsg || fErr?.message || 'Failed to broadcast notification');
+        }
       }
 
       fetchStatusAndLogs();

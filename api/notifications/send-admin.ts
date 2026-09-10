@@ -1,9 +1,8 @@
 import {
   verifyAdminAuth,
   sendMulticastPush,
-  getFirebaseAdminApp,
   checkFirebaseAdminCredentials,
-  ADMIN_EMAIL,
+  validateNotificationInput,
 } from '../_lib/firebaseAdmin.js';
 import {
   getTokensForTarget,
@@ -14,9 +13,7 @@ import {
 } from '../_lib/notificationScheduler.js';
 
 export default async function handler(req: any, res: any) {
-  let stage = 'start';
-  console.log('[push-broadcast] start - /api/notifications/send-admin invoked');
-
+  // 1. CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -28,112 +25,143 @@ export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
     return res.status(405).json({
       ok: false,
-      stage: 'method-check',
-      error: 'Method not allowed (must be POST)',
+      success: false,
+      endpoint: '/api/notifications/send-admin',
+      stage: 'method-validation',
+      errorCode: 'METHOD_NOT_ALLOWED',
+      message: `HTTP method ${req.method} is not supported. Use POST.`,
     });
   }
 
+  let stage = 'request-parsing';
   try {
-    // 1. Auth verification stage
-    stage = 'auth-verification';
-    const authHeader = req.headers?.authorization || '';
-    let body: any = {};
-    if (typeof req.body === 'string') {
+    // 2. Request body parsing
+    stage = 'request-body-parsing';
+    let body = req.body;
+    if (typeof body === 'string') {
       try {
-        body = req.body.trim() ? JSON.parse(req.body) : {};
-      } catch (jsonErr: any) {
+        body = JSON.parse(body);
+      } catch {
         return res.status(400).json({
           ok: false,
-          stage: 'body-parse',
-          error: `Malformed JSON body: ${jsonErr?.message || jsonErr}`,
+          success: false,
+          endpoint: '/api/notifications/send-admin',
+          stage: 'request-body-parsing',
+          errorCode: 'INVALID_JSON_BODY',
+          message: 'Malformed JSON payload in request body',
         });
       }
-    } else {
-      body = req.body || {};
     }
 
-    const idToken = authHeader.replace(/^Bearer\s+/i, '') || (body.idToken as string);
-    if (!idToken) {
+    // 3. Authentication (Strict Bearer token in Authorization header)
+    stage = 'auth-verification';
+    const authHeader = req.headers.authorization || req.headers.Authorization || '';
+    if (!authHeader) {
       return res.status(401).json({
         ok: false,
+        success: false,
+        endpoint: '/api/notifications/send-admin',
         stage: 'auth-verification',
-        error: 'Missing Firebase Auth ID token in Authorization header or body',
+        errorCode: 'UNAUTHORIZED_MISSING_BEARER_HEADER',
+        message: 'Missing Authorization header with Firebase Bearer token',
       });
     }
 
-    const authCheck = await verifyAdminAuth(idToken);
+    const authCheck = await verifyAdminAuth(authHeader);
     if (!authCheck.isAdmin) {
-      console.warn(`[push-broadcast] auth rejected: ${authCheck.error || 'User is not admin'}`);
-      return res.status(403).json({
+      const httpStatus = authCheck.errorCode === 'FIREBASE_ADMIN_CREDENTIALS_MISSING' ? 503 : authCheck.errorCode === 'FORBIDDEN' ? 403 : 401;
+      return res.status(httpStatus).json({
         ok: false,
-        stage: 'auth-verification',
-        error: authCheck.error || `Access denied: Only ${ADMIN_EMAIL} can dispatch broadcast notifications`,
+        success: false,
+        endpoint: '/api/notifications/send-admin',
+        stage: authCheck.stage || 'auth-verification',
+        errorCode: authCheck.errorCode || 'UNAUTHORIZED',
+        message: authCheck.error || 'Authentication failed',
       });
     }
 
-    console.log(`[push-broadcast] auth verified for admin: ${authCheck.email}`);
-
-    // 2. Firebase Admin Initialization Stage
+    // 4. Check Firebase Admin service readiness
     stage = 'firebase-admin-init';
     const credsStatus = checkFirebaseAdminCredentials();
-    getFirebaseAdminApp();
-
-    // 3. Payload validation
-    stage = 'payload-validation';
-    const { title, body: notifBody, url, target, type } = body;
-    if (!title || !notifBody) {
-      return res.status(400).json({
+    if (!credsStatus.hasPrivilegedCredentials) {
+      return res.status(503).json({
         ok: false,
-        stage: 'payload-validation',
-        error: 'Notification title and body are required',
+        success: false,
+        endpoint: '/api/notifications/send-admin',
+        stage: 'firebase-admin-init',
+        errorCode: 'FIREBASE_ADMIN_CREDENTIALS_MISSING',
+        message: 'Notification service is not configured with Firebase Admin credentials (FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY or FIREBASE_SERVICE_ACCOUNT_KEY).',
+        credentialsStatus: {
+          hasProjectId: credsStatus.hasProjectId,
+          hasClientEmail: credsStatus.hasClientEmail,
+          hasPrivateKey: credsStatus.hasPrivateKey,
+          hasServiceAccountKey: credsStatus.hasServiceAccountKey,
+          projectId: credsStatus.projectId,
+        },
       });
     }
 
-    const targetType = target || 'all';
-
-    // Broadcast to real-time connected clients in active tab immediately
-    try {
-      emitLiveNotification({
-        title: title.trim(),
-        body: notifBody.trim(),
-        url: (url || '').trim() || '/pyq-drill',
-        type: type || 'admin',
-        target: targetType,
+    // 5. Payload Validation
+    stage = 'payload-validation';
+    const validation = validateNotificationInput(body);
+    if (!validation.valid) {
+      return res.status(400).json({
+        ok: false,
+        success: false,
+        endpoint: '/api/notifications/send-admin',
+        stage: 'payload-validation',
+        errorCode: validation.errorCode,
+        message: validation.error,
       });
+    }
+
+    const { title, body: notifBody, url, target, type } = validation.data;
+
+    // 6. Broadcast to real-time connected clients (SSE / memory broadcast)
+    stage = 'live-emit';
+    let liveEventId: string | null = null;
+    try {
+      const liveEvent = emitLiveNotification({
+        title,
+        body: notifBody,
+        url,
+        type,
+        target,
+      });
+      liveEventId = liveEvent.id;
     } catch {}
 
-    // 4. Tokens loading stage
+    // 7. Token Lookup
     stage = 'tokens-load';
-    const { tokens } = await getTokensForTarget(targetType, authCheck.uid);
-    console.log(`[push-broadcast] tokens loaded: ${tokens.length} for target: "${targetType}"`);
-
+    const { tokens } = await getTokensForTarget(target, authCheck.uid);
     let sentCount = 0;
     let failureCount = 0;
-    let multicastResult: any = null;
 
+    // 8. FCM Multicast Send
     if (tokens.length > 0) {
-      // 5. Sending FCM stage
       stage = 'sending-fcm';
-      console.log(`[push-broadcast] sending multicast push to ${tokens.length} recipient tokens`);
-
-      multicastResult = await sendMulticastPush(tokens, {
-        title: title.trim(),
-        body: notifBody.trim(),
-        url: (url || '').trim() || '/pyq-drill',
-        type: type || 'admin',
+      const result = await sendMulticastPush(tokens, {
+        title,
+        body: notifBody,
+        url,
+        type,
       });
 
-      sentCount = multicastResult.successCount;
-      failureCount = multicastResult.failureCount;
+      sentCount = result.successCount;
+      failureCount = result.failureCount;
 
-      for (const deadToken of multicastResult.unregisteredTokens) {
-        try {
-          await removeDeviceToken(deadToken);
-        } catch {}
+      // 9. Invalid Token Cleanup
+      if (result.unregisteredTokens.length > 0) {
+        stage = 'token-cleanup';
+        for (const deadToken of result.unregisteredTokens) {
+          try {
+            await removeDeviceToken(deadToken);
+          } catch {}
+        }
       }
     }
 
-    // 6. Audit logging stage
+    // 10. Audit Logging (best-effort)
     stage = 'audit-logging';
     let logItem = null;
     try {
@@ -141,21 +169,19 @@ export default async function handler(req: any, res: any) {
         type: (type as any) || 'admin',
         dateKey: getIstDateString(),
         slot: 'custom',
-        title: title.trim(),
-        body: notifBody.trim(),
-        url: (url || '').trim() || '/pyq-drill',
-        target: targetType,
+        title,
+        body: notifBody,
+        url,
+        target,
         sentCount: Math.max(sentCount, tokens.length === 0 ? 0 : 1),
         failedCount: failureCount,
-        status: failureCount === 0 ? 'success' : 'partial',
+        status: failureCount === 0 ? 'success' : sentCount > 0 ? 'partial' : 'failed',
         sentAt: Date.now(),
       });
     } catch {}
 
-    // 7. Send completed stage
+    // 11. Send Completed
     stage = 'send-completed';
-    console.log(`[push-broadcast] send completed: sent=${sentCount}, failed=${failureCount}`);
-
     return res.status(200).json({
       ok: true,
       success: true,
@@ -164,23 +190,33 @@ export default async function handler(req: any, res: any) {
       stage: 'send-completed',
       eligibleTokenCount: tokens.length,
       attempted: tokens.length > 0,
-      successful: sentCount > 0,
+      successful: sentCount > 0 || tokens.length === 0,
       sentCount: Math.max(sentCount, tokens.length === 0 ? 0 : 1),
       failureCount,
-      tokensCount: tokens.length,
-      credentialsStatus: credsStatus,
+      credentialsStatus: {
+        hasProjectId: credsStatus.hasProjectId,
+        hasClientEmail: credsStatus.hasClientEmail,
+        hasPrivateKey: credsStatus.hasPrivateKey,
+        projectId: credsStatus.projectId,
+      },
       log: logItem,
+      broadcastId: liveEventId,
     });
   } catch (err: any) {
-    console.error(`[push-broadcast] FAILED at stage "${stage}":`, {
+    console.error(`[push-broadcast] Exception at stage "${stage}":`, {
       name: err?.name,
       message: err?.message,
-      stack: err?.stack,
     });
 
-    let credsStatus;
+    let safeCreds = null;
     try {
-      credsStatus = checkFirebaseAdminCredentials?.();
+      const c = checkFirebaseAdminCredentials();
+      safeCreds = {
+        hasProjectId: c.hasProjectId,
+        hasClientEmail: c.hasClientEmail,
+        hasPrivateKey: c.hasPrivateKey,
+        projectId: c.projectId,
+      };
     } catch {}
 
     return res.status(500).json({
@@ -189,10 +225,9 @@ export default async function handler(req: any, res: any) {
       endpoint: '/api/notifications/send-admin',
       httpStatus: 500,
       stage,
-      error: err?.message || 'Failed to dispatch admin broadcast notification',
-      errorName: err?.name || 'Error',
-      firebaseErrorCode: err?.code || err?.errorInfo?.code || null,
-      credentialsStatus: credsStatus || null,
+      errorCode: 'INTERNAL_SERVER_ERROR',
+      message: err?.message || 'Failed to dispatch admin notification',
+      credentialsStatus: safeCreds,
     });
   }
 }

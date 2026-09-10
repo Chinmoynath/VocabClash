@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { getFirebaseAdminApp, getAdminFirestore, sendPushToToken, sendMulticastPush, ADMIN_EMAIL } from './firebaseAdmin.js';
+import { getAdminFirestore, sendPushToToken, sendMulticastPush, ADMIN_EMAIL } from './firebaseAdmin.js';
 import type { FcmPayload } from './firebaseAdmin.js';
 
 export interface DeviceTokenRecord {
@@ -49,7 +49,7 @@ export interface LiveBroadcastEvent {
   timestamp: number;
 }
 
-// Global broadcast bus for real-time notification delivery to all connected browsers & devices
+// Global broadcast bus for real-time notification delivery to all connected clients
 export const notificationBroadcastBus = new EventEmitter();
 notificationBroadcastBus.setMaxListeners(500);
 
@@ -71,7 +71,10 @@ export function emitLiveNotification(event: Omit<LiveBroadcastEvent, 'id' | 'tim
     recentBroadcastEvents.pop();
   }
 
-  notificationBroadcastBus.emit('broadcast', fullEvent);
+  try {
+    notificationBroadcastBus.emit('broadcast', fullEvent);
+  } catch {}
+
   return fullEvent;
 }
 
@@ -84,34 +87,42 @@ export function getRecentBroadcastEvents(since?: number): LiveBroadcastEvent[] {
 const memoryTokens = new Map<string, DeviceTokenRecord>();
 const memoryPreferences = new Map<string, UserPreferencesRecord>();
 const memoryLogs: NotificationLogItem[] = [];
-const sentDailySlots = new Set<string>(); // Key: `${uid}_${dateKey}_${slot}` or `global_${dateKey}_${slot}`
+const sentDailySlots = new Set<string>();
 
 /**
  * Returns current date string in Asia/Kolkata timezone (YYYY-MM-DD)
  */
 export function getIstDateString(date: Date = new Date()): string {
-  const formatter = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Kolkata',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  });
-  return formatter.format(date); // YYYY-MM-DD
+  try {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    return formatter.format(date);
+  } catch {
+    return date.toISOString().split('T')[0]!;
+  }
 }
 
 /**
  * Returns current hour (0-23) and minute (0-59) in Asia/Kolkata
  */
 export function getIstTime(date: Date = new Date()): { hour: number; minute: number; formatted: string } {
-  const formatter = new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'Asia/Kolkata',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  });
-  const formatted = formatter.format(date);
-  const [h, m] = formatted.split(':').map(Number);
-  return { hour: h || 0, minute: m || 0, formatted };
+  try {
+    const formatter = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Kolkata',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+    const formatted = formatter.format(date);
+    const [h, m] = formatted.split(':').map(Number);
+    return { hour: h || 0, minute: m || 0, formatted };
+  } catch {
+    return { hour: date.getUTCHours(), minute: date.getUTCMinutes(), formatted: `${date.getUTCHours()}:${date.getUTCMinutes()}` };
+  }
 }
 
 /**
@@ -146,7 +157,7 @@ export async function registerDeviceToken(record: {
   // Sync to Firestore if Firestore DB is available and accessible
   try {
     const db = getAdminFirestore();
-    if (record.uid && record.uid !== 'anonymous') {
+    if (db && record.uid && record.uid !== 'anonymous') {
       const tokenDocRef = db.collection('users').doc(record.uid).collection('notificationTokens').doc(encodeURIComponent(record.token.slice(-32)));
       await tokenDocRef.set({
         token: tokenRecord.token,
@@ -162,10 +173,7 @@ export async function registerDeviceToken(record: {
       }, { merge: true });
     }
   } catch (err: any) {
-    // Graceful fallback to in-memory registry if backend admin IAM is constrained
-    if (err?.code !== 7) {
-      console.log('[Scheduler] Token registered in server memory registry (Firestore sync deferred).');
-    }
+    // Graceful fallback to memory registry
   }
 }
 
@@ -179,8 +187,10 @@ export async function removeDeviceToken(token: string): Promise<void> {
   if (existing?.uid && existing.uid !== 'anonymous') {
     try {
       const db = getAdminFirestore();
-      const tokenDocRef = db.collection('users').doc(existing.uid).collection('notificationTokens').doc(encodeURIComponent(token.slice(-32)));
-      await tokenDocRef.delete();
+      if (db) {
+        const tokenDocRef = db.collection('users').doc(existing.uid).collection('notificationTokens').doc(encodeURIComponent(token.slice(-32)));
+        await tokenDocRef.delete();
+      }
     } catch {}
   }
 }
@@ -207,24 +217,22 @@ export async function saveUserPreferences(uid: string, prefs: Partial<UserPrefer
 
   try {
     const db = getAdminFirestore();
-    await db.collection('users').doc(uid).collection('preferences').doc('notifications').set({
-      enabled: updated.enabled ?? true,
-      morningReminder: updated.morningReminder ?? true,
-      eveningStreakReminder: updated.eveningStreakReminder ?? true,
-      announcements: updated.announcements ?? true,
-      updatedAt: updated.updatedAt || Date.now(),
-    }, { merge: true });
-  } catch (err: any) {
-    if (err?.code !== 7) {
-      console.log('[Scheduler] User preferences saved in server memory registry.');
+    if (db) {
+      await db.collection('users').doc(uid).collection('preferences').doc('notifications').set({
+        enabled: updated.enabled ?? true,
+        morningReminder: updated.morningReminder ?? true,
+        eveningStreakReminder: updated.eveningStreakReminder ?? true,
+        announcements: updated.announcements ?? true,
+        updatedAt: updated.updatedAt || Date.now(),
+      }, { merge: true });
     }
-  }
+  } catch (err: any) {}
 
   return updated;
 }
 
 /**
- * Log notification dispatch for audit and idempotency
+ * Log notification dispatch for audit and idempotency (best-effort, never throws)
  */
 export async function logNotification(log: Omit<NotificationLogItem, 'id'>): Promise<NotificationLogItem> {
   const id = `notif_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -237,7 +245,9 @@ export async function logNotification(log: Omit<NotificationLogItem, 'id'>): Pro
 
   try {
     const db = getAdminFirestore();
-    await db.collection('notification_logs').doc(id).set(item);
+    if (db) {
+      await db.collection('notification_logs').doc(id).set(item);
+    }
   } catch {}
 
   return item;
@@ -246,16 +256,18 @@ export async function logNotification(log: Omit<NotificationLogItem, 'id'>): Pro
 /**
  * Get recent notification logs
  */
-export async function getRecentNotificationLogs(limit: number = 30): Promise<NotificationLogItem[]> {
+export async function getRecentNotificationLogs(limitCount: number = 30): Promise<NotificationLogItem[]> {
   try {
     const db = getAdminFirestore();
-    const snap = await db.collection('notification_logs').orderBy('sentAt', 'desc').limit(limit).get();
-    if (!snap.empty) {
-      return snap.docs.map(d => d.data() as NotificationLogItem);
+    if (db) {
+      const snap = await db.collection('notification_logs').orderBy('sentAt', 'desc').limit(limitCount).get();
+      if (!snap.empty) {
+        return snap.docs.map(d => d.data() as NotificationLogItem);
+      }
     }
   } catch (err) {}
 
-  return memoryLogs.slice(0, limit);
+  return memoryLogs.slice(0, limitCount);
 }
 
 /**
@@ -266,13 +278,15 @@ export async function getTokensForTarget(target: string, adminUid?: string): Pro
   if (memoryTokens.size === 0) {
     try {
       const db = getAdminFirestore();
-      const usersSnap = await db.collection('users').limit(100).get();
-      for (const userDoc of usersSnap.docs) {
-        const tokensSnap = await userDoc.ref.collection('notificationTokens').get();
-        for (const tDoc of tokensSnap.docs) {
-          const data = tDoc.data() as DeviceTokenRecord;
-          if (data.token) {
-            memoryTokens.set(data.token, data);
+      if (db) {
+        const usersSnap = await db.collection('users').limit(100).get();
+        for (const userDoc of usersSnap.docs) {
+          const tokensSnap = await userDoc.ref.collection('notificationTokens').get();
+          for (const tDoc of tokensSnap.docs) {
+            const data = tDoc.data() as DeviceTokenRecord;
+            if (data.token) {
+              memoryTokens.set(data.token, data);
+            }
           }
         }
       }
@@ -313,7 +327,6 @@ export async function getTokensForTarget(target: string, adminUid?: string): Pro
         matchedUids.push(record.uid);
       }
     } else {
-      // Default: match all eligible
       matchedTokens.push(record.token);
       matchedUids.push(record.uid);
     }
@@ -338,15 +351,11 @@ export async function dispatchMorningReminder(force: boolean = false): Promise<{
   const slotKey = `global_${dateKey}_morning`;
 
   if (!force && sentDailySlots.has(slotKey)) {
-    console.log(`[Scheduler] Morning reminder already sent for ${dateKey}, skipping.`);
     return { success: true, sentCount: 0, failedCount: 0, skipped: true };
   }
 
-  console.log(`[Scheduler] 🌅 Starting 9:00 AM IST Morning Vocab Goal dispatch for ${dateKey}...`);
-
   const { tokens } = await getTokensForTarget('all');
   if (tokens.length === 0) {
-    console.log('[Scheduler] No active push tokens registered for morning reminder.');
     sentDailySlots.add(slotKey);
     return { success: true, sentCount: 0, failedCount: 0, skipped: false };
   }
@@ -359,7 +368,6 @@ export async function dispatchMorningReminder(force: boolean = false): Promise<{
     tag: `vocabclash_morning_${dateKey}`,
   };
 
-  // Broadcast to all active connected devices in real time
   emitLiveNotification({
     title: payload.title,
     body: payload.body,
@@ -370,9 +378,10 @@ export async function dispatchMorningReminder(force: boolean = false): Promise<{
 
   const result = await sendMulticastPush(tokens, payload);
 
-  // Clean up invalid tokens
   for (const deadToken of result.unregisteredTokens) {
-    await removeDeviceToken(deadToken);
+    try {
+      await removeDeviceToken(deadToken);
+    } catch {}
   }
 
   sentDailySlots.add(slotKey);
@@ -391,7 +400,6 @@ export async function dispatchMorningReminder(force: boolean = false): Promise<{
     sentAt: Date.now(),
   });
 
-  console.log(`[Scheduler] 🌅 Morning reminder dispatched. Success: ${result.successCount}, Failed: ${result.failureCount}`);
   return {
     success: result.successCount > 0 || tokens.length === 0,
     sentCount: result.successCount,
@@ -413,20 +421,15 @@ export async function dispatchEveningReminder(force: boolean = false): Promise<{
   const slotKey = `global_${dateKey}_evening`;
 
   if (!force && sentDailySlots.has(slotKey)) {
-    console.log(`[Scheduler] Evening reminder already sent for ${dateKey}, skipping.`);
     return { success: true, sentCount: 0, failedCount: 0, skipped: true };
   }
 
-  console.log(`[Scheduler] 🌙 Starting 7:00 PM IST Evening Streak / Revision dispatch for ${dateKey}...`);
-
   const { tokens } = await getTokensForTarget('all');
   if (tokens.length === 0) {
-    console.log('[Scheduler] No active push tokens registered for evening reminder.');
     sentDailySlots.add(slotKey);
     return { success: true, sentCount: 0, failedCount: 0, skipped: false };
   }
 
-  // Personalized / smart fallback:
   const payload: FcmPayload = {
     title: "🔥 Don't Lose Today's Streak!",
     body: "You haven't completed today's goal yet. Play a quick 1v1 or finish a few PYQs before midnight.",
@@ -435,7 +438,6 @@ export async function dispatchEveningReminder(force: boolean = false): Promise<{
     tag: `vocabclash_evening_${dateKey}`,
   };
 
-  // Broadcast to all active connected devices in real time
   emitLiveNotification({
     title: payload.title,
     body: payload.body,
@@ -446,9 +448,10 @@ export async function dispatchEveningReminder(force: boolean = false): Promise<{
 
   const result = await sendMulticastPush(tokens, payload);
 
-  // Clean up invalid tokens
   for (const deadToken of result.unregisteredTokens) {
-    await removeDeviceToken(deadToken);
+    try {
+      await removeDeviceToken(deadToken);
+    } catch {}
   }
 
   sentDailySlots.add(slotKey);
@@ -467,7 +470,6 @@ export async function dispatchEveningReminder(force: boolean = false): Promise<{
     sentAt: Date.now(),
   });
 
-  console.log(`[Scheduler] 🌙 Evening reminder dispatched. Success: ${result.successCount}, Failed: ${result.failureCount}`);
   return {
     success: result.successCount > 0 || tokens.length === 0,
     sentCount: result.successCount,
@@ -478,35 +480,23 @@ export async function dispatchEveningReminder(force: boolean = false): Promise<{
 
 let schedulerTimer: NodeJS.Timeout | null = null;
 
-/**
- * Start the background minute-level scheduler checking IST times (9:00 AM and 7:00 PM)
- */
 export function startBackgroundNotificationScheduler(): void {
-  if (schedulerTimer) {
-    return;
-  }
-
-  console.log('[Scheduler] Background notification scheduler started. Monitoring IST time for 09:00 and 19:00 slots.');
+  if (schedulerTimer) return;
 
   const checkSchedule = async () => {
     try {
       const ist = getIstTime();
-
-      // 9:00 AM IST slot (check hour 9 and minute 0-2)
       if (ist.hour === 9 && ist.minute <= 2) {
         await dispatchMorningReminder(false);
       }
-
-      // 7:00 PM IST slot (check hour 19 and minute 0-2)
       if (ist.hour === 19 && ist.minute <= 2) {
         await dispatchEveningReminder(false);
       }
     } catch (err) {
-      console.error('[Scheduler] Error in schedule check:', err);
+      console.error('[Scheduler] Schedule check error:', err);
     }
   };
 
-  // Run initial check and then every 60 seconds
   checkSchedule();
   schedulerTimer = setInterval(checkSchedule, 60 * 1000);
 }

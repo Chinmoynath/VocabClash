@@ -7,7 +7,7 @@ import nodemailer from 'nodemailer';
 import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import { processPyqEnrichmentBatch } from './server/pyqEnrichmentLogic';
-import { verifyAdminAuth, sendPushToToken, sendMulticastPush, checkFirebaseAdminCredentials, ADMIN_EMAIL } from './server/firebaseAdmin';
+import { verifyAdminAuth, sendPushToToken, sendMulticastPush, checkFirebaseAdminCredentials, ADMIN_EMAIL, validateNotificationInput } from './server/firebaseAdmin';
 import {
   registerDeviceToken,
   removeDeviceToken,
@@ -1457,39 +1457,57 @@ app.post('/api/notifications/preferences', async (req, res) => {
 // 4. Send Test Notification to Admin's Current Device (Admin-only)
 app.post('/api/notifications/send-test', async (req, res) => {
   let stage = 'start';
-  console.log('[push] start - /api/notifications/send-test invoked');
   try {
     stage = 'auth-verification';
     const authHeader = req.headers.authorization || '';
-    const idToken = authHeader.replace(/^Bearer\s+/i, '') || (req.body?.idToken as string);
-
-    if (!idToken) {
+    if (!authHeader) {
       return res.status(401).json({
         ok: false,
+        success: false,
+        endpoint: '/api/notifications/send-test',
         stage: 'auth-verification',
-        error: 'Missing Firebase Auth ID token in Authorization header or body',
+        errorCode: 'UNAUTHORIZED_MISSING_BEARER_HEADER',
+        message: 'Missing Authorization header with Firebase Bearer token',
       });
     }
 
-    const authCheck = await verifyAdminAuth(idToken);
+    const authCheck = await verifyAdminAuth(authHeader);
     if (!authCheck.isAdmin) {
-      return res.status(403).json({
+      const httpStatus = authCheck.errorCode === 'FIREBASE_ADMIN_CREDENTIALS_MISSING' ? 503 : authCheck.errorCode === 'FORBIDDEN' ? 403 : 401;
+      return res.status(httpStatus).json({
         ok: false,
-        stage: 'auth-verification',
-        error: authCheck.error || 'Access denied: Admin authorization required',
+        success: false,
+        endpoint: '/api/notifications/send-test',
+        stage: authCheck.stage || 'auth-verification',
+        errorCode: authCheck.errorCode || 'UNAUTHORIZED',
+        message: authCheck.error || 'Authentication failed',
       });
     }
-
-    console.log(`[push] auth verified for admin: ${authCheck.email} (uid: ${authCheck.uid})`);
 
     stage = 'firebase-admin-init';
     const credsStatus = checkFirebaseAdminCredentials();
+    if (!credsStatus.hasPrivilegedCredentials) {
+      return res.status(503).json({
+        ok: false,
+        success: false,
+        endpoint: '/api/notifications/send-test',
+        stage: 'firebase-admin-init',
+        errorCode: 'FIREBASE_ADMIN_CREDENTIALS_MISSING',
+        message: 'Notification service is not configured with Firebase Admin credentials.',
+        credentialsStatus: {
+          hasProjectId: credsStatus.hasProjectId,
+          hasClientEmail: credsStatus.hasClientEmail,
+          hasPrivateKey: credsStatus.hasPrivateKey,
+          projectId: credsStatus.projectId,
+        },
+      });
+    }
 
     stage = 'tokens-load';
     const { token, title, body, url } = req.body || {};
-    const testTitle = (title || '').trim() || 'VocabClash Test';
-    const testBody = (body || '').trim() || 'Production FCM test successful.';
-    const testUrl = (url || '').trim() || '/pyq-drill';
+    const testTitle = (typeof title === 'string' ? title.trim() : '') || 'VocabClash Test Alert ⚡';
+    const testBody = (typeof body === 'string' ? body.trim() : '') || 'Production FCM test successful.';
+    const testUrl = (typeof url === 'string' && url.startsWith('/') ? url.trim() : '/pyq-drill');
 
     let targetTokens: string[] = [];
     if (token && typeof token === 'string' && token.trim().length > 20) {
@@ -1500,7 +1518,6 @@ app.post('/api/notifications/send-test', async (req, res) => {
     }
 
     const eligibleTokenCount = targetTokens.length;
-    console.log(`[push] tokens loaded - eligible count: ${eligibleTokenCount}`);
 
     if (eligibleTokenCount === 0) {
       return res.status(200).json({
@@ -1509,14 +1526,13 @@ app.post('/api/notifications/send-test', async (req, res) => {
         endpoint: '/api/notifications/send-test',
         httpStatus: 200,
         stage: 'tokens-load',
-        error: 'No eligible FCM tokens found for admin device. Please enable notifications in the browser/app first.',
+        errorCode: 'NO_ELIGIBLE_FCM_TOKENS',
+        message: 'No eligible FCM tokens found for admin device. Please enable notifications in the browser first.',
         eligibleTokenCount: 0,
         attempted: false,
         successful: false,
         failed: 0,
         messageId: null,
-        firebaseErrorCode: 'NO_ELIGIBLE_FCM_TOKENS',
-        credentialsStatus: credsStatus,
       });
     }
 
@@ -1552,7 +1568,6 @@ app.post('/api/notifications/send-test', async (req, res) => {
     } catch {}
 
     stage = 'send-completed';
-    console.log(`[push] send completed - success: ${result.success}`);
     const httpStatus = result.success ? 200 : 500;
 
     return res.status(httpStatus).json({
@@ -1566,17 +1581,12 @@ app.post('/api/notifications/send-test', async (req, res) => {
       successful: result.success,
       failed: result.success ? 0 : 1,
       messageId: result.messageId || null,
-      firebaseErrorCode: result.error || null,
-      error: result.success ? null : (result.error || 'Failed to send FCM test push'),
-      credentialsStatus: credsStatus,
+      errorCode: result.success ? null : (result.error || 'FCM_SEND_FAILED'),
+      message: result.success ? 'Test notification dispatched successfully' : (result.error || 'Failed to send FCM test push'),
       result,
     });
   } catch (err: any) {
     console.error(`[push] Exception at stage "${stage}":`, err);
-    let credsStatus;
-    try {
-      credsStatus = checkFirebaseAdminCredentials();
-    } catch {}
 
     return res.status(500).json({
       ok: false,
@@ -1584,10 +1594,8 @@ app.post('/api/notifications/send-test', async (req, res) => {
       endpoint: '/api/notifications/send-test',
       httpStatus: 500,
       stage,
-      error: err?.message || 'Failed to send test push notification',
-      errorName: err?.name || 'Error',
-      firebaseErrorCode: err?.code || null,
-      credentialsStatus: credsStatus || null,
+      errorCode: 'INTERNAL_SERVER_ERROR',
+      message: err?.message || 'Failed to send test push notification',
     });
   }
 });
@@ -1598,39 +1606,63 @@ app.post('/api/notifications/send-admin', async (req, res) => {
   try {
     stage = 'auth-verification';
     const authHeader = req.headers.authorization || '';
-    const idToken = authHeader.replace(/^Bearer\s+/i, '') || (req.body?.idToken as string);
-
-    if (!idToken) {
+    if (!authHeader) {
       return res.status(401).json({
         ok: false,
+        success: false,
+        endpoint: '/api/notifications/send-admin',
         stage: 'auth-verification',
-        error: 'Missing Firebase Auth ID token in Authorization header or body',
+        errorCode: 'UNAUTHORIZED_MISSING_BEARER_HEADER',
+        message: 'Missing Authorization header with Firebase Bearer token',
       });
     }
 
-    const authCheck = await verifyAdminAuth(idToken);
+    const authCheck = await verifyAdminAuth(authHeader);
     if (!authCheck.isAdmin) {
-      return res.status(403).json({
+      const httpStatus = authCheck.errorCode === 'FIREBASE_ADMIN_CREDENTIALS_MISSING' ? 503 : authCheck.errorCode === 'FORBIDDEN' ? 403 : 401;
+      return res.status(httpStatus).json({
         ok: false,
-        stage: 'auth-verification',
-        error: authCheck.error || 'Access denied: Admin authorization required',
+        success: false,
+        endpoint: '/api/notifications/send-admin',
+        stage: authCheck.stage || 'auth-verification',
+        errorCode: authCheck.errorCode || 'UNAUTHORIZED',
+        message: authCheck.error || 'Authentication failed',
       });
     }
 
     stage = 'firebase-admin-init';
     const credsStatus = checkFirebaseAdminCredentials();
-
-    stage = 'payload-validation';
-    const { title, body, url, target, type } = req.body || {};
-    if (!title || !body) {
-      return res.status(400).json({
+    if (!credsStatus.hasPrivilegedCredentials) {
+      return res.status(503).json({
         ok: false,
-        stage: 'payload-validation',
-        error: 'Notification title and body are required',
+        success: false,
+        endpoint: '/api/notifications/send-admin',
+        stage: 'firebase-admin-init',
+        errorCode: 'FIREBASE_ADMIN_CREDENTIALS_MISSING',
+        message: 'Notification service is not configured with Firebase Admin credentials.',
+        credentialsStatus: {
+          hasProjectId: credsStatus.hasProjectId,
+          hasClientEmail: credsStatus.hasClientEmail,
+          hasPrivateKey: credsStatus.hasPrivateKey,
+          projectId: credsStatus.projectId,
+        },
       });
     }
 
-    const targetType = target || 'all';
+    stage = 'payload-validation';
+    const validation = validateNotificationInput(req.body);
+    if (!validation.valid) {
+      return res.status(400).json({
+        ok: false,
+        success: false,
+        endpoint: '/api/notifications/send-admin',
+        stage: 'payload-validation',
+        errorCode: validation.errorCode,
+        message: validation.error,
+      });
+    }
+
+    const { title, body, url, target, type } = validation.data;
 
     // Broadcast to real-time connected clients immediately
     let liveEventId = null;
@@ -1638,15 +1670,15 @@ app.post('/api/notifications/send-admin', async (req, res) => {
       const liveEvent = emitLiveNotification({
         title,
         body,
-        url: url || '/pyq-drill',
-        type: type || 'admin',
-        target: targetType,
+        url,
+        type,
+        target,
       });
       liveEventId = liveEvent.id;
     } catch {}
 
     stage = 'tokens-load';
-    const { tokens } = await getTokensForTarget(targetType, authCheck.uid);
+    const { tokens } = await getTokensForTarget(target, authCheck.uid);
     let sentCount = 0;
     let failureCount = 0;
 
@@ -1655,8 +1687,8 @@ app.post('/api/notifications/send-admin', async (req, res) => {
       const result = await sendMulticastPush(tokens, {
         title,
         body,
-        url: url || '/pyq-drill',
-        type: type || 'admin',
+        url,
+        type,
       });
 
       sentCount = result.successCount;
@@ -1678,11 +1710,11 @@ app.post('/api/notifications/send-admin', async (req, res) => {
         slot: 'custom',
         title,
         body,
-        url: url || '/pyq-drill',
-        target: targetType,
+        url,
+        target,
         sentCount: Math.max(sentCount, tokens.length === 0 ? 0 : 1),
         failedCount: failureCount,
-        status: failureCount === 0 ? 'success' : 'partial',
+        status: failureCount === 0 ? 'success' : sentCount > 0 ? 'partial' : 'failed',
         sentAt: Date.now(),
       });
     } catch {}
@@ -1696,19 +1728,20 @@ app.post('/api/notifications/send-admin', async (req, res) => {
       stage: 'send-completed',
       eligibleTokenCount: tokens.length,
       attempted: tokens.length > 0,
-      successful: sentCount > 0,
+      successful: sentCount > 0 || tokens.length === 0,
       sentCount: Math.max(sentCount, tokens.length === 0 ? 0 : 1),
       failureCount,
-      credentialsStatus: credsStatus,
+      credentialsStatus: {
+        hasProjectId: credsStatus.hasProjectId,
+        hasClientEmail: credsStatus.hasClientEmail,
+        hasPrivateKey: credsStatus.hasPrivateKey,
+        projectId: credsStatus.projectId,
+      },
       log: logItem,
       broadcastId: liveEventId,
     });
   } catch (err: any) {
     console.error(`[push-broadcast] Exception at stage "${stage}":`, err);
-    let credsStatus;
-    try {
-      credsStatus = checkFirebaseAdminCredentials();
-    } catch {}
 
     return res.status(500).json({
       ok: false,
@@ -1716,9 +1749,8 @@ app.post('/api/notifications/send-admin', async (req, res) => {
       endpoint: '/api/notifications/send-admin',
       httpStatus: 500,
       stage,
-      error: err?.message || 'Failed to dispatch admin notification',
-      errorName: err?.name || 'Error',
-      credentialsStatus: credsStatus || null,
+      errorCode: 'INTERNAL_SERVER_ERROR',
+      message: err?.message || 'Failed to dispatch admin notification',
     });
   }
 });
