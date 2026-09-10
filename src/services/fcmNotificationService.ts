@@ -353,24 +353,28 @@ export async function requestBrowserPermission(): Promise<NotificationPermission
   });
 }
 
+// Production Web Push VAPID Public Key for Firebase Project tactile-world-jq6d2
+export const DEFAULT_VAPID_PUBLIC_KEY = 'BN7hCXmy_uYeEvhz6-LzgzmpFqJA1-SxbP_a4ixQ8DfHzG2ePkDxdZ3EeAZrMJ-DTjbhgGDcgw4L3X97gHHIMFU';
+
 /**
  * Sanitize and validate VAPID public key
  */
-export function sanitizeVapidKey(rawKey?: string): string | undefined {
-  if (!rawKey || typeof rawKey !== 'string') return undefined;
+export function sanitizeVapidKey(rawKey?: string): string {
+  const candidate = rawKey || (import.meta as any).env?.VITE_FCM_VAPID_KEY || DEFAULT_VAPID_PUBLIC_KEY;
+  if (!candidate || typeof candidate !== 'string') return DEFAULT_VAPID_PUBLIC_KEY;
   
   // Strip surrounding quotes and whitespace
-  let cleaned = rawKey.trim().replace(/^["']|["']$/g, '').trim();
+  let cleaned = candidate.trim().replace(/^["']|["']$/g, '').trim();
   
   if (!cleaned || cleaned === 'undefined' || cleaned === 'null' || cleaned.includes('YOUR_') || cleaned.includes('xxx')) {
-    return undefined;
+    return DEFAULT_VAPID_PUBLIC_KEY;
   }
 
   // A valid web push VAPID key is a Base64/Base64URL public key, typically 65 to 100 characters
   // It should only contain valid Base64 / Base64URL characters: A-Z, a-z, 0-9, -, _, +, /, =
   if (cleaned.length < 50 || !/^[A-Za-z0-9\-_+/=]+$/.test(cleaned)) {
-    console.warn('[FCM] Provided VAPID key format is not standard Base64/Base64URL, ignoring to prevent pattern errors.');
-    return undefined;
+    console.warn('[FCM] Provided VAPID key format is not standard Base64/Base64URL, using verified project default.');
+    return DEFAULT_VAPID_PUBLIC_KEY;
   }
 
   return cleaned;
@@ -382,13 +386,10 @@ export function sanitizeVapidKey(rawKey?: string): string | undefined {
 export function getVapidConfigStatus(): { configured: boolean; keyPreview?: string } {
   const rawKey = (import.meta as any).env?.VITE_FCM_VAPID_KEY;
   const sanitized = sanitizeVapidKey(rawKey);
-  if (sanitized) {
-    return {
-      configured: true,
-      keyPreview: `${sanitized.slice(0, 8)}...${sanitized.slice(-6)}`,
-    };
-  }
-  return { configured: false };
+  return {
+    configured: true,
+    keyPreview: `${sanitized.slice(0, 8)}...${sanitized.slice(-6)}`,
+  };
 }
 
 /**
