@@ -417,4 +417,31 @@ export function trackGuestSignupComplete(source?: 'pyq' | 'battle_review'): void
   trackEvent('guest_signup_complete', { source: source || 'unknown' });
 }
 
+/**
+ * Push Notification Events
+ */
+export function trackNotificationPromptView(): void {
+  trackEvent('notification_prompt_view');
+}
+
+export function trackNotificationPromptDismiss(): void {
+  trackEvent('notification_prompt_dismiss');
+}
+
+export function trackNotificationPermissionGranted(source: string = 'prompt'): void {
+  trackEvent('notification_permission_granted', { source });
+}
+
+export function trackNotificationPermissionDenied(source: string = 'prompt'): void {
+  trackEvent('notification_permission_denied', { source });
+}
+
+export function trackNotificationOpen(notificationType: string = 'general', route: string = ''): void {
+  trackEvent('notification_open', {
+    notification_type: notificationType,
+    target_route: route,
+  });
+}
+
+
 

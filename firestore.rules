@@ -299,5 +299,10 @@ service cloud.firestore {
       allow read: if true;
       allow create, update, delete: if isPyqAdmin();
     }
+
+    // 12. Push Notification Dispatch Logs: Admin-only read/write
+    match /notification_logs/{logId} {
+      allow read, write: if isPyqAdmin();
+    }
   }
 }

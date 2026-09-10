@@ -7,6 +7,23 @@ import nodemailer from 'nodemailer';
 import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import { processPyqEnrichmentBatch } from './server/pyqEnrichmentLogic';
+import { verifyAdminAuth, sendPushToToken, sendMulticastPush, ADMIN_EMAIL } from './server/firebaseAdmin';
+import {
+  registerDeviceToken,
+  removeDeviceToken,
+  saveUserPreferences,
+  getRecentNotificationLogs,
+  getTokensForTarget,
+  dispatchMorningReminder,
+  dispatchEveningReminder,
+  startBackgroundNotificationScheduler,
+  getNotificationSystemStatus,
+  logNotification,
+  getIstDateString,
+  emitLiveNotification,
+  notificationBroadcastBus,
+  getRecentBroadcastEvents,
+} from './server/notificationScheduler';
 
 dotenv.config();
 
@@ -1272,11 +1289,12 @@ STRICT GROUNDING RULES:
   res.json({ insight: fallbackReport, report: fallbackReport });
 });
 
-// Monetag Service Worker Verification & Ad Delivery Endpoint
+// Service Worker Verification & PWA Delivery Endpoint
 app.get(['/sw.js', '/service-worker.js'], (req, res) => {
+  const swPath = path.join(process.cwd(), 'public', 'sw.js');
   res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
   res.setHeader('Service-Worker-Allowed', '/');
-  res.send(`self.options = {\n    "domain": "5gvci.com",\n    "zoneId": 11591217\n};\nself.lary = "";\nimportScripts('https://5gvci.com/act/files/service-worker.min.js?r=sw');\n`);
+  res.sendFile(swPath);
 });
 
 // Google AdSense ads.txt explicit endpoint
@@ -1387,7 +1405,317 @@ app.get('/robots.txt', (req, res) => {
   res.send('User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /admin/\nDisallow: /api/\nDisallow: /.well-known/\n\nSitemap: https://vocabclash.in/sitemap.xml\n');
 });
 
-// Service Worker Endpoints (sw.js and service-worker.js) with proper PWA & TWA headers
+// ==========================================
+// PUSH NOTIFICATION API ENDPOINTS
+// ==========================================
+
+// 1. Get Notification System Status
+app.get('/api/notifications/status', (req, res) => {
+  const status = getNotificationSystemStatus();
+  res.json({ success: true, ...status });
+});
+
+// 2. Register Client FCM Push Token
+app.post('/api/notifications/register-token', async (req, res) => {
+  try {
+    const { token, uid, platform, timezone, targetExam, userAgent } = req.body;
+    if (!token) {
+      return res.status(400).json({ error: 'FCM token is required' });
+    }
+
+    await registerDeviceToken({
+      token,
+      uid: uid || 'anonymous',
+      platform,
+      timezone,
+      targetExam,
+      userAgent: userAgent || req.headers['user-agent'],
+    });
+
+    res.json({ success: true, message: 'Device token registered successfully' });
+  } catch (err: any) {
+    console.error('Error in /api/notifications/register-token:', err);
+    res.status(500).json({ error: err?.message || 'Failed to register token' });
+  }
+});
+
+// 3. Update User Notification Preferences
+app.post('/api/notifications/preferences', async (req, res) => {
+  try {
+    const { uid, preferences } = req.body;
+    if (!uid) {
+      return res.status(400).json({ error: 'User UID is required' });
+    }
+
+    const updated = await saveUserPreferences(uid, preferences || {});
+    res.json({ success: true, preferences: updated });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Failed to save preferences' });
+  }
+});
+
+// 4. Send Test Notification to Admin's Current Device (Admin-only)
+app.post('/api/notifications/send-test', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization || '';
+    const idToken = authHeader.replace(/^Bearer\s+/i, '') || (req.body.idToken as string);
+
+    const authCheck = await verifyAdminAuth(idToken);
+    if (!authCheck.isAdmin) {
+      return res.status(403).json({ error: authCheck.error || 'Access denied: Admin authorization required' });
+    }
+
+    const { token, title, body, url } = req.body;
+    const testTitle = title || 'VocabClash Test Alert ⚡';
+    const testBody = body || 'This is a test notification verifying your FCM service worker connection!';
+    const testUrl = url || '/pyq-drill';
+
+    if (token) {
+      const result = await sendPushToToken(token, {
+        title: testTitle,
+        body: testBody,
+        url: testUrl,
+        type: 'test',
+      });
+
+      emitLiveNotification({
+        title: testTitle,
+        body: testBody,
+        url: testUrl,
+        type: 'test',
+        target: 'me',
+      });
+
+      await logNotification({
+        type: 'test',
+        dateKey: getIstDateString(),
+        slot: 'custom',
+        title: testTitle,
+        body: testBody,
+        url: testUrl,
+        target: 'me',
+        sentCount: result.success ? 1 : 0,
+        failedCount: result.success ? 0 : 1,
+        status: result.success ? 'success' : 'failed',
+        sentAt: Date.now(),
+      });
+
+      return res.json({ success: result.success, result });
+    }
+
+    // Otherwise find admin tokens
+    const { tokens } = await getTokensForTarget('me', authCheck.uid);
+    
+    emitLiveNotification({
+      title: testTitle,
+      body: testBody,
+      url: testUrl,
+      type: 'test',
+      target: 'me',
+    });
+
+    if (tokens.length === 0) {
+      return res.json({ success: true, message: 'Test notification broadcasted to active admin sessions.' });
+    }
+
+    const sendRes = await sendMulticastPush(tokens, {
+      title: testTitle,
+      body: testBody,
+      url: testUrl,
+      type: 'test',
+    });
+
+    await logNotification({
+      type: 'test',
+      dateKey: getIstDateString(),
+      slot: 'custom',
+      title: testTitle,
+      body: testBody,
+      url: testUrl,
+      target: 'me',
+      sentCount: sendRes.successCount,
+      failedCount: sendRes.failureCount,
+      status: sendRes.failureCount === 0 ? 'success' : 'partial',
+      sentAt: Date.now(),
+    });
+
+    res.json({ success: sendRes.successCount > 0, ...sendRes });
+  } catch (err: any) {
+    console.error('Error in /api/notifications/send-test:', err);
+    res.status(500).json({ error: err?.message || 'Failed to send test push notification' });
+  }
+});
+
+// 5. Send Broadcast / Targeted Notification (Admin-only)
+app.post('/api/notifications/send-admin', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization || '';
+    const idToken = authHeader.replace(/^Bearer\s+/i, '') || (req.body.idToken as string);
+
+    const authCheck = await verifyAdminAuth(idToken);
+    if (!authCheck.isAdmin) {
+      return res.status(403).json({ error: authCheck.error || 'Access denied: Admin authorization required' });
+    }
+
+    const { title, body, url, target, type } = req.body;
+    if (!title || !body) {
+      return res.status(400).json({ error: 'Notification title and body are required' });
+    }
+
+    const targetType = target || 'all';
+
+    // Broadcast to real-time connected clients immediately
+    const liveEvent = emitLiveNotification({
+      title,
+      body,
+      url: url || '/pyq-drill',
+      type: type || 'admin',
+      target: targetType,
+    });
+
+    const { tokens } = await getTokensForTarget(targetType, authCheck.uid);
+
+    let sentCount = 1;
+    let failureCount = 0;
+
+    if (tokens.length > 0) {
+      const result = await sendMulticastPush(tokens, {
+        title,
+        body,
+        url: url || '/pyq-drill',
+        type: type || 'admin',
+      });
+
+      sentCount = Math.max(result.successCount, 1);
+      failureCount = result.failureCount;
+
+      // Remove dead tokens
+      for (const deadToken of result.unregisteredTokens) {
+        await removeDeviceToken(deadToken);
+      }
+    }
+
+    const logItem = await logNotification({
+      type: (type as any) || 'admin',
+      dateKey: getIstDateString(),
+      slot: 'custom',
+      title,
+      body,
+      url: url || '/pyq-drill',
+      target: targetType,
+      sentCount,
+      failedCount: failureCount,
+      status: failureCount === 0 ? 'success' : 'partial',
+      sentAt: Date.now(),
+    });
+
+    res.json({
+      success: true,
+      sentCount,
+      failureCount,
+      log: logItem,
+      broadcastId: liveEvent.id,
+    });
+  } catch (err: any) {
+    console.error('Error in /api/notifications/send-admin:', err);
+    res.status(500).json({ error: err?.message || 'Failed to dispatch admin notification' });
+  }
+});
+
+// Real-Time Server-Sent Events (SSE) stream for live push alerts across all connected phones and browsers
+app.get('/api/notifications/stream', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+
+  // Send initial ping and recent events
+  res.write(`data: ${JSON.stringify({ type: 'connected', time: Date.now() })}\n\n`);
+  
+  const recent = getRecentBroadcastEvents(Date.now() - 30000);
+  for (const ev of recent) {
+    res.write(`data: ${JSON.stringify(ev)}\n\n`);
+  }
+
+  const listener = (eventData: any) => {
+    try {
+      res.write(`data: ${JSON.stringify(eventData)}\n\n`);
+    } catch {}
+  };
+
+  notificationBroadcastBus.on('broadcast', listener);
+
+  const heartbeat = setInterval(() => {
+    try {
+      res.write(': heartbeat\n\n');
+    } catch {}
+  }, 25000);
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    notificationBroadcastBus.off('broadcast', listener);
+  });
+});
+
+// REST Fallback endpoint to fetch latest notification broadcasts
+app.get('/api/notifications/live-broadcast', (req, res) => {
+  const since = Number(req.query.since) || (Date.now() - 60000);
+  const events = getRecentBroadcastEvents(since);
+  res.json({ success: true, events, timestamp: Date.now() });
+});
+
+// 6. Cloud Scheduler / Cron Dispatch Webhook
+app.post('/api/notifications/cron-dispatch', async (req, res) => {
+  try {
+    const { slot, force, secret, idToken } = req.body;
+    const cronSecret = process.env.CRON_SECRET || 'vocabclash_cron_internal_2026';
+
+    const isSecretValid = secret && secret === cronSecret;
+    let isAdminValid = false;
+
+    if (!isSecretValid && idToken) {
+      const check = await verifyAdminAuth(idToken);
+      isAdminValid = check.isAdmin;
+    }
+
+    if (!isSecretValid && !isAdminValid) {
+      return res.status(403).json({ error: 'Unauthorized cron dispatch request' });
+    }
+
+    if (slot === 'morning') {
+      const morningRes = await dispatchMorningReminder(Boolean(force));
+      return res.json({ success: true, slot: 'morning', ...morningRes });
+    } else if (slot === 'evening') {
+      const eveningRes = await dispatchEveningReminder(Boolean(force));
+      return res.json({ success: true, slot: 'evening', ...eveningRes });
+    } else {
+      return res.status(400).json({ error: 'Invalid slot. Must be "morning" or "evening"' });
+    }
+  } catch (err: any) {
+    console.error('Error in /api/notifications/cron-dispatch:', err);
+    res.status(500).json({ error: err?.message || 'Failed to run cron dispatch' });
+  }
+});
+
+// 7. Get Recent Notification Logs (Admin-only)
+app.get('/api/notifications/logs', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization || '';
+    const idToken = authHeader.replace(/^Bearer\s+/i, '') || (req.query.idToken as string);
+
+    const authCheck = await verifyAdminAuth(idToken);
+    if (!authCheck.isAdmin) {
+      return res.status(403).json({ error: authCheck.error || 'Access denied: Admin authorization required' });
+    }
+
+    const logs = await getRecentNotificationLogs(50);
+    res.json({ success: true, logs });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Failed to fetch logs' });
+  }
+});
+
+// Service Worker Endpoints (sw.js, service-worker.js, and firebase-messaging-sw.js) with proper PWA & TWA headers
 const serveServiceWorker = (req: express.Request, res: express.Response) => {
   const swPath = path.join(process.cwd(), 'public', 'sw.js');
   res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
@@ -1396,8 +1724,17 @@ const serveServiceWorker = (req: express.Request, res: express.Response) => {
   res.sendFile(swPath);
 };
 
+const serveFirebaseMessagingSw = (req: express.Request, res: express.Response) => {
+  const fcmSwPath = path.join(process.cwd(), 'public', 'firebase-messaging-sw.js');
+  res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+  res.setHeader('Service-Worker-Allowed', '/');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.sendFile(fcmSwPath);
+};
+
 app.get('/sw.js', serveServiceWorker);
 app.get('/service-worker.js', serveServiceWorker);
+app.get('/firebase-messaging-sw.js', serveFirebaseMessagingSw);
 
 // Digital Asset Links Endpoint for Android TWA APK (Removes Chrome URL bar)
 app.get('/.well-known/assetlinks.json', (req, res) => {
@@ -1432,6 +1769,8 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server listening on port ${PORT}`);
+    // Start automated background notification scheduler (9:00 AM & 7:00 PM IST)
+    startBackgroundNotificationScheduler();
   });
 }
 

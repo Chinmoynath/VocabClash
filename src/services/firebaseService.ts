@@ -45,7 +45,7 @@ try {
 }
 
 // Initialize Firebase App
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+export const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
 
 // Standard Firebase Auth instance with browser popup/redirect resolver and multi-tier persistence
 let authInstance: ReturnType<typeof getAuth>;

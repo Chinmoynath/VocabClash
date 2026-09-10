@@ -89,6 +89,17 @@ import { PublicArticlesIndex } from './components/public/PublicArticlesIndex';
 import { PublicArticleDetail } from './components/public/PublicArticleDetail';
 import { Article } from './types/article';
 import { isUserAdmin } from './services/pyqFirestoreService';
+import { AdminNotificationsPanel } from './components/admin/AdminNotificationsPanel';
+import { NotificationPermissionBanner } from './components/NotificationPermissionBanner';
+import { NotificationSettingsModal } from './components/NotificationSettingsModal';
+import {
+  setupForegroundMessageListener,
+  shouldShowNotificationPrompt,
+  initializeAppFirstSeen,
+  subscribeToUnreadCount,
+  getUnreadNotificationCount,
+  markAllNotificationsAsRead,
+} from './services/fcmNotificationService';
 import { 
   trackPageView, 
   trackPracticeStart, 
@@ -96,6 +107,7 @@ import {
   trackPracticeComplete, 
   trackTop100Start, 
   trackTop100Complete,
+  trackNotificationOpen,
   normalizeAnalyticsCategory,
   normalizeAnalyticsExamFamily
 } from './services/analyticsService';
@@ -535,7 +547,7 @@ export default function App() {
   const [showAdminImporter, setShowAdminImporter] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       const p = window.location.pathname.toLowerCase();
-      if (p.includes('/admin/articles')) return false;
+      if (p.includes('/admin/articles') || p.includes('/admin/notifications')) return false;
       return (
         p.includes('/admin/pyq-import') ||
         p === '/admin' ||
@@ -547,16 +559,84 @@ export default function App() {
     return false;
   });
 
+  // Push Notification & Inbox States
+  const [showAdminNotifications, setShowAdminNotifications] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const p = window.location.pathname.toLowerCase();
+      return (
+        p === '/admin/notifications' ||
+        p === '/admin/notifications/' ||
+        window.location.hash.includes('admin-notifications') ||
+        window.location.search.includes('admin=notifications')
+      );
+    }
+    return false;
+  });
+  const [showNotificationSettingsModal, setShowNotificationSettingsModal] = useState<boolean>(false);
+  const [showNotificationBanner, setShowNotificationBanner] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return shouldShowNotificationPrompt();
+    }
+    return false;
+  });
+  const [unreadNotificationsCount, setUnreadNotificationsCount] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      return getUnreadNotificationCount();
+    }
+    return 0;
+  });
+
+  // Setup Foreground FCM message listener & Unread Notification Count Tracker
+  useEffect(() => {
+    initializeAppFirstSeen();
+
+    // Subscribe to unread counter changes (updates instantly when new alerts arrive)
+    const unsubCount = subscribeToUnreadCount((count) => {
+      setUnreadNotificationsCount(count);
+    });
+
+    let unsubscribeFcm: (() => void) | null = null;
+    setupForegroundMessageListener(() => {
+      // Gentle audio chime when alert is received
+      soundManager.playCorrect();
+    }).then((fn) => {
+      unsubscribeFcm = fn;
+    });
+
+    return () => {
+      unsubCount();
+      if (unsubscribeFcm) unsubscribeFcm();
+    };
+  }, []);
+
   // Listen to hash / route changes for private admin portal, public articles, and public SEO guides
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const handleHashOrPopState = () => {
       const rawPath = window.location.pathname.toLowerCase();
 
+      // 0. Admin Notifications Route (/admin/notifications)
+      if (
+        rawPath === '/admin/notifications' ||
+        rawPath === '/admin/notifications/' ||
+        window.location.hash.includes('admin-notifications') ||
+        window.location.search.includes('admin=notifications')
+      ) {
+        setShowAdminNotifications(true);
+        setShowAdminArticles(false);
+        setShowAdminImporter(false);
+        setIsViewingArticlesIndex(false);
+        setActiveArticleSlug(null);
+        setActiveSeoSlug(null);
+        return;
+      }
+      setShowAdminNotifications(false);
+
       // 1. Admin Articles Route (/admin/articles)
       if (rawPath === '/admin/articles' || rawPath === '/admin/articles/' || window.location.hash.includes('admin-articles')) {
         setShowAdminArticles(true);
         setShowAdminImporter(false);
+        setShowAdminNotifications(false);
         setIsViewingArticlesIndex(false);
         setActiveArticleSlug(null);
         setActiveSeoSlug(null);
@@ -614,6 +694,13 @@ export default function App() {
         setIsViewingArticlesIndex(false);
         setActiveSeoSlug(null);
         return;
+      }
+
+      // Check for FCM Notification Tracking
+      const notifSource = searchParams.get('utm_source') || searchParams.get('source');
+      const notifType = searchParams.get('notif_type') || searchParams.get('type') || 'fcm_push';
+      if (notifSource === 'fcm_push' || searchParams.has('notif_type')) {
+        trackNotificationOpen(notifType, rawPath);
       }
 
       // Clear article views if navigating away
@@ -1690,6 +1777,20 @@ export default function App() {
               window.history.pushState(null, '', '/articles');
             }
           }}
+          onOpenNotifications={() => {
+            soundManager.playTap();
+            markAllNotificationsAsRead();
+            setUnreadNotificationsCount(0);
+            setShowNotificationSettingsModal(true);
+          }}
+          hasUnreadNotifications={unreadNotificationsCount > 0}
+          onOpenAdminNotifications={() => {
+            soundManager.playTap();
+            setShowAdminNotifications(true);
+            if (typeof window !== 'undefined') {
+              window.history.pushState(null, '', '/admin/notifications');
+            }
+          }}
           isAdmin={(currentUser?.email?.toLowerCase() === 'nathchinmoy777@gmail.com' || (currentUser?.email && currentUser.email.toLowerCase().includes('admin')))}
           onOpenAdminArticles={() => {
             soundManager.playTap();
@@ -1735,6 +1836,20 @@ export default function App() {
             soundManager.playTap();
             setShowTourModal(true);
           }}
+          onOpenNotifications={() => {
+            soundManager.playTap();
+            markAllNotificationsAsRead();
+            setUnreadNotificationsCount(0);
+            setShowNotificationSettingsModal(true);
+          }}
+          hasUnreadNotifications={unreadNotificationsCount > 0}
+          onOpenAdminNotifications={() => {
+            soundManager.playTap();
+            setShowAdminNotifications(true);
+            if (typeof window !== 'undefined') {
+              window.history.pushState(null, '', '/admin/notifications');
+            }
+          }}
           isAdmin={(currentUser?.email?.toLowerCase() === 'nathchinmoy777@gmail.com' || (currentUser?.email && currentUser.email.toLowerCase().includes('admin')))}
           onOpenAdminArticles={() => {
             soundManager.playTap();
@@ -1754,6 +1869,22 @@ export default function App() {
         {forfeitNotice && (
           <div className="w-full bg-gradient-to-r from-rose-900/90 via-rose-800/90 to-rose-900/90 border-b border-rose-600/60 px-4 py-2 text-center text-xs font-black text-rose-100 flex items-center justify-center gap-2 shadow-lg backdrop-blur-md animate-fadeIn z-20 shrink-0">
             <span>{forfeitNotice}</span>
+          </div>
+        )}
+
+        {/* Smart In-App FCM Permission Banner (for Arena Tab when eligible) */}
+        {!matchState && currentTab === 'arena' && showNotificationBanner && (
+          <div className="p-3 pb-0 max-w-4xl mx-auto w-full z-10 shrink-0">
+            <NotificationPermissionBanner
+              uid={currentUser?.uid || player.id}
+              targetExam={player.targetExam}
+              onGranted={() => {
+                setShowNotificationBanner(false);
+              }}
+              onDismiss={() => {
+                setShowNotificationBanner(false);
+              }}
+            />
           </div>
         )}
 
@@ -2080,6 +2211,10 @@ export default function App() {
             setShowProfileModal(false);
             setShowTourModal(true);
           }}
+          onOpenNotifications={() => {
+            setShowProfileModal(false);
+            setShowNotificationSettingsModal(true);
+          }}
           onOpenEditProfile={() => {
             setShowProfileModal(false);
             setShowEditProfileModal(true);
@@ -2274,6 +2409,56 @@ export default function App() {
             }
           }}
         />
+      )}
+
+      {/* FCM Notification Inbox & Settings Modal */}
+      {showNotificationSettingsModal && (
+        <NotificationSettingsModal
+          isOpen={showNotificationSettingsModal}
+          onClose={() => {
+            setShowNotificationSettingsModal(false);
+            setUnreadNotificationsCount(0);
+          }}
+          uid={currentUser?.uid || player.id}
+          targetExam={player.targetExam}
+          onNavigateTab={(tab) => {
+            setShowNotificationSettingsModal(false);
+            setUnreadNotificationsCount(0);
+            setCurrentTab(tab as TabType);
+          }}
+        />
+      )}
+
+      {/* Admin Push Notification Dispatcher Command Center */}
+      {showAdminNotifications && (
+        <div className="fixed inset-0 z-50 bg-slate-950 overflow-y-auto">
+          <div className="p-3 sm:p-4 max-w-7xl mx-auto flex items-center justify-between border-b border-slate-800 bg-slate-900/90 backdrop-blur sticky top-0 z-10">
+            <button
+              onClick={() => {
+                setShowAdminNotifications(false);
+                if (typeof window !== 'undefined') {
+                  window.history.pushState(null, '', '/');
+                }
+              }}
+              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition flex items-center gap-1.5 border border-slate-700"
+            >
+              <span>←</span>
+              <span>Back to Arena</span>
+            </button>
+            <div className="text-xs text-rose-400 font-mono font-bold flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+              <span>Admin Push Console</span>
+            </div>
+          </div>
+          <AdminNotificationsPanel
+            onClose={() => {
+              setShowAdminNotifications(false);
+              if (typeof window !== 'undefined') {
+                window.history.pushState(null, '', '/');
+              }
+            }}
+          />
+        </div>
       )}
 
       {/* Android Bottom Navigation Bar (Hidden during active match and on desktop screens) */}
