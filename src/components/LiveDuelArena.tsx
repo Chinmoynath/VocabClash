@@ -328,6 +328,22 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
     };
 
     if (isRealMatch && roomId) {
+      const pRecord = playerAnswerRecordRef.current || {
+        questionId: currentQuestion.id,
+        selectedIndex: -1,
+        timeTakenMs: ROUND_TIME_SEC * 1000,
+        isCorrect: false,
+        scoreGained: -40,
+      };
+      const tempOppRecord: PlayerAnswerRecord = {
+        questionId: currentQuestion.id,
+        selectedIndex: -1,
+        timeTakenMs: 0,
+        isCorrect: false,
+        scoreGained: 0,
+      };
+      onAnswerQuestion(pRecord, tempOppRecord, finalScoresSnapshot);
+
       if (isLastQuestion) {
         if (liveRoom?.finalResult && liveRoom.finalResult.finalised && !hasCompletedRef.current) {
           hasCompletedRef.current = true;
@@ -374,22 +390,6 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
             setIsWaitingForOpponent(true);
           }
         }
-      } else {
-        const pRecord = playerAnswerRecordRef.current || {
-          questionId: currentQuestion.id,
-          selectedIndex: -1,
-          timeTakenMs: ROUND_TIME_SEC * 1000,
-          isCorrect: false,
-          scoreGained: -40,
-        };
-        const tempOppRecord: PlayerAnswerRecord = {
-          questionId: currentQuestion.id,
-          selectedIndex: -1,
-          timeTakenMs: 0,
-          isCorrect: false,
-          scoreGained: 0,
-        };
-        onAnswerQuestion(pRecord, tempOppRecord, finalScoresSnapshot);
       }
     } else {
       // Bot Match

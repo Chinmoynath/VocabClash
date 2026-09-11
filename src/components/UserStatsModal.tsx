@@ -23,8 +23,9 @@ import {
   LogIn
 } from 'lucide-react';
 import { PlayerProfile, UserSubscription, DailyStreakState, QuestionCategory } from '../types';
-import { getUserStatsSummary } from '../utils/userStatsManager';
-import { auth } from '../services/firebaseService';
+import { getUserStatsSummary, getDailyStatsMap, saveDailyStatsMap } from '../utils/userStatsManager';
+import { auth, db } from '../services/firebaseService';
+import { doc, onSnapshot } from 'firebase/firestore';
 import { soundManager } from '../utils/audio';
 
 interface UserStatsModalProps {
@@ -50,15 +51,62 @@ export const UserStatsModal: React.FC<UserStatsModalProps> = ({
 }) => {
   const [timeRange, setTimeRange] = useState<7 | 14 | 30>(14);
   const [hoveredDayIndex, setHoveredDayIndex] = useState<number | null>(null);
+  const [updateTick, setUpdateTick] = useState<number>(0);
 
   // Check if current user is logged in / signed up (has permanent account)
   const currentUser = auth.currentUser;
   const isSignedUp = Boolean(currentUser && !currentUser.isAnonymous && currentUser.email);
 
-  // Load latest stats summary
+  // Real-time listener for local attempts and cloud stats updates
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleStatsUpdated = () => {
+      setUpdateTick(prev => prev + 1);
+    };
+
+    window.addEventListener('user-stats-updated', handleStatsUpdated);
+    window.addEventListener('storage', handleStatsUpdated);
+
+    let unsubscribeFirestore: (() => void) | undefined;
+    if (currentUser?.uid) {
+      try {
+        const statsDocRef = doc(db, 'users', currentUser.uid, 'stats_summary', 'main');
+        unsubscribeFirestore = onSnapshot(statsDocRef, (snap) => {
+          if (snap.exists()) {
+            const data = snap.data();
+            if (Array.isArray(data?.recentDays) && data.recentDays.length > 0) {
+              const localDailyMap = getDailyStatsMap();
+              let updated = false;
+              for (const r of data.recentDays) {
+                if (r?.date && (!localDailyMap[r.date] || r.solved > localDailyMap[r.date].solved)) {
+                  localDailyMap[r.date] = r;
+                  updated = true;
+                }
+              }
+              if (updated) {
+                saveDailyStatsMap(localDailyMap);
+                setUpdateTick(prev => prev + 1);
+              }
+            }
+          }
+        }, (err) => {
+          console.warn('Live stats subscription note:', err);
+        });
+      } catch {}
+    }
+
+    return () => {
+      window.removeEventListener('user-stats-updated', handleStatsUpdated);
+      window.removeEventListener('storage', handleStatsUpdated);
+      if (unsubscribeFirestore) unsubscribeFirestore();
+    };
+  }, [isOpen, currentUser?.uid]);
+
+  // Load latest stats summary reactively
   const stats = useMemo(() => {
     return getUserStatsSummary(player, dailyStreak, timeRange);
-  }, [player, dailyStreak, timeRange]);
+  }, [player, dailyStreak, timeRange, updateTick]);
 
   if (!isOpen) return null;
 

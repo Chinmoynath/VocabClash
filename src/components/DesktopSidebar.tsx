@@ -108,74 +108,75 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
     <aside 
       id="vocabclash-desktop-sidebar"
       aria-label="Main Navigation Sidebar"
-      className="hidden md:flex flex-col w-64 lg:w-72 bg-slate-950 border-r border-slate-800/80 p-4 shrink-0 h-full justify-between select-none z-20"
+      className="hidden md:flex flex-col w-64 lg:w-72 bg-slate-950 border-r border-slate-800/80 shrink-0 h-full max-h-screen overflow-y-auto overscroll-contain select-none z-20 custom-scrollbar"
     >
-      {/* Top: Brand & Logo */}
-      <div className="space-y-6">
-        <div className="flex items-center justify-between px-1">
-          <div className="flex items-center gap-2.5">
-            <VocabClashLogo size="md" className="rounded-xl shadow-md ring-1 ring-amber-400/30" />
-            <div>
-              <div className="flex items-center gap-1.5">
-                <span className="font-black text-base text-white tracking-tight">VocabClash</span>
-                <span className="text-[9px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-1 py-0.2 rounded font-bold uppercase tracking-wider">
-                  Govt PYQs
-                </span>
+      <div className="flex flex-col min-h-full justify-between p-3.5 lg:p-4 gap-4 pb-6">
+        {/* Top: Brand & Logo & Navigation */}
+        <div className="space-y-5">
+          <div className="flex items-center justify-between px-1">
+            <div className="flex items-center gap-2.5">
+              <VocabClashLogo size="md" className="rounded-xl shadow-md ring-1 ring-amber-400/30" />
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <span className="font-black text-base text-white tracking-tight">VocabClash</span>
+                  <span className="text-[9px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-1 py-0.2 rounded font-bold uppercase tracking-wider">
+                    Govt PYQs
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 flex items-center gap-1.5 mt-0.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  <span>Live Arena Active</span>
+                </p>
               </div>
-              <p className="text-[11px] text-slate-400 flex items-center gap-1.5 mt-0.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span>Live Arena Active</span>
-              </p>
             </div>
           </div>
+
+          {/* Navigation Items */}
+          <nav className="space-y-1.5">
+            {navItems.map(item => {
+              const isActive = currentTab === item.id;
+              const Icon = item.icon;
+
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => {
+                    soundManager.playTap();
+                    onSelectTab(item.id);
+                  }}
+                  className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl border text-left transition-all group ${
+                    isActive
+                      ? `${item.activeBg} font-bold shadow-sm ring-1 ring-white/10`
+                      : 'bg-transparent border-transparent hover:bg-slate-900 hover:border-slate-800/60 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className={`p-1.5 rounded-lg ${isActive ? 'bg-slate-900/90' : 'bg-slate-900/60 group-hover:bg-slate-850'}`}>
+                      <Icon className={`w-4 h-4 ${isActive ? item.color : 'text-slate-400 group-hover:text-slate-200'}`} />
+                    </div>
+                    <div className="min-w-0 truncate">
+                      <div className={`text-xs font-semibold truncate ${isActive ? 'text-white' : 'text-slate-300'}`}>
+                        {item.label}
+                      </div>
+                      <div className="text-[10px] text-slate-500 truncate">
+                        {item.sublabel}
+                      </div>
+                    </div>
+                  </div>
+
+                  {item.badge && item.badge > 0 ? (
+                    <span className="bg-rose-600 text-white text-[10px] font-extrabold px-1.5 py-0.5 rounded-full border border-rose-900 shadow-sm shrink-0">
+                      {item.badge}
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </nav>
         </div>
 
-        {/* Navigation Items */}
-        <nav className="space-y-1.5">
-          {navItems.map(item => {
-            const isActive = currentTab === item.id;
-            const Icon = item.icon;
-
-            return (
-              <button
-                key={item.id}
-                onClick={() => {
-                  soundManager.playTap();
-                  onSelectTab(item.id);
-                }}
-                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl border text-left transition-all group ${
-                  isActive
-                    ? `${item.activeBg} font-bold shadow-sm ring-1 ring-white/10`
-                    : 'bg-transparent border-transparent hover:bg-slate-900 hover:border-slate-800/60 text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className={`p-1.5 rounded-lg ${isActive ? 'bg-slate-900/90' : 'bg-slate-900/60 group-hover:bg-slate-850'}`}>
-                    <Icon className={`w-4 h-4 ${isActive ? item.color : 'text-slate-400 group-hover:text-slate-200'}`} />
-                  </div>
-                  <div className="min-w-0 truncate">
-                    <div className={`text-xs font-semibold truncate ${isActive ? 'text-white' : 'text-slate-300'}`}>
-                      {item.label}
-                    </div>
-                    <div className="text-[10px] text-slate-500 truncate">
-                      {item.sublabel}
-                    </div>
-                  </div>
-                </div>
-
-                {item.badge && item.badge > 0 ? (
-                  <span className="bg-rose-600 text-white text-[10px] font-extrabold px-1.5 py-0.5 rounded-full border border-rose-900 shadow-sm shrink-0">
-                    {item.badge}
-                  </span>
-                ) : null}
-              </button>
-            );
-          })}
-        </nav>
-      </div>
-
-      {/* Bottom: Quick Stats & User Profile Box */}
-      <div className="space-y-3 pt-4 border-t border-slate-800/80">
+        {/* Bottom: Quick Stats, Admin Tools & User Profile Box */}
+        <div className="space-y-3 pt-3 border-t border-slate-800/80 mt-auto">
         
         {/* Quick Streak, Stats & Tour trigger */}
         <div className="grid grid-cols-2 gap-2">
@@ -383,6 +384,7 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
           </div>
         </div>
 
+      </div>
       </div>
     </aside>
   );

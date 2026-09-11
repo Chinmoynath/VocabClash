@@ -117,7 +117,7 @@ export const PremiumModal: React.FC<PremiumModalProps> = ({
 
   const featurePills = [
     { label: 'Always Ad-Free', highlight: true },
-    { label: 'Unlimited Passes' },
+    { label: 'Unlimited PYQ Practice' },
     { label: '1v1 Battles' },
     { label: 'Workouts' },
     { label: 'Error Practice' },
@@ -403,7 +403,7 @@ export const PremiumModal: React.FC<PremiumModalProps> = ({
             <div className="mt-5 space-y-2">
               <div className="flex items-center justify-between text-xs px-1 text-slate-400 font-bold tracking-wide">
                 <span>Choose your plan</span>
-                <span className="text-[11px] text-purple-400 font-mono">100% Guaranteed PYQ Pool</span>
+                <span className="text-[11px] text-purple-400 font-mono">Verified PYQ Pool</span>
               </div>
 
               <div className="space-y-2">
