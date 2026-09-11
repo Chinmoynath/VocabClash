@@ -13,7 +13,6 @@ import {
 } from '../services/mentorAnalyticsService';
 import { 
   Target, 
-  Zap, 
   Sparkles, 
   RefreshCw, 
   AlertTriangle, 
@@ -234,41 +233,7 @@ export const MentorDiagnosticsView: React.FC<MentorDiagnosticsViewProps> = ({
         </div>
       </div>
 
-      {/* 4. Action Hero: "Train My Weak Areas" */}
-      <div className="bg-slate-900 border-2 border-purple-500/40 hover:border-purple-500/70 rounded-2xl p-4 sm:p-5 shadow-md transition-all">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="space-y-1.5">
-            <h2 className="text-base sm:text-lg font-black text-slate-100 flex items-center gap-2">
-              <Zap className="w-5 h-5 text-purple-400" />
-              <span>Train My Weak Areas (10 Questions)</span>
-            </h2>
-            <p className="text-xs text-slate-300 max-w-xl leading-relaxed">
-              Curates a high-yield targeted drill prioritizing your repeatedly missed words, due spaced repetition cards, and lowest-scoring category ({weakCatStat?.name || 'priority areas'}).
-            </p>
-          </div>
-
-          <button
-            onClick={onLaunchDrill}
-            disabled={isPreparingDrill}
-            className="px-6 py-3 rounded-xl bg-purple-600 hover:bg-purple-500 active:scale-98 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-purple-950/40 transition-all shrink-0 cursor-pointer"
-          >
-            {isPreparingDrill ? (
-              <>
-                <RefreshCw className="w-4 h-4 animate-spin" />
-                <span>Assembling Drill...</span>
-              </>
-            ) : (
-              <>
-                <Sparkles className="w-4 h-4" />
-                <span>Start Weak Area Drill</span>
-                <ArrowRight className="w-4 h-4" />
-              </>
-            )}
-          </button>
-        </div>
-      </div>
-
-      {/* 5. Category Diagnosis */}
+      {/* 4. Category Diagnosis */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3.5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>

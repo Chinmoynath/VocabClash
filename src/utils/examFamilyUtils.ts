@@ -1,6 +1,6 @@
 import { ExamType, Question, ExamAppearance } from '../types';
 
-export type CanonicalExamFamily = 'ssc' | 'banking' | 'defence' | 'railways' | 'other';
+export type CanonicalExamFamily = 'ssc' | 'dsssb' | 'banking' | 'defence' | 'railways' | 'other';
 
 export interface ExamFamilyPillOption {
   id: ExamType;
@@ -20,6 +20,7 @@ export const EXAM_FAMILY_PILLS: ExamFamilyPillOption[] = [
   { id: 'SSC', label: 'SSC', family: 'ssc' },
   { id: 'BANKING', label: 'Banking', family: 'banking' },
   { id: 'DEFENCE', label: 'Defence', family: 'defence' },
+  { id: 'DSSSB', label: 'DSSSB', family: 'dsssb' },
 ];
 
 /**
@@ -27,6 +28,7 @@ export const EXAM_FAMILY_PILLS: ExamFamilyPillOption[] = [
  */
 export const EXAM_FAMILY_SUB_TAGS: Record<CanonicalExamFamily, string[]> = {
   ssc: ['CGL (Tier 1/2)', 'CHSL (10+2)', 'CPO (SI)', 'MTS & Havaldar', 'Steno & Phase'],
+  dsssb: ['ASO / DASS Gr-II', 'Junior Assistant (JA)', 'MTS', 'UDC / SSA', 'PRT / TGT / PGT', 'Head Clerk / SO'],
   banking: ['SBI PO', 'IBPS PO', 'SBI Clerk', 'IBPS Clerk', 'RRB & RBI Asst/PO'],
   defence: ['CDS (UPSC)', 'AFCAT', 'NDA / NA', 'CAPF (AC)'],
   railways: ['RRB NTPC', 'RRB Group D'],
@@ -41,6 +43,14 @@ export const EXAM_SUB_OPTIONS: Record<CanonicalExamFamily, SubExamOption[]> = {
     { id: 'SSC_CPO', label: 'SSC CPO', tag: 'SI / DP', family: 'ssc' },
     { id: 'SSC_MTS', label: 'SSC MTS', tag: 'Havaldar', family: 'ssc' },
     { id: 'SSC_STENO', label: 'SSC Steno & Selection', tag: 'Phase', family: 'ssc' },
+  ],
+  dsssb: [
+    { id: 'DSSSB', label: 'All DSSSB Shifts', tag: 'Combined', family: 'dsssb' },
+    { id: 'DSSSB_ASO', label: 'DSSSB ASO / DASS Gr-II', tag: 'Group B', family: 'dsssb' },
+    { id: 'DSSSB_JA', label: 'Junior Assistant (JA / Steno)', tag: 'LDC', family: 'dsssb' },
+    { id: 'DSSSB_MTS', label: 'DSSSB MTS', tag: 'Multi-Tasking', family: 'dsssb' },
+    { id: 'DSSSB_UDC_SSA', label: 'DSSSB UDC / SSA', tag: 'Secretariat', family: 'dsssb' },
+    { id: 'DSSSB_PGT_TGT', label: 'DSSSB Teaching (TGT/PGT/PRT)', tag: 'Teaching', family: 'dsssb' },
   ],
   banking: [
     { id: 'BANKING', label: 'All Banking', tag: 'Combined', family: 'banking' },
@@ -81,11 +91,11 @@ export function getExamFilterDisplayName(exam: ExamType | string | undefined | n
     };
   }
 
-  const familyLabel = family === 'ssc' ? 'SSC' : family === 'banking' ? 'Banking' : family === 'defence' ? 'Defence' : 'Railways';
+  const familyLabel = family === 'ssc' ? 'SSC' : family === 'dsssb' ? 'DSSSB' : family === 'banking' ? 'Banking' : family === 'defence' ? 'Defence' : 'Railways';
   const subOptions = EXAM_SUB_OPTIONS[family] || [];
   const found = subOptions.find(opt => opt.id === exam);
 
-  if (!found || found.id === 'SSC' || found.id === 'BANKING' || found.id === 'DEFENCE') {
+  if (!found || found.id === 'SSC' || found.id === 'DSSSB' || found.id === 'BANKING' || found.id === 'DEFENCE') {
     return {
       familyName: familyLabel,
       subName: `All ${familyLabel} Shifts`,
@@ -115,7 +125,19 @@ export function normalizeExamStringToFamily(raw: string | undefined | null): Can
 
   if (!clean) return 'other';
 
-  // 1. BANKING CHECKS (Must check before general RRB to avoid misclassifying IBPS RRB as Railways)
+  // 1. DSSSB CHECKS (Must check before general keywords to correctly classify DSSSB MTS, DSSSB Steno, etc.)
+  if (
+    clean.includes('dsssb') ||
+    clean.includes('delhi subordinate') ||
+    clean.includes('dass') ||
+    clean.includes('delhi administrative') ||
+    clean.includes('delhi gov') ||
+    clean.includes('delhi govt')
+  ) {
+    return 'dsssb';
+  }
+
+  // 2. BANKING CHECKS (Must check before general RRB to avoid misclassifying IBPS RRB as Railways)
   if (
     clean.includes('ibps') ||
     clean.includes('sbi') ||
@@ -133,7 +155,7 @@ export function normalizeExamStringToFamily(raw: string | undefined | null): Can
     return 'banking';
   }
 
-  // 2. DEFENCE CHECKS
+  // 3. DEFENCE CHECKS
   if (
     clean.includes('defence') ||
     clean.includes('defense') ||
@@ -152,7 +174,7 @@ export function normalizeExamStringToFamily(raw: string | undefined | null): Can
     return 'defence';
   }
 
-  // 3. RAILWAYS CHECKS
+  // 4. RAILWAYS CHECKS
   if (
     clean.includes('railway') ||
     clean.includes('railways') ||
@@ -167,7 +189,7 @@ export function normalizeExamStringToFamily(raw: string | undefined | null): Can
     return 'railways';
   }
 
-  // 4. SSC CHECKS
+  // 5. SSC CHECKS
   if (
     clean.includes('ssc') ||
     clean.includes('cgl') ||
@@ -269,6 +291,10 @@ export function normalizeFilterToFamily(
     return 'ssc';
   }
 
+  if (normalized === 'DSSSB' || normalized.startsWith('DSSSB_')) {
+    return 'dsssb';
+  }
+
   if (normalized === 'BANKING' || normalized.startsWith('BANK_') || normalized === 'BANK') {
     return 'banking';
   }
@@ -290,9 +316,10 @@ export function normalizeFilterToFamily(
  * Guaranteed:
  *  - When ALL: matches everything.
  *  - When SSC: ONLY questions whose canonical family is 'ssc' match.
+ *  - When DSSSB: ONLY questions whose canonical family is 'dsssb' match.
  *  - When BANKING: ONLY questions whose canonical family is 'banking' match.
  *  - When DEFENCE: ONLY questions whose canonical family is 'defence' match.
- *  - Sub-exam granularity is preserved for granular selection (e.g. 'SSC_CGL').
+ *  - Sub-exam granularity is preserved for granular selection (e.g. 'SSC_CGL', 'DSSSB_ASO').
  */
 export function matchesExamFamilyFilter(
   question: Question | { examFamily?: string; exam?: string; appearances?: ExamAppearance[]; examHistory?: string[] } | undefined | null,
@@ -311,10 +338,11 @@ export function matchesExamFamilyFilter(
     return false;
   }
 
-  // If a general family was chosen (e.g. SSC, BANKING, DEFENCE)
+  // If a general family was chosen (e.g. SSC, DSSSB, BANKING, DEFENCE)
   const rawFilter = String(filter).toUpperCase().trim();
   if (
     rawFilter === 'SSC' ||
+    rawFilter === 'DSSSB' ||
     rawFilter === 'BANKING' ||
     rawFilter === 'DEFENCE' ||
     rawFilter === 'ALL'
@@ -322,7 +350,7 @@ export function matchesExamFamilyFilter(
     return true;
   }
 
-  // If a granular sub-filter was specified (e.g. 'SSC_CGL', 'SSC_CHSL', 'BANK_SBI_PO')
+  // If a granular sub-filter was specified (e.g. 'SSC_CGL', 'DSSSB_ASO', 'BANK_SBI_PO')
   return matchGranularSubExam(question, rawFilter);
 }
 
@@ -347,6 +375,22 @@ function matchGranularSubExam(question: any, subFilter: string): boolean {
   const combined = texts.join(' ');
 
   switch (subFilter) {
+    // DSSSB Sub-exams
+    case 'DSSSB_ASO':
+      return combined.includes('aso') || combined.includes('assistant section') || combined.includes('dass') || combined.includes('grade-ii') || combined.includes('grade 2') || combined.includes('gr-ii');
+    case 'DSSSB_DASS_G2':
+      return combined.includes('dass') || combined.includes('grade-ii') || combined.includes('grade 2') || combined.includes('gr-ii');
+    case 'DSSSB_JA':
+      return combined.includes('junior assistant') || combined.includes('ja') || combined.includes('stenographer') || combined.includes('steno') || combined.includes('ldc') || combined.includes('lower division');
+    case 'DSSSB_MTS':
+      return combined.includes('mts') || combined.includes('multi tasking') || combined.includes('multitasking') || combined.includes('peon') || combined.includes('attendant');
+    case 'DSSSB_UDC_SSA':
+      return combined.includes('udc') || combined.includes('ssa') || combined.includes('upper division') || combined.includes('senior secretariat') || combined.includes('head clerk') || combined.includes('section officer');
+    case 'DSSSB_PGT_TGT':
+      return combined.includes('tgt') || combined.includes('pgt') || combined.includes('prt') || combined.includes('teacher') || combined.includes('teaching') || combined.includes('educator');
+    case 'DSSSB_OTHER':
+      return combined.includes('dsssb') || combined.includes('delhi');
+
     // SSC Sub-exams
     case 'SSC_CGL':
       return combined.includes('cgl') || combined.includes('combined graduate');

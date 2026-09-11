@@ -21,7 +21,7 @@ export const GA_MEASUREMENT_ID = 'G-GRSQYTY5W1';
 
 export type PracticeType = 'pyq_drill' | 'ssc_top100' | 'daily_sprint' | '1v1';
 export type CategoryType = 'synonyms' | 'antonyms' | 'ows' | 'idioms' | 'mixed';
-export type ExamFamilyType = 'all' | 'ssc' | 'banking' | 'defence';
+export type ExamFamilyType = 'all' | 'ssc' | 'dsssb' | 'banking' | 'defence';
 
 /**
  * Checks if debug mode is active for GA4 DebugView.
@@ -200,12 +200,13 @@ export function normalizeAnalyticsCategory(cat?: string | null): CategoryType {
 
 /**
  * Normalizes exam type to GA4 exam family:
- * "all" | "ssc" | "banking" | "defence"
+ * "all" | "ssc" | "dsssb" | "banking" | "defence"
  */
 export function normalizeAnalyticsExamFamily(exam?: string | null): ExamFamilyType {
   if (!exam) return 'ssc';
   const e = exam.toLowerCase();
   if (e === 'all' || e === 'mixed') return 'all';
+  if (e.includes('dsssb') || e.includes('dass')) return 'dsssb';
   if (e.includes('bank') || e.includes('ibps') || e.includes('sbi') || e.includes('rbi')) return 'banking';
   if (e.includes('def') || e.includes('nda') || e.includes('cds') || e.includes('afcat')) return 'defence';
   return 'ssc';
@@ -415,6 +416,41 @@ export function trackGuestReviewSignupClick(): void {
 
 export function trackGuestSignupComplete(source?: 'pyq' | 'battle_review'): void {
   trackEvent('guest_signup_complete', { source: source || 'unknown' });
+}
+
+/**
+ * Personal Daily Command Center & Due Revision Analytics
+ */
+export function trackNextBestActionView(actionType: string, priority: number): void {
+  trackEvent('next_best_action_view', {
+    action_type: actionType,
+    priority,
+  });
+}
+
+export function trackNextBestActionClick(actionType: string, priority: number): void {
+  trackEvent('next_best_action_click', {
+    action_type: actionType,
+    priority,
+  });
+}
+
+export function trackDueRevisionStart(count: number): void {
+  trackEvent('due_revision_start', {
+    due_count: Math.max(0, Math.round(count)),
+  });
+}
+
+export function trackDueRevisionComplete(params: {
+  count: number;
+  strengthenedCount: number;
+  accuracy: number;
+}): void {
+  trackEvent('due_revision_complete', {
+    count: Math.max(0, Math.round(params.count)),
+    strengthened_count: Math.max(0, Math.round(params.strengthenedCount)),
+    accuracy: Math.min(100, Math.max(0, Math.round(params.accuracy))),
+  });
 }
 
 

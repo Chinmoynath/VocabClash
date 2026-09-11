@@ -66,14 +66,35 @@ export function generateMatchedOpponent(playerLP: number, preferredExam: ExamTyp
   let targetExam = randomOpponent.targetExam;
   if (preferredExam !== 'ALL') {
     const examNames: Record<string, string> = {
+      SSC: 'SSC Aspirant (CGL / CHSL)',
       SSC_CGL: 'SSC CGL 2026 (GST / IT Inspector)',
       SSC_CHSL: 'SSC CHSL 10+2 Ranker',
       SSC_CPO: 'SSC CPO Sub-Inspector (Delhi Police)',
       SSC_MTS: 'SSC MTS Top Ranker',
+      SSC_STENO: 'SSC Stenographer Aspirant',
+      DSSSB: 'DSSSB Aspirant (Delhi Govt)',
+      DSSSB_ASO: 'DSSSB ASO / DASS Grade-II',
+      DSSSB_DASS_G2: 'DSSSB DASS Grade-II Aspirant',
+      DSSSB_JA: 'DSSSB Junior Assistant (JA / Steno)',
+      DSSSB_MTS: 'DSSSB MTS Aspirant',
+      DSSSB_UDC_SSA: 'DSSSB UDC / SSA Aspirant',
+      DSSSB_PGT_TGT: 'DSSSB Teaching (TGT/PGT/PRT)',
+      DSSSB_OTHER: 'DSSSB Delhi Govt Candidate',
+      BANKING: 'Banking Aspirant (SBI / IBPS)',
+      BANK_SBI_PO: 'SBI PO Aspirant',
+      BANK_IBPS_PO: 'IBPS PO Aspirant',
+      BANK_SBI_CLERK: 'SBI Clerk Ranker',
+      BANK_IBPS_CLERK: 'IBPS Clerk Candidate',
+      BANK_RRB_RBI: 'RRB & RBI Officer Aspirant',
+      BANK_PO: 'SBI / IBPS PO Specialist',
+      DEFENCE: 'Defence Officer Aspirant (CDS / AFCAT / NDA)',
+      DEF_CDS: 'CDS Officer Cadet (IMA/OTA)',
+      DEF_AFCAT: 'AFCAT Flying Officer Aspirant',
+      DEF_NDA: 'NDA Cadet (Khadakwasla)',
+      DEF_CAPF: 'CAPF Assistant Commandant Aspirant',
+      CDS_NDA: 'CDS / NDA Officer Cadet',
       RRB_NTPC: 'RRB NTPC Commercial Apprentice',
       RRB_GROUP_D: 'RRB Railway Aspirant',
-      BANK_PO: 'SBI / IBPS PO Specialist',
-      CDS_NDA: 'CDS / NDA Officer Cadet',
     };
     targetExam = examNames[preferredExam] || targetExam;
   }

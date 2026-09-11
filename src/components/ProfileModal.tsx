@@ -135,7 +135,8 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   const [showResetConfirm, setShowResetConfirm] = useState<boolean>(false);
   const [showSupportModal, setShowSupportModal] = useState<boolean>(false);
   const [showLegalModal, setShowLegalModal] = useState<boolean>(false);
-  const [name, setName] = useState<string>(player.name);
+  const cleanInitialName = extractCleanUserName(player.name, currentUser?.email || player.email);
+  const [name, setName] = useState<string>(cleanInitialName !== 'Govt Aspirant' ? cleanInitialName : player.name);
   const [avatar, setAvatar] = useState<string>(player.avatar);
   const [targetExam, setTargetExam] = useState<string>(player.targetExam);
 
@@ -321,13 +322,13 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                 placeholder="Enter Aspirant Name"
                 className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-center text-sm font-bold text-slate-100 w-full focus:outline-none focus:border-amber-400"
               />
-              {currentUser?.displayName && currentUser.displayName !== name && (
+              {currentUser && extractCleanUserName(currentUser.displayName, currentUser.email) !== name && (
                 <button
                   type="button"
-                  onClick={() => setName(currentUser.displayName || name)}
-                  className="text-[10px] text-sky-400 hover:underline font-medium"
+                  onClick={() => setName(extractCleanUserName(currentUser.displayName, currentUser.email))}
+                  className="text-[10px] text-sky-400 hover:underline font-medium block mx-auto mt-1"
                 >
-                  Use Google Name: {currentUser.displayName}
+                  Use Account Name: {extractCleanUserName(currentUser.displayName, currentUser.email)}
                 </button>
               )}
             </div>

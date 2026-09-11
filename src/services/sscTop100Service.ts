@@ -270,6 +270,22 @@ class SscTop100Service {
   }
 
   /**
+   * Resets local top 100 progress caches upon sign-out
+   */
+  public resetLocalProgress(): void {
+    this.progressMemoryCache.clear();
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    const categories: SscTop100Category[] = ['synonyms', 'antonyms', 'ows', 'idioms'];
+    for (const cat of categories) {
+      try {
+        localStorage.removeItem(`vclash_ssc100_${cat}`);
+      } catch {
+        // Safe ignore
+      }
+    }
+  }
+
+  /**
    * Diagnostic inspection of SSC rankings
    */
   public async inspectSscRankings(): Promise<SscVocabRankingDiagnostic[]> {

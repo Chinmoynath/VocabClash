@@ -167,3 +167,17 @@ export function clearSpeedBlitzRecentHistory(): void {
   localStorage.removeItem(STORAGE_KEY_SPEED_BLITZ_RECENT);
 }
 
+/**
+ * Clears all question history, daily seen sets, and speed blitz history on sign out
+ */
+export function clearSeenHistory(): void {
+  if (typeof window === 'undefined' || !window.localStorage) return;
+  try {
+    localStorage.removeItem(STORAGE_KEY_SEEN_HISTORY);
+    localStorage.removeItem(STORAGE_KEY_DAILY_SEEN);
+    localStorage.removeItem(STORAGE_KEY_SPEED_BLITZ_RECENT);
+  } catch (err) {
+    console.warn('Failed to clear question history:', err);
+  }
+}
+

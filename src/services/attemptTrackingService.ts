@@ -387,3 +387,16 @@ export function getAuthoritativeAttempts(): NormalizedAttempt[] {
   // 4. Return as array
   return Array.from(attemptMap.values());
 }
+
+/**
+ * Resets locally cached authoritative attempts on user sign-out
+ */
+export function resetAuthoritativeAttempts(): void {
+  if (typeof window === 'undefined' || !window.localStorage) return;
+  try {
+    localStorage.removeItem(STORAGE_KEY_ATTEMPTS_LOG);
+  } catch (e) {
+    console.warn('Failed to reset authoritative attempts log:', e);
+  }
+}
+

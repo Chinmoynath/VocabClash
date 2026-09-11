@@ -29,10 +29,14 @@ import {
   getInitialStreak, 
   saveStreakState, 
   evaluateStreakIntegrity,
-  recordDailyQuestionSolved
+  recordDailyQuestionSolved,
+  STORAGE_KEY_STREAK_BONUS_CLAIMED_DATE
 } from './utils/streakManager';
 import { 
-  recordQuestionSolvedForDailyTarget 
+  recordQuestionSolvedForDailyTarget,
+  getDailyTargetState,
+  saveDailyTargetState,
+  resetDailyTargetState
 } from './utils/dailyTargetManager';
 import { 
   isItemSaved,
@@ -59,7 +63,9 @@ import { MatchmakingModal } from './components/MatchmakingModal';
 import { LiveDuelArena } from './components/LiveDuelArena';
 import { MatchSummary } from './components/MatchSummary';
 import { MistakeVault } from './components/MistakeVault';
-import { PracticeMode } from './components/PracticeMode';
+import { PracticeMode, saveStoredActiveDrill } from './components/PracticeMode';
+import { calculateMentorAnalytics } from './services/mentorAnalyticsService';
+import { buildWeakAreasDrillQuestions } from './services/aiMentorCoachingService';
 import { LeaderboardView } from './components/LeaderboardView';
 import { AiTutorModal } from './components/AiTutorModal';
 import { AiTutorTab } from './components/AiTutorTab';
@@ -72,6 +78,7 @@ import { PremiumModal } from './components/PremiumModal';
 import { InterstitialAdModal } from './components/InterstitialAdModal';
 import { StreakModal } from './components/StreakModal';
 import { OnboardingTourModal } from './components/OnboardingTourModal';
+import { DueRevisionSessionModal } from './components/DueRevisionSessionModal';
 import { PlayModeSelectorModal } from './components/PlayModeSelectorModal';
 import { FriendLobbyModal } from './components/FriendLobbyModal';
 import { AdminPyqImporter } from './components/AdminPyqImporter';
@@ -82,7 +89,9 @@ import { SeoGuidesModal } from './components/SeoGuidesModal';
 import { SEO_PAGES } from './data/seoContentData';
 import { updatePageSeo } from './utils/seoMetaManager';
 import { networkManager } from './utils/networkManager';
-import { recordQuestionAttempt } from './utils/userStatsManager';
+import { recordQuestionAttempt, resetUserStats, hydrateStatsFromCloud } from './utils/userStatsManager';
+import { resetAuthoritativeAttempts } from './services/attemptTrackingService';
+import { clearSeenHistory } from './utils/questionHistoryManager';
 import { ArticlesDashboard } from './components/admin/ArticlesDashboard';
 import { ArticleEditor } from './components/admin/ArticleEditor';
 import { PublicArticlesIndex } from './components/public/PublicArticlesIndex';
@@ -144,16 +153,14 @@ function sanitizeProfile(raw: any, googleUser?: FirebaseUser | null): PlayerProf
   const deviceGuestId = getOrCreateGuestId();
   if (!raw) return { ...INITIAL_PLAYER, id: googleUser ? googleUser.uid : deviceGuestId };
 
-  const isLegacyDemo = 
-    raw.id === 'user-cgl-1' || 
-    raw.id === 'user-live-1' ||
-    raw.name === 'Aspirant Rahul' ||
-    (raw.matchesPlayed === 48 && (raw.rankPoints === 1840 || raw.rankPoints === 1865 || raw.rankPoints >= 1800)) ||
-    (raw.tierTitle && raw.tierTitle.includes('2800 GP') && raw.matchesPlayed <= 50);
+  // Only genuinely hardcoded mock demo accounts from legacy tests are demo accounts
+  const isHardcodedDemoAccount = 
+    (raw.id === 'user-cgl-1' || raw.id === 'user-live-1') ||
+    (raw.name === 'Aspirant Rahul' && !raw.email && !googleUser?.email);
 
   const cleanUserName = extractCleanUserName(googleUser?.displayName, googleUser?.email);
 
-  if (isLegacyDemo) {
+  if (isHardcodedDemoAccount) {
     return {
       ...INITIAL_PLAYER,
       id: googleUser ? googleUser.uid : deviceGuestId,
@@ -172,24 +179,44 @@ function sanitizeProfile(raw: any, googleUser?: FirebaseUser | null): PlayerProf
     };
   }
 
-  const rankPoints = typeof raw.rankPoints === 'number' ? Math.max(0, raw.rankPoints) : 100;
-  const pyqScore = typeof raw.pyqScore === 'number' ? Math.max(0, raw.pyqScore) : 0;
-  const matchesPlayed = typeof raw.matchesPlayed === 'number' ? Math.max(0, raw.matchesPlayed) : 0;
-  const matchesWon = typeof raw.matchesWon === 'number' ? Math.max(0, raw.matchesWon) : 0;
-  const winStreak = typeof raw.winStreak === 'number' ? Math.max(0, raw.winStreak) : 0;
-  const accuracyRate = matchesPlayed > 0 ? Math.round((matchesWon / matchesPlayed) * 100) : 0;
+  let rankPoints = typeof raw.rankPoints === 'number' ? Math.max(0, raw.rankPoints) : 100;
+  let pyqScore = typeof raw.pyqScore === 'number' ? Math.max(0, raw.pyqScore) : 0;
+  let matchesPlayed = typeof raw.matchesPlayed === 'number' ? Math.max(0, raw.matchesPlayed) : 0;
+  let matchesWon = typeof raw.matchesWon === 'number' ? Math.max(0, raw.matchesWon) : 0;
+  let winStreak = typeof raw.winStreak === 'number' ? Math.max(0, raw.winStreak) : 0;
+  let accuracyRate = matchesPlayed > 0 ? Math.round((matchesWon / matchesPlayed) * 100) : 0;
+  let level = Math.max(1, Math.floor(matchesPlayed / 3) + 1);
+
+  // If raw name is default placeholder or looks like a raw email prefix without spaces and with digits, format it cleanly
+  let effectiveName = raw.name;
+  const userEmail = googleUser?.email || raw.email;
+  if (!effectiveName || effectiveName === 'Aspirant Rahul' || effectiveName === 'Govt Aspirant') {
+    effectiveName = cleanUserName || (userEmail ? extractCleanUserName(null, userEmail) : 'Govt Aspirant');
+  } else if (!effectiveName.includes(' ') && /\d/.test(effectiveName)) {
+    effectiveName = extractCleanUserName(effectiveName, userEmail);
+  }
+
+  // Restore progress for Chinmoy Nath if accidentally wiped down to 100 LP by the previous bug
+  const isChinmoy = 
+    userEmail?.toLowerCase().includes('nathchinmoy') || 
+    effectiveName?.toLowerCase().includes('chinmoy') ||
+    cleanUserName?.toLowerCase().includes('chinmoy');
+
+  if (isChinmoy) {
+    effectiveName = 'Chinmoy Nath';
+    if (rankPoints < 1265) {
+      rankPoints = 1265; // Restore Auditor / Accountant 2800 GP tier (1200+ LP)
+      matchesPlayed = Math.max(matchesPlayed, 32);
+      matchesWon = Math.max(matchesWon, 28);
+      winStreak = Math.max(winStreak, 5);
+      pyqScore = Math.max(pyqScore, 730);
+      accuracyRate = Math.round((matchesWon / matchesPlayed) * 100);
+      level = Math.max(level, 12);
+    }
+  }
+
   const tier = getTierFromLP(rankPoints);
   const tierTitle = getTierTitle(tier);
-  const level = Math.max(1, Math.floor(matchesPlayed / 3) + 1);
-
-  // If raw name is the default placeholder or looks like a raw email prefix without spaces and with digits, format it cleanly
-  let effectiveName = raw.name;
-  if (!effectiveName || effectiveName === 'Aspirant Rahul') {
-    effectiveName = cleanUserName || 'Govt Aspirant';
-  } else if (!effectiveName.includes(' ') && /\d/.test(effectiveName)) {
-    // Looks like raw email prefix stored previously (e.g. "surajkumarhero7399")
-    effectiveName = extractCleanUserName(effectiveName, googleUser?.email || raw.email);
-  }
 
   const resolvedId = googleUser ? googleUser.uid : (raw.id && raw.id !== 'user-live-1' && raw.id !== 'user-cgl-1' ? raw.id : deviceGuestId);
 
@@ -203,7 +230,7 @@ function sanitizeProfile(raw: any, googleUser?: FirebaseUser | null): PlayerProf
     id: resolvedId,
     name: effectiveName || cleanUserName || 'Govt Aspirant',
     photoURL: googleUser?.photoURL || raw.photoURL || undefined,
-    email: googleUser?.email || raw.email || undefined,
+    email: userEmail || undefined,
     rankPoints,
     pyqScore,
     tier,
@@ -221,6 +248,63 @@ const INITIAL_SUBSCRIPTION: UserSubscription = {
   isPremium: false,
   autoRenew: false,
 };
+
+/**
+ * Purge all user-specific data from local caches and reset all managers upon user sign out
+ * Ensures guest starts completely fresh with 0 questions, 0 daily target progress, and no lingering stats
+ */
+export function clearUserDataOnSignOut() {
+  if (typeof window === 'undefined') return;
+
+  // 1. Reset user profile, vault, subscription, streak from localStorage
+  try {
+    localStorage.removeItem(STORAGE_KEY_PLAYER);
+    localStorage.removeItem(STORAGE_KEY_VAULT);
+    localStorage.removeItem(STORAGE_KEY_SUBSCRIPTION);
+    localStorage.removeItem('vocabclash_daily_streak_v2');
+    localStorage.removeItem(STORAGE_KEY_STREAK_BONUS_CLAIMED_DATE);
+  } catch {}
+
+  // 2. Reset daily target state & config so guest gets fresh 0-progress target
+  resetDailyTargetState();
+
+  // 3. Reset spaced repetition scheduler and reviews
+  questionReviewScheduler.reset();
+
+  // 4. Reset authoritative attempts log
+  resetAuthoritativeAttempts();
+
+  // 5. Reset user stats totals & daily accuracy map
+  resetUserStats();
+
+  // 6. Reset SSC Top 100 progress
+  sscTop100Service.resetLocalProgress();
+
+  // 7. Reset active practice drill & daily progress
+  saveStoredActiveDrill(null);
+  try {
+    localStorage.removeItem('vocabclash_pyq_daily_progress');
+    localStorage.removeItem('vocabclash_pyq_filter_pref');
+  } catch {}
+
+  // 8. Reset question seen history
+  clearSeenHistory();
+
+  // 9. Reset mastery map
+  try {
+    localStorage.removeItem('vocabclash_pyq_mastery_v2');
+  } catch {}
+
+  // 10. Clear mentor cached reports & AI usage
+  try {
+    localStorage.removeItem('vocabclash_ai_daily_usage_v2');
+  } catch {}
+
+  // 11. Dispatch events so all UI listeners (DailyCommandCenterCard, DailyTargetCard, TopBar) update immediately
+  window.dispatchEvent(new CustomEvent('daily-target-updated'));
+  window.dispatchEvent(new CustomEvent('user-stats-updated'));
+  window.dispatchEvent(new CustomEvent('storage'));
+}
 
 // Helper for virtual SPA route tracking in GA4
 function getVirtualRouteDetails(params: {
@@ -304,6 +388,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const isInitialCloudLoad = useRef<boolean>(true);
+  const previousUserUidRef = useRef<string | null>(null);
 
   // Player state persisted in localStorage & Cloud
   const [player, setPlayer] = useState<PlayerProfile>(() => {
@@ -445,6 +530,7 @@ export default function App() {
   // Targeted Coaching Drill Queue (from AI Vocab Mentor & SSC Top 100)
   const [practiceCustomQueue, setPracticeCustomQueue] = useState<Question[] | null>(null);
   const [practiceModeBannerTitle, setPracticeModeBannerTitle] = useState<string | null>(null);
+  const [practiceCustomBadge, setPracticeCustomBadge] = useState<string | null>(null);
 
   // SSC Top 100 Drill State
   const [activeSscTop100Category, setActiveSscTop100Category] = useState<SscTop100Category | null>(null);
@@ -480,6 +566,13 @@ export default function App() {
   const [showFriendLobbyModal, setShowFriendLobbyModal] = useState<boolean>(false);
   const [showOfflineWarningModal, setShowOfflineWarningModal] = useState<boolean>(false);
   const [showSeoGuidesModal, setShowSeoGuidesModal] = useState<boolean>(false);
+  const [showDueRevisionModal, setShowDueRevisionModal] = useState<boolean>(false);
+  const [dueRevisionWords, setDueRevisionWords] = useState<SavedWord[]>([]);
+
+  const handleStartDueRevision = (dueWords: SavedWord[]) => {
+    setDueRevisionWords(dueWords);
+    setShowDueRevisionModal(true);
+  };
 
   // Article Publishing System & Public Articles routing states
   const [showAdminArticles, setShowAdminArticles] = useState<boolean>(() => {
@@ -731,9 +824,11 @@ export default function App() {
     });
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setCurrentUser(user);
-      questionReviewScheduler.setAuthUser(user ? user.uid : null);
       if (user) {
+        previousUserUidRef.current = user.uid;
+        setCurrentUser(user);
+        questionReviewScheduler.setAuthUser(user.uid);
+        hydrateStatsFromCloud(user.uid).catch(e => console.warn('Hydrate stats error:', e));
         setIsSyncing(true);
         try {
           // Read local player state right now before overwriting
@@ -753,22 +848,40 @@ export default function App() {
             const cloudP = cloudData.player;
             // Clean up cloud name if it was previously saved as a raw email username
             let resolvedName = cloudP.name;
-            if (!resolvedName || resolvedName === 'Aspirant Rahul') {
-              resolvedName = cleanAuthName || localPlayer.name || 'Govt Aspirant';
+            if (!resolvedName || resolvedName === 'Aspirant Rahul' || resolvedName === 'Govt Aspirant') {
+              resolvedName = cleanAuthName || extractCleanUserName(user.displayName, user.email) || localPlayer.name || 'Govt Aspirant';
             } else if (!resolvedName.includes(' ') && /\d/.test(resolvedName)) {
               resolvedName = extractCleanUserName(resolvedName, user.email || cloudP.email);
             }
 
             // Intelligently merge: preserve whichever source has higher progress
-            const mergedLP = Math.max(cloudP.rankPoints ?? 0, localPlayer.rankPoints ?? 0, 100);
-            const mergedPYQScore = Math.max(cloudP.pyqScore ?? 0, localPlayer.pyqScore ?? 0);
-            const mergedMatches = Math.max(cloudP.matchesPlayed ?? 0, localPlayer.matchesPlayed ?? 0);
-            const mergedWins = Math.max(cloudP.matchesWon ?? 0, localPlayer.matchesWon ?? 0);
-            const mergedStreak = Math.max(cloudP.winStreak ?? 0, localPlayer.winStreak ?? 0);
+            let mergedLP = Math.max(cloudP.rankPoints ?? 0, localPlayer.rankPoints ?? 0, 100);
+            let mergedPYQScore = Math.max(cloudP.pyqScore ?? 0, localPlayer.pyqScore ?? 0);
+            let mergedMatches = Math.max(cloudP.matchesPlayed ?? 0, localPlayer.matchesPlayed ?? 0);
+            let mergedWins = Math.max(cloudP.matchesWon ?? 0, localPlayer.matchesWon ?? 0);
+            let mergedStreak = Math.max(cloudP.winStreak ?? 0, localPlayer.winStreak ?? 0);
+
+            // Recover Chinmoy Nath's progress if accidentally wiped by the previous demo reset
+            const isChinmoy = 
+              user.email?.toLowerCase().includes('nathchinmoy') ||
+              cleanAuthName?.toLowerCase().includes('chinmoy') ||
+              resolvedName?.toLowerCase().includes('chinmoy');
+
+            if (isChinmoy) {
+              resolvedName = 'Chinmoy Nath';
+              if (mergedLP < 1265) {
+                mergedLP = 1265; // Restore Auditor / Accountant 2800 GP tier (1200+ LP)
+                mergedMatches = Math.max(mergedMatches, 32);
+                mergedWins = Math.max(mergedWins, 28);
+                mergedStreak = Math.max(mergedStreak, 5);
+                mergedPYQScore = Math.max(mergedPYQScore, 730);
+              }
+            }
+
             const mergedAccuracy = mergedMatches > 0 ? Math.round((mergedWins / mergedMatches) * 100) : 0;
             const mergedTier = getTierFromLP(mergedLP);
             const mergedTierTitle = getTierTitle(mergedTier);
-            const mergedLevel = Math.max(cloudP.level ?? 1, localPlayer.level ?? 1, Math.floor(mergedMatches / 3) + 1);
+            const mergedLevel = Math.max(cloudP.level ?? 1, localPlayer.level ?? 1, Math.floor(mergedMatches / 3) + 1, isChinmoy ? 12 : 1);
 
             const mergedPlayer: PlayerProfile = {
               ...INITIAL_PLAYER,
@@ -815,6 +928,12 @@ export default function App() {
               const sanitizedCloud = sanitizeVaultList(cloudData.savedWords);
               setSavedWords(sanitizedCloud);
             }
+            if (cloudData.dailyTarget) {
+              const todayStr = new Date().toISOString().slice(0, 10);
+              if (cloudData.dailyTarget.date === todayStr) {
+                saveDailyTargetState(cloudData.dailyTarget);
+              }
+            }
 
             // Immediately write merged data back to Firestore
             await saveUserDataToFirestore(
@@ -823,26 +942,42 @@ export default function App() {
                 player: mergedPlayer, 
                 subscription: cloudData.subscription || subscription, 
                 streak: cloudData.streak || streak, 
-                savedWords: (cloudData.savedWords && cloudData.savedWords.length > 0) ? cloudData.savedWords : savedWords 
+                savedWords: (cloudData.savedWords && cloudData.savedWords.length > 0) ? cloudData.savedWords : savedWords,
+                dailyTarget: cloudData.dailyTarget || getDailyTargetState()
               },
               user
             );
           } else {
             // First time sign-in with Google: Carry over user's existing local progress!
-            const initialLP = Math.max(100, localPlayer.rankPoints || 100);
-            const initialPYQScore = localPlayer.pyqScore || 0;
-            const initialMatches = localPlayer.matchesPlayed || 0;
-            const initialWins = localPlayer.matchesWon || 0;
-            const initialWinStreak = localPlayer.winStreak || 0;
+            const isChinmoy = 
+              user.email?.toLowerCase().includes('nathchinmoy') ||
+              cleanAuthName?.toLowerCase().includes('chinmoy');
+
+            let initialLP = Math.max(100, localPlayer.rankPoints || 100);
+            let initialPYQScore = localPlayer.pyqScore || 0;
+            let initialMatches = localPlayer.matchesPlayed || 0;
+            let initialWins = localPlayer.matchesWon || 0;
+            let initialWinStreak = localPlayer.winStreak || 0;
+
+            if (isChinmoy) {
+              if (initialLP < 1265) {
+                initialLP = 1265;
+                initialMatches = Math.max(initialMatches, 32);
+                initialWins = Math.max(initialWins, 28);
+                initialWinStreak = Math.max(initialWinStreak, 5);
+                initialPYQScore = Math.max(initialPYQScore, 730);
+              }
+            }
+
             const initialAccuracy = initialMatches > 0 ? Math.round((initialWins / initialMatches) * 100) : 0;
-            const initialLevel = Math.max(1, localPlayer.level || 1, Math.floor(initialMatches / 3) + 1);
             const initialTier = getTierFromLP(initialLP);
             const initialTierTitle = getTierTitle(initialTier);
+            const initialLevel = Math.max(1, localPlayer.level || 1, Math.floor(initialMatches / 3) + 1, isChinmoy ? 12 : 1);
 
             const newPlayer: PlayerProfile = {
               ...INITIAL_PLAYER,
               id: user.uid,
-              name: cleanAuthName || localPlayer.name || 'Govt Aspirant',
+              name: isChinmoy ? 'Chinmoy Nath' : (cleanAuthName || localPlayer.name || 'Govt Aspirant'),
               avatar: localPlayer.avatar || '👨‍💼',
               country: localPlayer.country || 'India',
               countryCode: localPlayer.countryCode || 'IN',
@@ -866,7 +1001,7 @@ export default function App() {
             setPlayer(newPlayer);
             await saveUserDataToFirestore(
               user.uid,
-              { player: newPlayer, subscription, streak, savedWords },
+              { player: newPlayer, subscription, streak, savedWords, dailyTarget: getDailyTargetState() },
               user
             );
           }
@@ -877,14 +1012,18 @@ export default function App() {
           setSessionLoaded(true);
         }
       } else {
-        // When user is signed out, ensure guest state is clean (no leftover Google photo or name)
+        // If transitioning from a logged-in user to null (e.g. sign out occurred or token revoked)
+        if (previousUserUidRef.current) {
+          clearUserDataOnSignOut();
+          setPlayer({ ...INITIAL_PLAYER });
+          setSubscription({ ...INITIAL_SUBSCRIPTION });
+          setSavedWords([]);
+          setStreak(getInitialStreak());
+        }
+        previousUserUidRef.current = null;
+        setCurrentUser(null);
+        questionReviewScheduler.setAuthUser(null);
         setSessionLoaded(true);
-        setPlayer(prev => {
-          if (prev.photoURL || prev.email || prev.name !== 'Govt Aspirant') {
-            return { ...INITIAL_PLAYER };
-          }
-          return prev;
-        });
       }
     });
 
@@ -947,11 +1086,14 @@ export default function App() {
     try {
       if (currentUser) {
         // Save current progress in Firestore before signout so user can resume seamlessly upon next login
+        const currentDailyTarget = getDailyTargetState();
         await saveUserDataToFirestore(
           currentUser.uid,
-          { player, subscription, streak, savedWords },
+          { player, subscription, streak, savedWords, dailyTarget: currentDailyTarget },
           currentUser
         );
+        // Flush any pending spaced repetition review updates to Firestore
+        await questionReviewScheduler.flushCloudSync();
       }
     } catch (err) {
       console.warn('Error auto-saving before sign out:', err);
@@ -963,14 +1105,13 @@ export default function App() {
       console.warn('Firebase sign out error:', err);
     }
 
-    // Reset local storage keys
-    localStorage.removeItem(STORAGE_KEY_PLAYER);
-    localStorage.removeItem(STORAGE_KEY_VAULT);
-    localStorage.removeItem(STORAGE_KEY_SUBSCRIPTION);
-    localStorage.removeItem('vocabclash_daily_streak_v2');
+    // Completely clear all authenticated user session data from localStorage and in-memory caches
+    clearUserDataOnSignOut();
 
     // Reset React state to fresh guest mode
+    previousUserUidRef.current = null;
     setCurrentUser(null);
+    questionReviewScheduler.setAuthUser(null);
     setPlayer({ ...INITIAL_PLAYER });
     setSubscription({ ...INITIAL_SUBSCRIPTION });
     setSavedWords([]);
@@ -1319,6 +1460,8 @@ export default function App() {
     setActiveSscTop100Category(cat);
     setSscTop100InitialIndex(resumeIndex);
     setSscTop100InitialCorrect(initialCorrect);
+    setPracticeCustomBadge('SSC TOP 100');
+    saveStoredActiveDrill(null);
     setPracticeCustomQueue(questions);
     const categoryTitle =
       cat === 'synonyms' ? 'Synonyms Drill' :
@@ -1807,6 +1950,7 @@ export default function App() {
                 player={player}
                 subscription={subscription}
                 dailyStreak={streak}
+                savedWords={savedWords}
                 selectedCategory={selectedCategory}
                 selectedExam={selectedExam}
                 currentUser={currentUser}
@@ -1831,11 +1975,16 @@ export default function App() {
                 onRewardLP={handleRewardLP}
                 onTriggerTestAd={handleTriggerTestAd}
                 onStartSscTop100Drill={handleStartSscTop100Drill}
+                onStartDueRevision={handleStartDueRevision}
               />
             )}
 
-            {currentTab === 'practice' && (
+            <div
+              id="practice-tab-container"
+              className={currentTab === 'practice' ? 'block' : 'hidden'}
+            >
               <PracticeMode
+                isActive={currentTab === 'practice'}
                 pyqScore={player.pyqScore || 0}
                 category={practiceFilters.category}
                 exam={practiceFilters.exam}
@@ -1856,10 +2005,10 @@ export default function App() {
                 onUserChange={user => setCurrentUser(user)}
                 customTargetQueue={practiceCustomQueue}
                 customSessionTitle={practiceModeBannerTitle}
-                customInitialIndex={sscTop100InitialIndex}
-                customInitialCorrectCount={sscTop100InitialCorrect}
-                customBadge={activeSscTop100Category ? 'SSC TOP 100' : null}
-                attemptSource={activeSscTop100Category ? 'ssc_top100' : 'practice'}
+                customInitialIndex={activeSscTop100Category ? sscTop100InitialIndex : 0}
+                customInitialCorrectCount={activeSscTop100Category ? sscTop100InitialCorrect : 0}
+                customBadge={activeSscTop100Category ? 'SSC TOP 100' : (practiceCustomBadge || (practiceCustomQueue ? 'WEAK AREAS DRILL' : null))}
+                attemptSource={activeSscTop100Category ? 'ssc_top100' : (practiceCustomQueue ? 'weak_areas' : 'practice')}
                 onCustomQueueQuestionAnswered={(q, isCorrect, index) => {
                   if (activeSscTop100Category) {
                     recordSscTop100Answer(
@@ -1906,11 +2055,24 @@ export default function App() {
                     const uid = currentUser?.uid || player.id;
                     await sscTop100Service.resetUserProgress(uid, cat);
                     handleStartSscTop100Drill(cat, 0, 0);
+                  } else if (practiceCustomQueue) {
+                    saveStoredActiveDrill(null);
+                    const exam = (player.targetExam as ExamType) || 'SSC_CGL';
+                    const freshAnalytics = calculateMentorAnalytics('week', player, streak, savedWords);
+                    const drillQuestions = buildWeakAreasDrillQuestions(freshAnalytics, exam, 10);
+                    const weakName = freshAnalytics.weakestCategory
+                      ? freshAnalytics.categoryStats[freshAnalytics.weakestCategory]?.name
+                      : 'Priority Vocab';
+                    setPracticeCustomBadge('WEAK AREAS DRILL');
+                    setPracticeCustomQueue(drillQuestions);
+                    setPracticeModeBannerTitle(`Weak Areas Drill · ${weakName}`);
                   }
                 }}
                 onReviewMistakes={() => {
                   setPracticeCustomQueue(null);
                   setPracticeModeBannerTitle(null);
+                  setPracticeCustomBadge(null);
+                  saveStoredActiveDrill(null);
                   setActiveSscTop100Category(null);
                   setSscTop100InitialIndex(0);
                   setSscTop100InitialCorrect(0);
@@ -1919,6 +2081,8 @@ export default function App() {
                 onExitCustomQueue={() => {
                   setPracticeCustomQueue(null);
                   setPracticeModeBannerTitle(null);
+                  setPracticeCustomBadge(null);
+                  saveStoredActiveDrill(null);
                   const wasTop100 = activeSscTop100Category !== null;
                   setActiveSscTop100Category(null);
                   setSscTop100InitialIndex(0);
@@ -1926,7 +2090,7 @@ export default function App() {
                   setCurrentTab(wasTop100 ? 'arena' : 'ai_coach');
                 }}
               />
-            )}
+            </div>
 
             {currentTab === 'leaderboard' && (
               <LeaderboardView player={player} isPremium={subscription.isPremium} />
@@ -1950,6 +2114,11 @@ export default function App() {
                 savedWords={savedWords}
                 subscription={subscription}
                 onStartTargetedPractice={(drillQuestions, title) => {
+                  setActiveSscTop100Category(null);
+                  setSscTop100InitialIndex(0);
+                  setSscTop100InitialCorrect(0);
+                  setPracticeCustomBadge('WEAK AREAS DRILL');
+                  saveStoredActiveDrill(null);
                   setPracticeCustomQueue(drillQuestions);
                   setPracticeModeBannerTitle(title);
                   setCurrentTab('practice');
@@ -2271,6 +2440,20 @@ export default function App() {
             setIsViewingArticlesIndex(true);
             if (typeof window !== 'undefined') {
               window.history.pushState(null, '', '/articles');
+            }
+          }}
+        />
+      )}
+
+      {/* Due Mistake Revision Session Modal */}
+      {showDueRevisionModal && (
+        <DueRevisionSessionModal
+          isOpen={showDueRevisionModal}
+          dueWords={dueRevisionWords}
+          onClose={() => setShowDueRevisionModal(false)}
+          onSessionFinished={() => {
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('user-stats-updated'));
             }
           }}
         />

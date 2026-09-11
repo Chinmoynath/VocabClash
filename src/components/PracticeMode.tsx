@@ -94,7 +94,47 @@ interface PracticeModeProps {
   onRestartCustomDrill?: () => void;
   onReviewMistakes?: () => void;
   onExitCustomQueue?: () => void;
+  isActive?: boolean;
 }
+
+export const STORAGE_KEY_ACTIVE_DRILL = 'vocabclash_active_drill_question_v1';
+
+export interface StoredActiveDrill {
+  question: Question;
+  selectedOption: number | null;
+  isAnswered: boolean;
+  category: QuestionCategory | 'mixed';
+  exam: ExamType;
+  customSessionTitle?: string | null;
+  customQueueIndex?: number;
+}
+
+export const getStoredActiveDrill = (): StoredActiveDrill | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEY_ACTIVE_DRILL) || localStorage.getItem(STORAGE_KEY_ACTIVE_DRILL);
+    if (!raw) return null;
+    const parsed: StoredActiveDrill = JSON.parse(raw);
+    if (parsed && parsed.question && parsed.question.id && Array.isArray(parsed.question.options)) {
+      return parsed;
+    }
+  } catch {}
+  return null;
+};
+
+export const saveStoredActiveDrill = (state: StoredActiveDrill | null) => {
+  if (typeof window === 'undefined') return;
+  try {
+    if (!state) {
+      sessionStorage.removeItem(STORAGE_KEY_ACTIVE_DRILL);
+      localStorage.removeItem(STORAGE_KEY_ACTIVE_DRILL);
+    } else {
+      const serialized = JSON.stringify(state);
+      sessionStorage.setItem(STORAGE_KEY_ACTIVE_DRILL, serialized);
+      localStorage.setItem(STORAGE_KEY_ACTIVE_DRILL, serialized);
+    }
+  } catch {}
+};
 
 export const STORAGE_KEY_PYQ_FILTER = 'vocabclash_pyq_filter_preferences_v1';
 
@@ -198,6 +238,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
   onRestartCustomDrill,
   onReviewMistakes,
   onExitCustomQueue,
+  isActive = true,
 }) => {
   const [category, setCategory] = useState<QuestionCategory | 'mixed'>(() => {
     return categoryProp || getStoredPyqFilterPreferences().category;
@@ -236,23 +277,72 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
   const [streak, setStreak] = useState<number>(() => getStoredDailyProgress().streak);
 
   const [recentWordsHistory, setRecentWordsHistory] = useState<string[]>(() => getPersistentSeenWords().slice(-100));
+
+  // Retrieve cached active question to ensure switching tabs does not reset unanswered/active question
+  const initialStoredDrill = useMemo(() => {
+    return getStoredActiveDrill();
+  }, []);
+
   const [currentQ, setCurrentQ] = useState<Question>(() => {
     if (customTargetQueue && customTargetQueue.length > 0) {
       const idx = Math.min(Math.max(0, customInitialIndex || 0), customTargetQueue.length - 1);
+      if (
+        initialStoredDrill &&
+        initialStoredDrill.customSessionTitle === customSessionTitle &&
+        typeof initialStoredDrill.customQueueIndex === 'number' &&
+        initialStoredDrill.customQueueIndex >= 0 &&
+        initialStoredDrill.customQueueIndex < customTargetQueue.length
+      ) {
+        return customTargetQueue[initialStoredDrill.customQueueIndex];
+      }
       return customTargetQueue[idx];
     }
-    const initHistory = getPersistentSeenWords().slice(-100);
+
     const initialCat = categoryProp || getStoredPyqFilterPreferences().category;
     const initialEx = examProp || getStoredPyqFilterPreferences().exam;
-    return getNextDrillQuestion(initialCat, initialEx, initHistory);
+
+    // Never change active question on navigation/tab-switch if it matches current filter
+    if (initialStoredDrill && initialStoredDrill.question && initialStoredDrill.question.id) {
+      const matchesCategory = initialCat === 'mixed' || initialStoredDrill.question.category === initialCat;
+      const matchesExam = initialEx === 'ALL' || matchesExamFamilyFilter(initialStoredDrill.question, initialEx);
+      if (matchesCategory && matchesExam) {
+        return initialStoredDrill.question;
+      }
+    }
+
+    const initHistory = getPersistentSeenWords().slice(-100);
+    const newQ = getNextDrillQuestion(initialCat, initialEx, initHistory);
+    saveStoredActiveDrill({
+      question: newQ,
+      selectedOption: null,
+      isAnswered: false,
+      category: initialCat,
+      exam: initialEx,
+    });
+    return newQ;
   });
 
   // Keep state in sync if parent prop changes (e.g. from cloud fetch or global selector)
   useEffect(() => {
     if (categoryProp && categoryProp !== category) {
       setCategory(categoryProp);
+      if (categoryProp !== 'mixed' && currentQ?.category !== categoryProp && !customTargetQueue) {
+        const nextQ = getNextDrillQuestion(categoryProp, exam, recentWordsHistory);
+        setCurrentQ(nextQ);
+        setSelectedOption(null);
+        setIsAnswered(false);
+        setCountdown(0);
+        setIsCountdownPaused(false);
+        saveStoredActiveDrill({
+          question: nextQ,
+          selectedOption: null,
+          isAnswered: false,
+          category: categoryProp,
+          exam,
+        });
+      }
     }
-  }, [categoryProp]);
+  }, [categoryProp, category, exam, currentQ, recentWordsHistory, customTargetQueue]);
 
   useEffect(() => {
     if (examProp && examProp !== exam) {
@@ -265,17 +355,35 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
         setIsAnswered(false);
         setCountdown(0);
         setIsCountdownPaused(false);
+        saveStoredActiveDrill({
+          question: nextQ,
+          selectedOption: null,
+          isAnswered: false,
+          category,
+          exam: examProp,
+        });
       }
     }
   }, [examProp, exam, category, recentWordsHistory, currentQ]);
 
   // Custom targeted coaching drill state
   const validInitialIndex = useMemo(() => {
-    if (customTargetQueue && customTargetQueue.length > 0 && typeof customInitialIndex === 'number') {
-      return Math.min(Math.max(0, customInitialIndex), customTargetQueue.length - 1);
+    if (customTargetQueue && customTargetQueue.length > 0) {
+      if (
+        initialStoredDrill &&
+        initialStoredDrill.customSessionTitle === customSessionTitle &&
+        typeof initialStoredDrill.customQueueIndex === 'number' &&
+        initialStoredDrill.customQueueIndex >= 0 &&
+        initialStoredDrill.customQueueIndex < customTargetQueue.length
+      ) {
+        return initialStoredDrill.customQueueIndex;
+      }
+      if (typeof customInitialIndex === 'number') {
+        return Math.min(Math.max(0, customInitialIndex), customTargetQueue.length - 1);
+      }
     }
     return 0;
-  }, [customTargetQueue, customInitialIndex]);
+  }, [customTargetQueue, customInitialIndex, initialStoredDrill, customSessionTitle]);
 
   const [customQueueIndex, setCustomQueueIndex] = useState<number>(validInitialIndex);
   const [customQueueResults, setCustomQueueResults] = useState<{ isCorrect: boolean }[]>([]);
@@ -285,7 +393,13 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
   // Derived drill metrics (strictly bounded by queue length, e.g. max 100 for SSC Top 100)
   const isSscTop100 = Boolean(
     attemptSource === 'ssc_top100' ||
-    (customBadge && (customBadge.includes('SSC') || customBadge.includes('Top 100')))
+    (customBadge && (customBadge.includes('SSC TOP 100') || customBadge === 'SSC TOP 100'))
+  );
+
+  const isWeakAreasDrill = Boolean(
+    attemptSource === 'weak_areas' ||
+    (customBadge && (customBadge.includes('WEAK AREAS') || customBadge.includes('TARGETED'))) ||
+    (customSessionTitle && customSessionTitle.toLowerCase().includes('weak areas'))
   );
 
   const totalCustomQuestions = customTargetQueue ? customTargetQueue.length : 0;
@@ -311,18 +425,23 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
 
   // Clean, non-repetitive display badge and title for custom drills
   const displayBadge = useMemo(() => {
-    if (!customBadge) return 'SSC TOP 100';
-    if (customBadge.includes('SSC TOP 100')) return 'SSC TOP 100';
-    return customBadge;
-  }, [customBadge]);
+    if (customBadge) return customBadge;
+    if (isSscTop100) return 'SSC TOP 100';
+    if (isWeakAreasDrill) return 'WEAK AREAS DRILL';
+    return 'TARGETED DRILL';
+  }, [customBadge, isSscTop100, isWeakAreasDrill]);
 
   const displayTitle = useMemo(() => {
-    if (!customSessionTitle) return 'Vocab Drill';
-    let t = customSessionTitle;
-    if (t.startsWith('SSC TOP 100 • ')) {
-      t = t.replace('SSC TOP 100 • ', '').trim();
+    if (!customSessionTitle) {
+      if (isSscTop100) return 'SSC Top 100 Drill';
+      if (isWeakAreasDrill) return 'Weak Areas Drill';
+      return 'Vocab Drill';
     }
-    if (displayBadge === 'SSC TOP 100') {
+    let t = customSessionTitle;
+    if (isSscTop100) {
+      if (t.startsWith('SSC TOP 100 • ')) {
+        t = t.replace('SSC TOP 100 • ', '').trim();
+      }
       const lower = t.toLowerCase();
       if (lower.includes('synonyms')) return 'Synonyms Drill';
       if (lower.includes('antonyms')) return 'Antonyms Drill';
@@ -330,20 +449,24 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
       if (lower.includes('idioms')) return 'Idioms & Phrases Drill';
     }
     return t;
-  }, [customSessionTitle, displayBadge]);
+  }, [customSessionTitle, isSscTop100, isWeakAreasDrill]);
 
+  const lastCustomQueueRef = useRef<Question[] | null>(null);
   useEffect(() => {
-    if (customTargetQueue && customTargetQueue.length > 0) {
-      const startIdx = Math.min(Math.max(0, customInitialIndex || 0), customTargetQueue.length - 1);
+    if (customTargetQueue && customTargetQueue.length > 0 && lastCustomQueueRef.current !== customTargetQueue) {
+      lastCustomQueueRef.current = customTargetQueue;
+      const startIdx = validInitialIndex;
       setCustomQueueIndex(startIdx);
       setCustomQueueResults([]);
       customResultsRef.current = [];
       setCustomDrillCompleted(false);
       setCurrentQ(customTargetQueue[startIdx]);
-      setSelectedOption(null);
-      setIsAnswered(false);
+      if (!initialStoredDrill || initialStoredDrill.question?.id !== customTargetQueue[startIdx].id) {
+        setSelectedOption(null);
+        setIsAnswered(false);
+      }
     }
-  }, [customTargetQueue, customInitialIndex]);
+  }, [customTargetQueue, validInitialIndex, initialStoredDrill]);
 
   const questionStartTimeRef = useRef<number>(Date.now());
   const isAdvancingRef = useRef<boolean>(false);
@@ -351,8 +474,18 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     currentQ ? questionReviewScheduler.getReviewState(currentQ.memoryKey || currentQ.wordOrPhrase) || null : null
   );
 
-  const [selectedOption, setSelectedOption] = useState<number | null>(null);
-  const [isAnswered, setIsAnswered] = useState<boolean>(false);
+  const [selectedOption, setSelectedOption] = useState<number | null>(() => {
+    if (initialStoredDrill && initialStoredDrill.question?.id === currentQ?.id) {
+      return initialStoredDrill.selectedOption;
+    }
+    return null;
+  });
+  const [isAnswered, setIsAnswered] = useState<boolean>(() => {
+    if (initialStoredDrill && initialStoredDrill.question?.id === currentQ?.id) {
+      return initialStoredDrill.isAnswered;
+    }
+    return false;
+  });
   const [flyItems, setFlyItems] = useState<VaultFlyItem[]>([]);
   const [showAllOptionBreakdown, setShowAllOptionBreakdown] = useState<boolean>(true);
   const [showReportModal, setShowReportModal] = useState<boolean>(false);
@@ -414,7 +547,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
 
   // Auto-advance countdown timer when question is answered (clean interval + single-trigger timeout)
   useEffect(() => {
-    if (!isAnswered || autoAdvanceSec <= 0 || isCountdownPaused) {
+    if (!isActive || !isAnswered || autoAdvanceSec <= 0 || isCountdownPaused) {
       setCountdown(0);
       return;
     }
@@ -441,11 +574,12 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
       clearInterval(intervalId);
       clearTimeout(timeoutId);
     };
-  }, [isAnswered, autoAdvanceSec, isCountdownPaused, currentQ?.id]);
+  }, [isActive, isAnswered, autoAdvanceSec, isCountdownPaused, currentQ?.id]);
 
   // Desktop keyboard controls (1-4 for options, S/B for bookmark, Space/Enter/N for Next question)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (!isActive) return;
       if (showReportModal || showSupportModal) return;
 
       // Bookmark shortcut
@@ -475,7 +609,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isAnswered, currentQ, showReportModal, showSupportModal, bookmarkedIds]);
+  }, [isActive, isAnswered, currentQ, showReportModal, showSupportModal, bookmarkedIds]);
 
   const handleApplyFilter = (newCat: QuestionCategory | 'mixed', newExam: ExamType) => {
     soundManager.playTap();
@@ -499,12 +633,29 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     setIsAnswered(false);
     setCountdown(0);
     setIsCountdownPaused(false);
+    saveStoredActiveDrill({
+      question: nextQ,
+      selectedOption: null,
+      isAnswered: false,
+      category: newCat,
+      exam: newExam,
+    });
   };
 
   const handleSelectOption = (idx: number) => {
     if (isAnswered || !currentQ) return;
     setSelectedOption(idx);
     setIsAnswered(true);
+
+    saveStoredActiveDrill({
+      question: currentQ,
+      selectedOption: idx,
+      isAnswered: true,
+      category,
+      exam,
+      customSessionTitle,
+      customQueueIndex,
+    });
 
     if (onSolveQuestion) {
       onSolveQuestion();
@@ -671,6 +822,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
         if (onCustomDrillCompleted) {
           onCustomDrillCompleted(customResultsRef.current);
         }
+        saveStoredActiveDrill(null);
         setTimeout(() => {
           isAdvancingRef.current = false;
         }, 300);
@@ -683,6 +835,15 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
       setIsAnswered(false);
       setCountdown(0);
       setIsCountdownPaused(false);
+      saveStoredActiveDrill({
+        question: nextQ,
+        selectedOption: null,
+        isAnswered: false,
+        category,
+        exam,
+        customSessionTitle,
+        customQueueIndex: nextIdx,
+      });
       setTimeout(() => {
         isAdvancingRef.current = false;
       }, 400);
@@ -711,6 +872,13 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     setIsAnswered(false);
     setCountdown(0);
     setIsCountdownPaused(false);
+    saveStoredActiveDrill({
+      question: safeQ,
+      selectedOption: null,
+      isAnswered: false,
+      category,
+      exam,
+    });
 
     setTimeout(() => {
       isAdvancingRef.current = false;
@@ -957,71 +1125,142 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
               <Sparkles className="w-8 h-8" />
             </div>
             <div className="space-y-1.5">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black tracking-wider uppercase bg-purple-500/15 border border-purple-500/30 text-purple-300">
+                <Target className="w-3.5 h-3.5 text-purple-400" />
+                {displayBadge} COMPLETED
+              </div>
               <h3 className="text-xl sm:text-2xl font-black text-slate-100">
-                Targeted Coaching Drill Complete!
+                {displayTitle || 'Targeted Coaching Drill Complete!'}
               </h3>
-              <p className="text-xs sm:text-sm text-slate-400 max-w-md mx-auto">
-                You've successfully drilled through your priority weak areas and mistake vault words. Your spaced repetition states have been refreshed.
+              <p className="text-xs sm:text-sm text-slate-300 max-w-md mx-auto">
+                You've successfully completed this targeted weak areas session. Spaced repetition memory levels and category accuracy have been refreshed.
               </p>
             </div>
-            <div className="grid grid-cols-2 gap-3 max-w-xs mx-auto">
-              <div className="bg-slate-950/80 border border-slate-800 p-3.5 rounded-2xl">
-                <div className="text-2xl font-black text-emerald-400">
-                  {customQueueResults.filter(r => r.isCorrect).length} / {customTargetQueue?.length || 10}
+            <div className="grid grid-cols-3 gap-2.5 sm:gap-3 max-w-md mx-auto">
+              <div className="bg-slate-950/80 border border-emerald-500/40 p-3 rounded-2xl">
+                <div className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider flex items-center justify-center gap-1">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Right %
                 </div>
-                <div className="text-[11px] text-slate-400 font-semibold mt-0.5">Correct Answers</div>
+                <div className="text-xl sm:text-2xl font-black text-emerald-400 mt-1">
+                  {liveRightPercent}%
+                </div>
+                <div className="text-[11px] font-semibold text-slate-300 mt-0.5">
+                  {liveCorrectCount} Correct
+                </div>
               </div>
-              <div className="bg-slate-950/80 border border-slate-800 p-3.5 rounded-2xl">
-                <div className="text-2xl font-black text-purple-400">
-                  {customTargetQueue?.length
-                    ? Math.round((customQueueResults.filter(r => r.isCorrect).length / customTargetQueue.length) * 100)
-                    : 0}
-                  %
+
+              <div className="bg-slate-950/80 border border-rose-500/40 p-3 rounded-2xl">
+                <div className="text-[11px] font-bold text-rose-400 uppercase tracking-wider flex items-center justify-center gap-1">
+                  <XCircle className="w-3.5 h-3.5" />
+                  Wrong %
                 </div>
-                <div className="text-[11px] text-slate-400 font-semibold mt-0.5">Accuracy</div>
+                <div className="text-xl sm:text-2xl font-black text-rose-400 mt-1">
+                  {liveWrongPercent}%
+                </div>
+                <div className="text-[11px] font-semibold text-slate-300 mt-0.5">
+                  {liveMistakeCount} Mistakes
+                </div>
+              </div>
+
+              <div className="bg-slate-950/80 border border-purple-500/40 p-3 rounded-2xl">
+                <div className="text-[11px] font-bold text-purple-400 uppercase tracking-wider flex items-center justify-center gap-1">
+                  <Target className="w-3.5 h-3.5" />
+                  Solved
+                </div>
+                <div className="text-xl sm:text-2xl font-black text-purple-300 mt-1">
+                  {currentDrillSolvedCount}/{totalCustomQuestions}
+                </div>
+                <div className="text-[11px] font-semibold text-slate-300 mt-0.5">
+                  +{liveCorrectCount * 10 - liveMistakeCount * 2} pts
+                </div>
               </div>
             </div>
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-3">
+
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-3 max-w-md mx-auto">
+              <button
+                onClick={() => {
+                  soundManager.playTap();
+                  if (onRestartCustomDrill) {
+                    onRestartCustomDrill();
+                  } else {
+                    setCustomDrillCompleted(false);
+                    setCustomQueueIndex(0);
+                    setCustomQueueResults([]);
+                    customResultsRef.current = [];
+                    if (customTargetQueue && customTargetQueue.length > 0) {
+                      setCurrentQ(customTargetQueue[0]);
+                      setSelectedOption(null);
+                      setIsAnswered(false);
+                    }
+                  }
+                }}
+                className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs shadow-lg shadow-purple-900/40 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-purple-200" />
+                Train More Weak Areas
+              </button>
+
+              {liveMistakeCount > 0 && onReviewMistakes && (
+                <button
+                  onClick={() => {
+                    soundManager.playTap();
+                    onReviewMistakes();
+                  }}
+                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-rose-950/80 hover:bg-rose-900 border border-rose-600/60 text-rose-200 font-bold text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <BookOpen className="w-3.5 h-3.5" />
+                  Review Mistakes
+                </button>
+              )}
+
               {onExitCustomQueue && (
                 <button
                   onClick={() => {
                     soundManager.playTap();
                     onExitCustomQueue();
                   }}
-                  className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold shadow-lg shadow-purple-900/40 transition-all cursor-pointer"
+                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 transition-all flex items-center justify-center gap-1 cursor-pointer"
                 >
-                  Return to Vocab Mentor
+                  Return to AI Coach
+                  <ChevronRight className="w-3.5 h-3.5" />
                 </button>
               )}
-              <button
-                onClick={() => {
-                  soundManager.playTap();
-                  setCustomDrillCompleted(false);
-                  if (onExitCustomQueue) onExitCustomQueue();
-                }}
-                className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 transition-all cursor-pointer"
-              >
-                Continue PYQ Endless Drill
-              </button>
             </div>
           </div>
         )
       ) : customTargetQueue && customTargetQueue.length > 0 ? (
         /* Dedicated Targeted Coaching / SSC Top 100 Drill Header */
-        <div className="bg-slate-900/95 border border-amber-500/40 rounded-2xl p-3 sm:p-4 shadow-xl space-y-3">
-          {/* Top Row: Category title, TCS & Eduquity PYQ Bank badge, and Exit Drill button */}
+        <div className={`border rounded-2xl p-3 sm:p-4 shadow-xl space-y-3 ${
+          isSscTop100 
+            ? 'bg-slate-900/95 border-amber-500/40' 
+            : 'bg-slate-900/95 border-purple-500/40 shadow-purple-950/20'
+        }`}>
+          {/* Top Row: Category title, Subtitle/badge, and Exit Drill button */}
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className="p-2 rounded-xl border shrink-0 bg-amber-500/15 text-amber-400 border-amber-500/30">
-                <Flame className="w-5 h-5 text-amber-400 fill-amber-400 animate-pulse" />
+              <div className={`p-2 rounded-xl border shrink-0 ${
+                isSscTop100
+                  ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+                  : 'bg-purple-500/15 text-purple-400 border-purple-500/30'
+              }`}>
+                {isSscTop100 ? (
+                  <Flame className="w-5 h-5 text-amber-400 fill-amber-400 animate-pulse" />
+                ) : (
+                  <Target className="w-5 h-5 text-purple-400" />
+                )}
               </div>
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  <span className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider border ${
+                    isSscTop100
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                      : 'bg-purple-500/20 text-purple-300 border-purple-500/30'
+                  }`}>
                     {displayBadge}
                   </span>
                   <span className="text-[11px] font-semibold text-slate-400 hidden sm:inline">
-                    TCS & Eduquity PYQ Bank
+                    {isSscTop100 ? 'TCS & Eduquity PYQ Bank' : 'AI Adaptive Coaching • Weak Area Focus'}
                   </span>
                 </div>
                 <h3 className="text-sm sm:text-base font-black text-slate-100 truncate mt-0.5">
@@ -1037,9 +1276,11 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
                   <span>{streak}x</span>
                 </div>
               )}
-              <div className="flex items-center gap-1 bg-slate-800/90 border border-amber-500/30 px-2.5 py-1 rounded-xl text-xs">
+              <div className={`flex items-center gap-1 bg-slate-800/90 border px-2.5 py-1 rounded-xl text-xs ${
+                isSscTop100 ? 'border-amber-500/30' : 'border-purple-500/30'
+              }`}>
                 <span className="text-[10px] font-bold text-slate-400 uppercase">PYQ</span>
-                <span className="font-mono font-black text-amber-400">
+                <span className={`font-mono font-black ${isSscTop100 ? 'text-amber-400' : 'text-purple-400'}`}>
                   {pyqScore} pts
                 </span>
               </div>
@@ -1061,7 +1302,9 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
           <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-2.5 space-y-2">
             <div className="flex items-center justify-between text-xs">
               <div className="flex items-center gap-2">
-                <span className="font-black text-amber-400 flex items-center gap-1">
+                <span className={`font-black flex items-center gap-1 ${
+                  isSscTop100 ? 'text-amber-400' : 'text-purple-400'
+                }`}>
                   <BookOpen className="w-3.5 h-3.5" />
                   Question {currentDrillQuestionNum} of {totalCustomQuestions}
                 </span>
@@ -1082,10 +1325,12 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
               </div>
             </div>
 
-            {/* Progress Bar - Solid amber matching Question 1 color */}
+            {/* Progress Bar */}
             <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
               <div
-                className="bg-amber-400 h-full rounded-full transition-all duration-300"
+                className={`h-full rounded-full transition-all duration-300 ${
+                  isSscTop100 ? 'bg-amber-400' : 'bg-purple-500'
+                }`}
                 style={{ width: `${drillProgressPercent}%` }}
               />
             </div>
@@ -1142,6 +1387,8 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
                       ? 'All Exams'
                       : normalizeFilterToFamily(exam) === 'ssc'
                       ? 'SSC'
+                      : normalizeFilterToFamily(exam) === 'dsssb'
+                      ? 'DSSSB'
                       : normalizeFilterToFamily(exam) === 'banking'
                       ? 'Banking'
                       : 'Defence'}
@@ -1420,6 +1667,12 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
                 <span className="bg-amber-950 text-amber-300 border border-amber-700/80 px-2 py-0.5 rounded-full font-bold text-[10px] flex items-center gap-1 shrink-0">
                   <Bookmark className="w-2.5 h-2.5" />
                   Saved Review
+                </span>
+              )}
+              {currentQ.reviewReason === 'weak_category' && (
+                <span className="bg-purple-950 text-purple-300 border border-purple-700/80 px-2 py-0.5 rounded-full font-bold text-[10px] flex items-center gap-1 shrink-0">
+                  <Target className="w-2.5 h-2.5 text-purple-400" />
+                  Weak Area Focus
                 </span>
               )}
 

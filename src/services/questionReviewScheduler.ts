@@ -447,8 +447,44 @@ class QuestionReviewScheduler {
     }
   }
 
+  private currentAuthUid: string | null = null;
+
+  /**
+   * Resets all in-memory review states and clears local storage on logout
+   */
+  public reset(): void {
+    if (this.syncTimer) {
+      clearTimeout(this.syncTimer);
+      this.syncTimer = null;
+    }
+    this.pendingSyncKeys.clear();
+    this.reviewStates.clear();
+    this.sessionOrdinal = 0;
+    this.recentMemoryKeys = [];
+    this.recentQuestionIds = [];
+    this.currentAuthUid = null;
+    this.initialized = false;
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        localStorage.removeItem(STORAGE_KEY_REVIEWS);
+      } catch (e) {
+        console.warn('Failed to clear review states from localStorage:', e);
+      }
+    }
+  }
+
   // Hydrate user progress from Firestore subcollection on login
   public setAuthUser(uid: string | null) {
+    if (this.currentAuthUid && !uid) {
+      // Authenticated user logged out: clean memory and localStorage
+      this.reset();
+      return;
+    }
+    if (this.currentAuthUid && uid && this.currentAuthUid !== uid) {
+      // User switched: reset previous user's data before hydrating
+      this.reset();
+    }
+    this.currentAuthUid = uid;
     if (uid) {
       this.hydrateUserProgressFromCloud(uid).catch(err => console.warn('Hydrate review progress error:', err));
     }

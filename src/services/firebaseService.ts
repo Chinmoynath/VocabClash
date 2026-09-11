@@ -36,6 +36,7 @@ import {
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { PlayerProfile, UserSubscription, DailyStreakState, SavedWord, QuestionCategory, ExamType } from '../types';
+import { DailyTargetState } from '../utils/dailyTargetManager';
 
 // Suppress internal Firestore connection retry & offline warnings
 try {
@@ -266,6 +267,7 @@ export interface UserCloudData {
     category: QuestionCategory | 'mixed';
     exam: ExamType;
   };
+  dailyTarget?: DailyTargetState | null;
   updatedAt: number;
 }
 
@@ -541,6 +543,7 @@ export async function saveUserDataToFirestore(
       category: QuestionCategory | 'mixed';
       exam: ExamType;
     };
+    dailyTarget?: DailyTargetState | null;
   },
   currentUser?: FirebaseUser | null
 ): Promise<void> {
@@ -570,6 +573,7 @@ export async function saveUserDataToFirestore(
       streak: data.streak || null,
       savedWords: data.savedWords || [],
       practiceFilters: data.practiceFilters || data.player.practiceFilters || null,
+      dailyTarget: data.dailyTarget || null,
       updatedAt: Date.now(),
     };
     

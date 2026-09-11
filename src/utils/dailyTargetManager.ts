@@ -150,3 +150,19 @@ export function getTimeUntilMidnight(): { hours: number; minutes: number; second
 
   return { hours, minutes, seconds, formatted };
 }
+
+/**
+ * Resets daily target state and config upon sign out so guest starts fresh
+ */
+export function resetDailyTargetState(): void {
+  try {
+    localStorage.removeItem(STORAGE_KEY_DAILY_TARGET_STATE);
+    localStorage.removeItem(STORAGE_KEY_DAILY_TARGET_CONFIG);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('daily-target-updated'));
+    }
+  } catch {
+    // ignore
+  }
+}
+

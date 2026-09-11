@@ -25,6 +25,7 @@ import { AdSenseUnit } from './AdSenseUnit';
 import { ADSENSE_BANNER_SLOT } from '../services/adSenseService';
 import { DailyTargetCard } from './DailyTargetCard';
 import { CadreRankCard } from './CadreRankCard';
+import { DailyCommandCenterCard } from './DailyCommandCenterCard';
 // import { SscTop100Section } from './SscTop100Section'; // Temporarily hidden; will bring back later
 import { SscTop100Category } from '../data/sscTop100';
 import { 
@@ -33,11 +34,13 @@ import {
   normalizeFilterToFamily, 
   getExamFilterDisplayName 
 } from '../utils/examFamilyUtils';
+import { SavedWord } from '../types';
 
 interface ArenaHomeProps {
   player: PlayerProfile;
   subscription: UserSubscription;
   dailyStreak: DailyStreakState;
+  savedWords?: SavedWord[];
   selectedCategory: QuestionCategory | 'mixed';
   selectedExam: ExamType;
   currentUser?: FirebaseUser | null;
@@ -56,12 +59,14 @@ interface ArenaHomeProps {
   onRewardLP: (lpDelta: number, reason: string) => void;
   onTriggerTestAd: () => void;
   onStartSscTop100Drill?: (category: SscTop100Category, resumeIndex?: number) => void;
+  onStartDueRevision?: (dueWords: SavedWord[]) => void;
 }
 
 export const ArenaHome: React.FC<ArenaHomeProps> = ({
   player,
   subscription,
   dailyStreak,
+  savedWords = [],
   selectedCategory,
   selectedExam,
   currentUser,
@@ -80,6 +85,7 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
   onRewardLP,
   onTriggerTestAd,
   onStartSscTop100Drill,
+  onStartDueRevision,
 }) => {
   const [secondsToAd, setSecondsToAd] = useState<number>(() => getSecondsUntilNextAd(subscription.isPremium));
 
@@ -127,24 +133,43 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
   return (
     <div className="p-3.5 sm:p-5 lg:p-6 space-y-4 max-w-7xl mx-auto w-full pb-8">
       
-      {/* Top Status & Queue Banner */}
-      <div className="bg-emerald-950/40 border border-emerald-800/40 rounded-xl px-3.5 py-2 flex items-center justify-between text-xs text-emerald-300 shadow-sm">
-        <div className="flex items-center gap-2">
-          <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-          </span>
-          <span className="font-semibold text-emerald-200">Instant 1v1 Matchmaking Active</span>
-        </div>
-        <span className="text-[11px] text-emerald-400/90 font-mono font-bold">Avg Queue: 5.0s</span>
-      </div>
-
       {/* Main Responsive Grid: 1-Column on Mobile, 2-Column Dashboard on Desktop/Laptop */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6 items-start">
         
-        {/* LEFT COLUMN: Duel Actions, Exam Selector, Categories, Quick Modes (7 Cols on Desktop) */}
+        {/* LEFT COLUMN: Daily Command Center, Duel Actions, Exam Selector, Categories, Quick Modes (7 Cols on Desktop) */}
         <div className="order-1 lg:col-span-7 xl:col-span-7 space-y-4">
           
+          {/* Personal Daily Command Center (Today's Next Best Action) */}
+          <DailyCommandCenterCard
+            player={player}
+            currentUser={currentUser}
+            dailyStreak={dailyStreak}
+            savedWords={savedWords}
+            onStartDueRevision={(dueWords) => {
+              if (onStartDueRevision) {
+                onStartDueRevision(dueWords);
+              } else if (onNavigateTab) {
+                onNavigateTab('mistakes');
+              }
+            }}
+            onNavigateTab={onNavigateTab}
+            onStartMatchmaking={onStartMatchmaking}
+            onSelectCategory={onSelectCategory}
+            onStartSscTop100Drill={onStartSscTop100Drill}
+          />
+
+          {/* Instant 1v1 Matchmaking Active Status Ticker */}
+          <div className="bg-emerald-950/40 border border-emerald-800/40 rounded-xl px-3.5 py-2 flex items-center justify-between text-xs text-emerald-300 shadow-xs">
+            <div className="flex items-center gap-2">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+              <span className="font-semibold text-emerald-200">Instant 1v1 Matchmaking Active</span>
+            </div>
+            <span className="text-[11px] text-emerald-400/90 font-mono font-bold">Avg Queue: 5.0s</span>
+          </div>
+
           {/* Target Govt Exam Filter Pills */}
           <div className="space-y-1.5 bg-slate-900/70 border border-slate-800/90 rounded-2xl p-3 sm:p-3.5 shadow-sm">
             <div className="flex items-center justify-between text-xs text-slate-300 font-semibold px-1">
@@ -157,6 +182,8 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
                   ? 'All Board PYQs'
                   : activeFamily === 'ssc'
                   ? 'All SSC Exams'
+                  : activeFamily === 'dsssb'
+                  ? 'All DSSSB Exams'
                   : activeFamily === 'banking'
                   ? 'All Banking Exams'
                   : 'All Defence Exams'}
@@ -242,7 +269,7 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
           </div>
 
           {/* Hero Action: Primary Ranked 1v1 Battle Button */}
-          <div className="space-y-3 pt-1">
+          <div className="space-y-2.5 pt-1">
             <button
               onClick={() => {
                 soundManager.playTap();

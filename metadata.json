@@ -1,6 +1,6 @@
 {
   "name": "VocabClash - Govt Exam English Arena",
-  "description": "Head-to-head real-time competitive English arena for SSC, Railway & Govt Exam aspirants covering Antonyms, Synonyms, OWS, and Idioms.",
+  "description": "Head-to-head real-time competitive English arena for SSC, DSSSB, Railway, Banking & Govt Exam aspirants covering Antonyms, Synonyms, OWS, and Idioms.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

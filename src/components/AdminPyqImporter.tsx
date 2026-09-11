@@ -1034,10 +1034,11 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-sky-500"
                   >
                     <option value="SSC">SSC (CGL, CHSL, CPO, MTS)</option>
+                    <option value="DSSSB">DSSSB (ASO, MTS, JA, DASS, UDC)</option>
                     <option value="Banking">Banking (IBPS PO, SBI Clerk, RRB)</option>
                     <option value="Defence">Defence (CDS, AFCAT, NDA)</option>
                     <option value="Railways">Railways (RRB NTPC, Group D, JE)</option>
-                    <option value="State">State Govt (DSSSB, etc.)</option>
+                    <option value="State">State Govt (Other)</option>
                   </select>
                 </div>
 
@@ -2655,6 +2656,7 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-sky-500"
                 >
                   <option value="SSC">SSC</option>
+                  <option value="DSSSB">DSSSB</option>
                   <option value="Banking">Banking</option>
                   <option value="Defence">Defence</option>
                   <option value="Railways">Railways</option>

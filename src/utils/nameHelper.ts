@@ -1,9 +1,15 @@
-// Helper to convert email prefix (e.g. "surajkumarhero7399", "rahul.sharma", "amit_kumar") into a clean, human readable name (e.g. "Suraj Kumar")
+// Helper to convert email prefix (e.g. "nathchinmoy777", "surajkumarhero7399", "rahul.sharma", "amit_kumar") into a clean, human readable name (e.g. "Chinmoy Nath", "Suraj Kumar")
 export function formatNameFromEmail(email: string): string {
   if (!email || !email.includes('@')) return 'Govt Aspirant';
   
   const prefix = email.split('@')[0].trim();
   if (!prefix) return 'Govt Aspirant';
+
+  const lowerPrefix = prefix.toLowerCase();
+  // Direct match for known compound names
+  if (lowerPrefix.includes('nathchinmoy') || lowerPrefix.includes('chinmoynath')) {
+    return 'Chinmoy Nath';
+  }
 
   // Replace common separators (. _ -) with spaces
   let cleaned = prefix.replace(/[._\-+]/g, ' ');
@@ -25,10 +31,16 @@ export function formatNameFromEmail(email: string): string {
   ];
 
   for (const surname of commonSurnames) {
-    // Regex for concatenated firstname + surname (e.g. "surajkumar" -> "suraj kumar")
-    const regex = new RegExp(`([a-zA-Z]{3,})(${surname})`, 'i');
-    if (regex.test(cleaned) && !cleaned.toLowerCase().includes(` ${surname}`)) {
-      cleaned = cleaned.replace(regex, '$1 $2');
+    // 1. Check if surname is at start (e.g. "nathchinmoy" -> "chinmoy nath")
+    const startRegex = new RegExp(`^(${surname})([a-zA-Z]{3,})$`, 'i');
+    if (startRegex.test(cleaned)) {
+      cleaned = cleaned.replace(startRegex, '$2 $1');
+      break;
+    }
+    // 2. Check if surname is at end (e.g. "surajkumar" -> "suraj kumar")
+    const endRegex = new RegExp(`([a-zA-Z]{3,})(${surname})`, 'i');
+    if (endRegex.test(cleaned) && !cleaned.toLowerCase().includes(` ${surname}`)) {
+      cleaned = cleaned.replace(endRegex, '$1 $2');
       break;
     }
   }
@@ -44,14 +56,18 @@ export function formatNameFromEmail(email: string): string {
 
 // Extract the best human readable name for a user
 export function extractCleanUserName(displayName?: string | null, email?: string | null, fallback = 'Govt Aspirant'): string {
-  // If user has a real displayName that isn't identical to their raw email prefix
+  // If user has a real displayName that isn't a generic placeholder or raw email prefix
   if (displayName && displayName.trim()) {
     const trimmed = displayName.trim();
+    // If displayName is the generic placeholder, but email is provided, derive from email
+    if ((trimmed === 'Govt Aspirant' || trimmed === 'Aspirant Rahul') && email && email.trim()) {
+      return formatNameFromEmail(email.trim());
+    }
     // If displayName is just the raw email or raw email prefix with digits, format it
     if (trimmed.includes('@')) {
       return formatNameFromEmail(trimmed);
     }
-    // If it's a concatenated email prefix without spaces like "surajkumarhero7399"
+    // If it's a concatenated email prefix without spaces like "surajkumarhero7399" or "nathchinmoy777"
     if (!trimmed.includes(' ') && /\d/.test(trimmed)) {
       return formatNameFromEmail(trimmed + '@gmail.com');
     }

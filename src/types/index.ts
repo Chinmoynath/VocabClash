@@ -3,6 +3,7 @@ export type QuestionCategory = 'synonyms' | 'antonyms' | 'ows' | 'idioms';
 export type ExamType = 
   | 'ALL'
   | 'SSC'
+  | 'DSSSB'
   | 'BANKING'
   | 'DEFENCE'
   | 'SSC_CGL'
@@ -10,6 +11,13 @@ export type ExamType =
   | 'SSC_CPO'
   | 'SSC_MTS'
   | 'SSC_STENO'
+  | 'DSSSB_ASO'
+  | 'DSSSB_DASS_G2'
+  | 'DSSSB_JA'
+  | 'DSSSB_MTS'
+  | 'DSSSB_UDC_SSA'
+  | 'DSSSB_PGT_TGT'
+  | 'DSSSB_OTHER'
   | 'RRB_NTPC'
   | 'RRB_GROUP_D'
   | 'BANK_PO'
@@ -87,7 +95,7 @@ export interface Question {
   sourceQuestionId?: string;
   appearances?: ExamAppearance[]; // Canonical list of all exam occurrences
   sourceType?: 'verified_pyq' | 'generated_practice';
-  reviewReason?: 'fresh' | 'due_review' | 'mistake_review' | 'saved_review' | 'pool_exhausted_review';
+  reviewReason?: 'fresh' | 'due_review' | 'mistake_review' | 'saved_review' | 'pool_exhausted_review' | 'weak_category';
   examFamily?: string;
   exam?: string;
   year?: number;

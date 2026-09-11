@@ -13,6 +13,7 @@ import { questionReviewScheduler } from './questionReviewScheduler';
 import { questionBankEngine } from './questionBankEngine';
 import { isItemMistake } from '../utils/vaultManager';
 import { getPeriodKey, CATEGORY_DISPLAY_NAMES } from './mentorAnalyticsService';
+import { getPersistentSeenWords } from '../utils/questionHistoryManager';
 import { auth, db } from './firebaseService';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 
@@ -411,20 +412,49 @@ export function buildWeakAreasDrillQuestions(
     }
   }
 
-  // 3. Questions from weakest category
-  const weakestCat: QuestionCategory = diagnosticsOrAnalytics.weakestCategory || 'antonyms';
+  // 3. Resolve user's weakest category from analytics or lowest accuracy category
+  let weakestCat: QuestionCategory = (diagnosticsOrAnalytics as any).weakestCategory as QuestionCategory;
+  if (!weakestCat && (diagnosticsOrAnalytics as any).categoryStats) {
+    const stats = (diagnosticsOrAnalytics as any).categoryStats;
+    const cats: QuestionCategory[] = ['idioms', 'ows', 'antonyms', 'synonyms'];
+    cats.sort((a, b) => {
+      const accA = stats[a]?.accuracy ?? 100;
+      const accB = stats[b]?.accuracy ?? 100;
+      if (accA !== accB) return accA - accB;
+      return (stats[a]?.attempted ?? 0) - (stats[b]?.attempted ?? 0);
+    });
+    weakestCat = cats[0];
+  }
+  if (!weakestCat) weakestCat = 'idioms';
+
   const weakPool = questionBankEngine.getPlayablePool(weakestCat);
   const matchingExamQuestions = weakPool.filter(q => questionBankEngine.matchesExam(q, targetExam));
   const candidatePool = matchingExamQuestions.length >= 10 ? matchingExamQuestions : weakPool;
 
-  for (const q of candidatePool) {
+  // Prioritize unseen / non-recent questions from candidate pool and shuffle
+  const seenWords = new Set(getPersistentSeenWords().map(w => w.toLowerCase().trim()));
+  const shuffle = <T>(arr: T[]): T[] => {
+    const a = [...arr];
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  };
+
+  const unseenCandidates = shuffle(candidatePool.filter(q => !seenWords.has((q.wordOrPhrase || '').toLowerCase().trim())));
+  const otherCandidates = shuffle(candidatePool.filter(q => seenWords.has((q.wordOrPhrase || '').toLowerCase().trim())));
+  const orderedCandidates = [...unseenCandidates, ...otherCandidates];
+
+  for (const q of orderedCandidates) {
     if (selected.length >= desiredCount) break;
-    pushQuestion(q, 'fresh');
+    pushQuestion(q, 'weak_category');
   }
 
   // 4. Fill any remaining with questions from general pool
   if (selected.length < desiredCount) {
-    for (const q of playablePool) {
+    const shuffledGeneral = shuffle(playablePool);
+    for (const q of shuffledGeneral) {
       if (selected.length >= desiredCount) break;
       pushQuestion(q, 'fresh');
     }

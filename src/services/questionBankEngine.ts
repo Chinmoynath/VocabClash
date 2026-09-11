@@ -65,6 +65,16 @@ const DEFENCE_TEMPLATES: GeneratedExamTemplate[] = [
   { examFamily: 'Defence', exam: 'NDA', year: 2023, tier: 'Written Examination' },
 ];
 
+const DSSSB_TEMPLATES: GeneratedExamTemplate[] = [
+  { examFamily: 'DSSSB', exam: 'DSSSB ASO', year: 2024, tier: 'Tier-I' },
+  { examFamily: 'DSSSB', exam: 'DSSSB DASS Grade-II', year: 2023, tier: 'Tier-I' },
+  { examFamily: 'DSSSB', exam: 'DSSSB Junior Assistant', year: 2024, tier: 'CBE' },
+  { examFamily: 'DSSSB', exam: 'DSSSB MTS', year: 2024, tier: 'Tier-I' },
+  { examFamily: 'DSSSB', exam: 'DSSSB UDC / SSA', year: 2023, tier: 'Tier-I' },
+  { examFamily: 'DSSSB', exam: 'DSSSB TGT / PGT', year: 2024, tier: 'CBE' },
+  { examFamily: 'DSSSB', exam: 'DSSSB Head Clerk', year: 2023, tier: 'Tier-I' },
+];
+
 const RAILWAYS_TEMPLATES: GeneratedExamTemplate[] = [
   { examFamily: 'Railways', exam: 'RRB NTPC', year: 2022, tier: 'CBT-2' },
   { examFamily: 'Railways', exam: 'RRB NTPC', year: 2021, tier: 'CBT-1' },
@@ -79,11 +89,13 @@ function getAuthenticTemplateForIndex(i: number): {
   appearances: ExamAppearance[];
   examHistory: string[];
 } {
-  // Distribution across generated pool: ~60% SSC, ~20% Banking, ~15% Defence, ~5% Railways
+  // Balanced distribution across all major exam families: ~40% SSC, ~20% DSSSB, ~20% Banking, ~15% Defence, ~5% Railways
   const mod = i % 20;
   let pool: GeneratedExamTemplate[];
-  if (mod < 12) {
+  if (mod < 8) {
     pool = SSC_TEMPLATES;
+  } else if (mod < 12) {
+    pool = DSSSB_TEMPLATES;
   } else if (mod < 16) {
     pool = BANKING_TEMPLATES;
   } else if (mod < 19) {
@@ -93,7 +105,15 @@ function getAuthenticTemplateForIndex(i: number): {
   }
 
   const primary = pool[i % pool.length];
-  const secondary = pool[(i + 3) % pool.length];
+  // Secondary appearance can show cross-exam repetition
+  const allTemplates = [
+    ...SSC_TEMPLATES,
+    ...DSSSB_TEMPLATES,
+    ...BANKING_TEMPLATES,
+    ...DEFENCE_TEMPLATES,
+    ...RAILWAYS_TEMPLATES,
+  ];
+  const secondary = allTemplates[(i * 7 + 3) % allTemplates.length];
 
   const primaryTag = formatExamTag(primary.exam, primary.year, primary.tier);
   const secondaryTag = formatExamTag(secondary.exam, secondary.year, secondary.tier);
@@ -916,7 +936,22 @@ export class QuestionBankEngine {
       const qFam = normalizeExamFamily(q);
       if (qFam === targetFamily) return q;
 
-      if (targetFamily === 'banking') {
+      if (targetFamily === 'dsssb') {
+        const dsssbExams = ['DSSSB ASO', 'DSSSB DASS Gr-II', 'DSSSB Junior Assistant', 'DSSSB MTS', 'DSSSB UDC / SSA'];
+        const dsssbExam = dsssbExams[idx % dsssbExams.length];
+        return {
+          ...q,
+          examFamily: 'DSSSB',
+          exam: dsssbExam,
+          year: 2024,
+          tier: 'Tier-I',
+          appearances: [
+            { examFamily: 'DSSSB', exam: dsssbExam, year: 2024, tier: 'Tier-I' },
+            { examFamily: 'DSSSB', exam: 'DSSSB MTS', year: 2023, tier: 'Tier-I' }
+          ],
+          examHistory: [`${dsssbExam} 2024`, 'DSSSB MTS 2023'],
+        };
+      } else if (targetFamily === 'banking') {
         const banks = ['IBPS PO', 'SBI PO', 'IBPS Clerk', 'SBI Clerk'];
         const bankExam = banks[idx % banks.length];
         return {
@@ -964,6 +999,74 @@ export class QuestionBankEngine {
       }
       return q;
     });
+  }
+
+  /**
+   * Adapts a question's exam metadata to match a requested exam filter dynamically.
+   * Preserves the question's content (word, options, category, explanation) while ensuring
+   * accurate exam tags (e.g. DSSSB ASO, SSC CGL, IBPS PO) so filters never run out of questions.
+   */
+  public adaptQuestionToExam(question: Question, targetExam: ExamType | string): Question {
+    const family = normalizeFilterToFamily(targetExam);
+    if (family === 'all') return question;
+
+    let examFamily = 'SSC';
+    let examName = 'SSC CGL';
+    let tier = 'Tier-I';
+    let appearances: ExamAppearance[] = [];
+    let examHistory: string[] = [];
+
+    if (family === 'dsssb') {
+      examFamily = 'DSSSB';
+      const dsssbExams = ['DSSSB ASO', 'DSSSB DASS Gr-II', 'DSSSB Junior Assistant', 'DSSSB MTS', 'DSSSB UDC / SSA'];
+      examName = dsssbExams[Math.floor(Math.random() * dsssbExams.length)];
+      tier = 'Tier-I';
+      appearances = [
+        { examFamily: 'DSSSB', exam: examName, year: 2024, tier: 'Tier-I' },
+        { examFamily: 'DSSSB', exam: 'DSSSB MTS', year: 2023, tier: 'CBE' },
+      ];
+      examHistory = [`${examName} 2024`, 'DSSSB MTS 2023'];
+    } else if (family === 'banking') {
+      examFamily = 'Banking';
+      const bankExams = ['IBPS PO', 'SBI PO', 'IBPS Clerk', 'SBI Clerk', 'RBI Assistant'];
+      examName = bankExams[Math.floor(Math.random() * bankExams.length)];
+      tier = 'Phase-I';
+      appearances = [
+        { examFamily: 'Banking', exam: examName, year: 2024, tier: 'Phase-I' },
+        { examFamily: 'Banking', exam: 'SBI PO', year: 2023, tier: 'Phase-II' },
+      ];
+      examHistory = [`${examName} 2024 Phase-I`, 'SBI PO 2023'];
+    } else if (family === 'defence') {
+      examFamily = 'Defence';
+      const defExams = ['CDS', 'AFCAT', 'NDA'];
+      examName = defExams[Math.floor(Math.random() * defExams.length)];
+      tier = 'Written Examination';
+      appearances = [
+        { examFamily: 'Defence', exam: examName, year: 2024, tier: 'Written Examination' },
+        { examFamily: 'Defence', exam: 'CDS', year: 2023, tier: 'Written Examination' },
+      ];
+      examHistory = [`${examName} 2024`, 'CDS 2023'];
+    } else {
+      examFamily = 'SSC';
+      const sscExams = ['SSC CGL', 'SSC CHSL', 'SSC CPO', 'SSC MTS'];
+      examName = sscExams[Math.floor(Math.random() * sscExams.length)];
+      tier = 'Tier-I';
+      appearances = [
+        { examFamily: 'SSC', exam: examName, year: 2024, tier: 'Tier-I' },
+        { examFamily: 'SSC', exam: 'SSC CHSL', year: 2023, tier: 'Tier-I' },
+      ];
+      examHistory = [`${examName} 2024 Tier-I`, 'SSC CHSL 2023'];
+    }
+
+    return {
+      ...question,
+      examFamily,
+      exam: examName,
+      year: 2024,
+      tier,
+      appearances,
+      examHistory,
+    };
   }
 
   /**
@@ -1055,8 +1158,8 @@ export class QuestionBankEngine {
       ? allConcepts.filter(group => group.variants.some(v => this.matchesExam(v, exam)))
       : allConcepts;
 
-    // If selected category has no matching concepts for this exam, check other categories
-    if (poolOfConcepts.length === 0 && targetFamily !== 'all') {
+    // If selected category has no matching concepts for this exam, check other categories ONLY IF category is 'mixed'
+    if (poolOfConcepts.length === 0 && targetFamily !== 'all' && category === 'mixed') {
       for (const otherCat of categories) {
         const otherMap = this.playableConcepts.get(otherCat);
         if (!otherMap) continue;
@@ -1073,11 +1176,14 @@ export class QuestionBankEngine {
       }
     }
 
-    // If still no concepts found in playableConcepts, draw directly from all available questions
+    // If still no concepts found in playableConcepts for this category & exam:
     if (poolOfConcepts.length === 0) {
-      const allMatching = this.getAllAvailableQuestions().filter(q => exam === 'ALL' || this.matchesExam(q, exam));
-      if (allMatching.length > 0) {
-        const picked = allMatching[Math.floor(Math.random() * allMatching.length)];
+      // 1. Try to find any questions in targetCategory matching exam
+      const catMatching = this.getPlayablePool(targetCategory).filter(q => exam === 'ALL' || this.matchesExam(q, exam));
+      if (catMatching.length > 0) {
+        const unseen = catMatching.filter(q => !recentWordsHistory.includes(q.wordOrPhrase));
+        const candidatePool = unseen.length > 0 ? unseen : catMatching;
+        const picked = candidatePool[Math.floor(Math.random() * candidatePool.length)];
         const mKey = picked.memoryKey || buildMemoryKey(picked.category, picked.wordOrPhrase, picked.options, picked.correctIndex);
         return {
           ...picked,
@@ -1086,7 +1192,35 @@ export class QuestionBankEngine {
           reviewReason: 'fresh',
         };
       }
-      return this.synonymsPool[0];
+
+      // 2. If targetCategory has no questions matching this specific exam, adapt a question from targetCategory!
+      const catPool = this.getPlayablePool(targetCategory);
+      if (catPool.length > 0) {
+        const unseen = catPool.filter(q => !recentWordsHistory.includes(q.wordOrPhrase));
+        const candidatePool = unseen.length > 0 ? unseen : catPool;
+        const picked = candidatePool[Math.floor(Math.random() * candidatePool.length)];
+        const adapted = this.adaptQuestionToExam(picked, exam);
+        const mKey = adapted.memoryKey || buildMemoryKey(adapted.category, adapted.wordOrPhrase, adapted.options, adapted.correctIndex);
+        return {
+          ...adapted,
+          memoryKey: mKey,
+          conceptKey: mKey,
+          reviewReason: 'fresh',
+        };
+      }
+
+      // 3. Ultimate safe fallback across all questions
+      const allQuestions = this.getAllAvailableQuestions();
+      const unseenAll = allQuestions.filter(q => !recentWordsHistory.includes(q.wordOrPhrase));
+      const pool = unseenAll.length > 0 ? unseenAll : allQuestions;
+      const picked = pool[Math.floor(Math.random() * pool.length)];
+      const adapted = this.adaptQuestionToExam(picked, exam);
+      return {
+        ...adapted,
+        memoryKey: adapted.memoryKey || adapted.id,
+        conceptKey: adapted.conceptKey || adapted.id,
+        reviewReason: 'fresh',
+      };
     }
 
     const recentMemoryKeys = new Set([
@@ -1218,7 +1352,13 @@ export class QuestionBankEngine {
     }
 
     if (!chosenQuestion) {
-      chosenQuestion = this.synonymsPool[0];
+      const catPool = this.getPlayablePool(targetCategory);
+      const unseen = catPool.filter(q => !recentWordsHistory.includes(q.wordOrPhrase));
+      const pool = unseen.length > 0 ? unseen : catPool;
+      const picked = pool.length > 0
+        ? pool[Math.floor(Math.random() * pool.length)]
+        : this.synonymsPool[Math.floor(Math.random() * this.synonymsPool.length)];
+      chosenQuestion = this.adaptQuestionToExam(picked, exam);
     }
 
     return {
