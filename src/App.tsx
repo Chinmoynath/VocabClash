@@ -24,7 +24,7 @@ import { LiveRoomFinalResult, forfeitLiveRoom } from './services/realtimeMatchma
 import { soundManager } from './utils/audio';
 import { isAdDue, resetAdTimerForTest, recordAdShown, ADS_ENABLED } from './utils/adManager';
 import { matchesExamFamilyFilter } from './utils/examFamilyUtils';
-import { extractCleanUserName, formatNameFromEmail } from './utils/nameHelper';
+import { extractCleanUserName, formatNameFromEmail, resolvePlayerName } from './utils/nameHelper';
 import { 
   getInitialStreak, 
   saveStreakState, 
@@ -49,12 +49,16 @@ import {
 import { 
   auth, 
   saveUserDataToFirestore, 
+  saveUserProfileFieldsToFirestore,
   fetchUserDataFromFirestore,
-  checkRedirectAuthResult
+  checkRedirectAuthResult,
+  getPendingRegistrationDisplayName,
+  setPendingRegistrationDisplayName
 } from './services/firebaseService';
 import { syncUserToLeaderboard } from './services/leaderboardService';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { AndroidDeviceShell } from './components/AndroidDeviceShell';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { TopBar } from './components/TopBar';
 import { DesktopSidebar } from './components/DesktopSidebar';
 import { BottomNavBar, TabType } from './components/BottomNavBar';
@@ -106,11 +110,7 @@ import {
   trackTop100Start, 
   trackTop100Complete,
   normalizeAnalyticsCategory,
-  normalizeAnalyticsExamFamily,
-  trackOneVOneStarted,
-  trackSpeedBlitzStarted,
-  trackDailySprintStarted,
-  trackPlayFriendStarted
+  normalizeAnalyticsExamFamily
 } from './services/analyticsService';
 
 const STORAGE_KEY_PLAYER = 'vocabclash_player_v5';
@@ -132,13 +132,32 @@ export function getOrCreateGuestId(): string {
   return `guest_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 8)}`;
 }
 
+const resolveTargetExam = (cloudExam?: string | null, localExam?: string | null): string => {
+  const explicit = typeof window !== 'undefined' ? localStorage.getItem('vocabclash_user_chosen_target_exam') : null;
+  if (explicit && explicit.trim()) return explicit;
+  // If local exam is customized (not the legacy default), prefer it over a stale default
+  if (localExam && localExam !== 'SSC CGL 2026 (GST Inspector)' && localExam.trim()) {
+    return localExam;
+  }
+  if (cloudExam && cloudExam !== 'SSC CGL 2026 (GST Inspector)' && cloudExam.trim()) {
+    return cloudExam;
+  }
+  if (cloudExam && cloudExam.trim()) {
+    return cloudExam;
+  }
+  if (localExam && localExam.trim()) {
+    return localExam;
+  }
+  return 'SSC CGL - Assistant Section Officer (ASO - CSS / MEA / IB / 4600 GP)';
+};
+
 const INITIAL_PLAYER: PlayerProfile = {
   id: getOrCreateGuestId(),
   name: 'Govt Aspirant',
   avatar: '👨‍💼',
   country: 'India',
   countryCode: 'IN',
-  targetExam: 'SSC CGL 2026 (GST Inspector)',
+  targetExam: (typeof window !== 'undefined' && localStorage.getItem('vocabclash_user_chosen_target_exam')) || 'SSC CGL - Assistant Section Officer (ASO - CSS / MEA / IB / 4600 GP)',
   rankPoints: 0,
   pyqScore: 0,
   tier: 'Aspirant',
@@ -191,20 +210,17 @@ function sanitizeProfile(raw: any, googleUser?: FirebaseUser | null): PlayerProf
   let accuracyRate = matchesPlayed > 0 ? Math.round((matchesWon / matchesPlayed) * 100) : 0;
   let level = Math.max(1, Math.floor(matchesPlayed / 3) + 1);
 
-  // If raw name is default placeholder or looks like a raw email prefix without spaces and with digits, format it cleanly
-  let effectiveName = raw.name;
   const userEmail = googleUser?.email || raw.email;
-  if (!effectiveName || effectiveName === 'Aspirant Rahul' || effectiveName === 'Govt Aspirant') {
-    effectiveName = cleanUserName || (userEmail ? extractCleanUserName(null, userEmail) : 'Govt Aspirant');
-  } else if (!effectiveName.includes(' ') && /\d/.test(effectiveName)) {
-    effectiveName = extractCleanUserName(effectiveName, userEmail);
-  }
+  let effectiveName = resolvePlayerName({
+    cloudName: raw.name,
+    authDisplayName: googleUser?.displayName,
+    email: userEmail,
+  });
 
-  // Restore progress for Chinmoy Nath if accidentally wiped down to 100 LP by the previous bug
+  // Restore progress for Chinmoy Nath (admin/owner account) if accidentally wiped down to 100 LP
   const isChinmoy = 
-    userEmail?.toLowerCase().includes('nathchinmoy') || 
-    effectiveName?.toLowerCase().includes('chinmoy') ||
-    cleanUserName?.toLowerCase().includes('chinmoy');
+    userEmail?.toLowerCase() === 'nathchinmoy777@gmail.com' || 
+    userEmail?.toLowerCase().includes('nathchinmoy777');
 
   if (isChinmoy) {
     effectiveName = 'Chinmoy Nath';
@@ -228,11 +244,14 @@ function sanitizeProfile(raw: any, googleUser?: FirebaseUser | null): PlayerProf
     ? { category: raw.practiceFilters.category, exam: raw.practiceFilters.exam }
     : undefined;
 
+  const resolvedTargetExam = resolveTargetExam(raw.targetExam);
+
   return {
     ...INITIAL_PLAYER,
     ...raw,
     id: resolvedId,
     name: effectiveName || cleanUserName || 'Govt Aspirant',
+    targetExam: resolvedTargetExam,
     photoURL: googleUser?.photoURL || raw.photoURL || undefined,
     email: userEmail || undefined,
     rankPoints,
@@ -561,6 +580,7 @@ export default function App() {
   const [showAiModal, setShowAiModal] = useState<boolean>(false);
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
   const [showEditProfileModal, setShowEditProfileModal] = useState<boolean>(false);
+  const [editProfileReturnToProfile, setEditProfileReturnToProfile] = useState<boolean>(false);
   const [showPremiumModal, setShowPremiumModal] = useState<boolean>(false);
   const [showAdModal, setShowAdModal] = useState<boolean>(false);
   const [showStreakModal, setShowStreakModal] = useState<boolean>(false);
@@ -846,17 +866,19 @@ export default function App() {
 
           // Try to load existing cloud data for this user
           const cloudData = await fetchUserDataFromFirestore(user.uid);
-          const cleanAuthName = extractCleanUserName(user.displayName, user.email);
+          const pendingRegName = getPendingRegistrationDisplayName();
+          const effectiveAuthDisplayName = user.displayName?.trim() || pendingRegName;
+          const cleanAuthName = effectiveAuthDisplayName || extractCleanUserName(user.displayName, user.email);
           
           if (cloudData && cloudData.player) {
             const cloudP = cloudData.player;
-            // Clean up cloud name if it was previously saved as a raw email username
-            let resolvedName = cloudP.name;
-            if (!resolvedName || resolvedName === 'Aspirant Rahul' || resolvedName === 'Govt Aspirant') {
-              resolvedName = cleanAuthName || extractCleanUserName(user.displayName, user.email) || localPlayer.name || 'Govt Aspirant';
-            } else if (!resolvedName.includes(' ') && /\d/.test(resolvedName)) {
-              resolvedName = extractCleanUserName(resolvedName, user.email || cloudP.email);
-            }
+            // Clean up cloud name by prioritizing authenticated identity and fixing synthetic email artifacts
+            let resolvedName = resolvePlayerName({
+              cloudName: cloudP.name,
+              localName: localPlayer.name,
+              authDisplayName: effectiveAuthDisplayName,
+              email: user.email,
+            });
 
             // Intelligently merge: preserve whichever source has higher progress
             let mergedLP = Math.max(cloudP.rankPoints ?? 0, localPlayer.rankPoints ?? 0, 100);
@@ -865,11 +887,10 @@ export default function App() {
             let mergedWins = Math.max(cloudP.matchesWon ?? 0, localPlayer.matchesWon ?? 0);
             let mergedStreak = Math.max(cloudP.winStreak ?? 0, localPlayer.winStreak ?? 0);
 
-            // Recover Chinmoy Nath's progress if accidentally wiped by the previous demo reset
+            // Recover Chinmoy Nath's progress (developer account)
             const isChinmoy = 
-              user.email?.toLowerCase().includes('nathchinmoy') ||
-              cleanAuthName?.toLowerCase().includes('chinmoy') ||
-              resolvedName?.toLowerCase().includes('chinmoy');
+              user.email?.toLowerCase() === 'nathchinmoy777@gmail.com' ||
+              user.email?.toLowerCase().includes('nathchinmoy777');
 
             if (isChinmoy) {
               resolvedName = 'Chinmoy Nath';
@@ -887,6 +908,13 @@ export default function App() {
             const mergedTierTitle = getTierTitle(mergedTier);
             const mergedLevel = Math.max(cloudP.level ?? 1, localPlayer.level ?? 1, Math.floor(mergedMatches / 3) + 1, isChinmoy ? 12 : 1);
 
+            const resolvedTargetExam = resolveTargetExam(cloudP.targetExam, localPlayer.targetExam);
+            if (typeof window !== 'undefined') {
+              try {
+                localStorage.setItem('vocabclash_user_chosen_target_exam', resolvedTargetExam);
+              } catch {}
+            }
+
             const mergedPlayer: PlayerProfile = {
               ...INITIAL_PLAYER,
               ...cloudP,
@@ -895,8 +923,8 @@ export default function App() {
               avatar: cloudP.avatar || localPlayer.avatar || '👨‍💼',
               country: cloudP.country || localPlayer.country || 'India',
               countryCode: cloudP.countryCode || localPlayer.countryCode || 'IN',
-              targetExam: cloudP.targetExam || localPlayer.targetExam || 'SSC CGL 2026 (GST Inspector)',
-              photoURL: user.photoURL || cloudP.photoURL || undefined,
+              targetExam: resolvedTargetExam,
+              photoURL: cloudP.photoURL === null ? null : (cloudP.photoURL || user.photoURL || undefined),
               email: user.email || cloudP.email || undefined,
               rankPoints: mergedLP,
               pyqScore: mergedPYQScore,
@@ -915,6 +943,11 @@ export default function App() {
             };
 
             setPlayer(mergedPlayer);
+
+            if (cloudP.targetExam !== resolvedTargetExam) {
+              saveUserProfileFieldsToFirestore(user.uid, mergedPlayer, user).catch(() => {});
+              syncUserToLeaderboard(mergedPlayer, user.uid).catch(() => {});
+            }
 
             if (cloudP.practiceFilters) {
               setPracticeFilters(cloudP.practiceFilters);
@@ -939,8 +972,8 @@ export default function App() {
               }
             }
 
-            // Immediately write merged data back to Firestore
-            await saveUserDataToFirestore(
+            // Asynchronously write merged data back to Firestore in background without blocking UI
+            saveUserDataToFirestore(
               user.uid,
               { 
                 player: mergedPlayer, 
@@ -950,12 +983,13 @@ export default function App() {
                 dailyTarget: cloudData.dailyTarget || getDailyTargetState()
               },
               user
-            );
+            ).catch((err) => console.warn('Background sync notice:', err));
+            syncUserToLeaderboard(mergedPlayer, user.uid).catch((err) => console.warn('Leaderboard sync notice:', err));
           } else {
-            // First time sign-in with Google: Carry over user's existing local progress!
+            // First time sign-in with Google or Email: Carry over user's existing local progress!
             const isChinmoy = 
-              user.email?.toLowerCase().includes('nathchinmoy') ||
-              cleanAuthName?.toLowerCase().includes('chinmoy');
+              user.email?.toLowerCase() === 'nathchinmoy777@gmail.com' ||
+              user.email?.toLowerCase().includes('nathchinmoy777');
 
             let initialLP = Math.max(100, localPlayer.rankPoints || 100);
             let initialPYQScore = localPlayer.pyqScore || 0;
@@ -978,14 +1012,28 @@ export default function App() {
             const initialTierTitle = getTierTitle(initialTier);
             const initialLevel = Math.max(1, localPlayer.level || 1, Math.floor(initialMatches / 3) + 1, isChinmoy ? 12 : 1);
 
+            const resolvedTargetExam = resolveTargetExam(null, localPlayer.targetExam);
+            if (typeof window !== 'undefined') {
+              try {
+                localStorage.setItem('vocabclash_user_chosen_target_exam', resolvedTargetExam);
+              } catch {}
+            }
+
+            const resolvedNewName = resolvePlayerName({
+              cloudName: null,
+              localName: localPlayer.name,
+              authDisplayName: effectiveAuthDisplayName,
+              email: user.email,
+            });
+
             const newPlayer: PlayerProfile = {
               ...INITIAL_PLAYER,
               id: user.uid,
-              name: isChinmoy ? 'Chinmoy Nath' : (cleanAuthName || localPlayer.name || 'Govt Aspirant'),
+              name: isChinmoy ? 'Chinmoy Nath' : resolvedNewName,
               avatar: localPlayer.avatar || '👨‍💼',
               country: localPlayer.country || 'India',
               countryCode: localPlayer.countryCode || 'IN',
-              targetExam: localPlayer.targetExam || 'SSC CGL 2026 (GST Inspector)',
+              targetExam: resolvedTargetExam,
               photoURL: user.photoURL || undefined,
               email: user.email || undefined,
               rankPoints: initialLP,
@@ -1003,11 +1051,12 @@ export default function App() {
             };
 
             setPlayer(newPlayer);
-            await saveUserDataToFirestore(
+            saveUserDataToFirestore(
               user.uid,
               { player: newPlayer, subscription, streak, savedWords, dailyTarget: getDailyTargetState() },
               user
-            );
+            ).catch((err) => console.warn('Initial save notice:', err));
+            syncUserToLeaderboard(newPlayer, user.uid).catch((err) => console.warn('Leaderboard sync notice:', err));
           }
         } catch (error) {
           console.warn('Session cloud data fetch failed, keeping local state safe:', error);
@@ -1027,6 +1076,7 @@ export default function App() {
         previousUserUidRef.current = null;
         setCurrentUser(null);
         questionReviewScheduler.setAuthUser(null);
+        setIsSyncing(false);
         setSessionLoaded(true);
       }
     });
@@ -1059,7 +1109,7 @@ export default function App() {
           currentUser.uid,
           { player, subscription, streak, savedWords },
           currentUser
-        );
+        ).catch(() => {});
       }, 1000);
       return () => clearTimeout(timer);
     }
@@ -1074,45 +1124,54 @@ export default function App() {
   const handleManualSync = async () => {
     if (!currentUser) return;
     setIsSyncing(true);
-    await saveUserDataToFirestore(
-      currentUser.uid,
-      { player, subscription, streak, savedWords },
-      currentUser
-    );
+    try {
+      await saveUserDataToFirestore(
+        currentUser.uid,
+        { player, subscription, streak, savedWords },
+        currentUser
+      );
+    } catch {}
     setTimeout(() => {
       setIsSyncing(false);
-    }, 600);
+    }, 400);
   };
 
-  // Sign out user: 1. Save data to Firestore -> 2. Firebase sign out -> 3. Clear local storage & reset state to Guest
+  // Sign out user: instant non-blocking logout with background sync
   const handleSignOutUser = async () => {
-    setIsSyncing(true);
-    try {
-      if (currentUser) {
-        // Save current progress in Firestore before signout so user can resume seamlessly upon next login
+    setIsSyncing(false);
+    const userToSignOut = currentUser;
+
+    // 1. Immediately save snapshot in background with max 800ms race so UI is never blocked
+    if (userToSignOut) {
+      try {
         const currentDailyTarget = getDailyTargetState();
-        await saveUserDataToFirestore(
-          currentUser.uid,
-          { player, subscription, streak, savedWords, dailyTarget: currentDailyTarget },
-          currentUser
-        );
-        // Flush any pending spaced repetition review updates to Firestore
-        await questionReviewScheduler.flushCloudSync();
+        Promise.race([
+          saveUserDataToFirestore(
+            userToSignOut.uid,
+            { player, subscription, streak, savedWords, dailyTarget: currentDailyTarget },
+            userToSignOut
+          ),
+          new Promise(r => setTimeout(r, 600))
+        ]).catch(() => {});
+
+        questionReviewScheduler.flushCloudSync().catch(() => {});
+      } catch (err) {
+        console.warn('Error saving before sign out:', err);
       }
-    } catch (err) {
-      console.warn('Error auto-saving before sign out:', err);
     }
 
+    // 2. Perform sign out with timeout
     try {
-      await auth.signOut();
+      await Promise.race([
+        auth.signOut(),
+        new Promise(r => setTimeout(r, 800))
+      ]);
     } catch (err) {
-      console.warn('Firebase sign out error:', err);
+      console.warn('Firebase sign out notice:', err);
     }
 
-    // Completely clear all authenticated user session data from localStorage and in-memory caches
+    // 3. Instantly clear all authenticated user session data and return to guest mode
     clearUserDataOnSignOut();
-
-    // Reset React state to fresh guest mode
     previousUserUidRef.current = null;
     setCurrentUser(null);
     questionReviewScheduler.setAuthUser(null);
@@ -1142,22 +1201,6 @@ export default function App() {
       setShowOfflineWarningModal(true);
       return;
     }
-
-    // Benchmark Analytics: Track homepage competitive mode starts
-    const actionParams = {
-      target_exam: selectedExam || player.targetExam || 'all',
-      category: selectedCategory || 'mixed',
-      user_logged_in: !!currentUser,
-    };
-
-    if (mode === '1v1_ranked') {
-      trackOneVOneStarted(actionParams);
-    } else if (mode === 'quick_duel') {
-      trackSpeedBlitzStarted(actionParams);
-    } else if (mode === 'daily_challenge') {
-      trackDailySprintStarted(actionParams);
-    }
-
     setMatchMode(mode);
     const opp = generateMatchedOpponent(player.rankPoints, selectedExam);
     setMatchedOpponent(opp);
@@ -1169,13 +1212,6 @@ export default function App() {
       setShowOfflineWarningModal(true);
       return;
     }
-
-    trackPlayFriendStarted({
-      target_exam: selectedExam || player.targetExam || 'all',
-      category: selectedCategory || 'mixed',
-      user_logged_in: !!currentUser,
-    });
-
     setShowFriendLobbyModal(true);
   };
 
@@ -1314,7 +1350,7 @@ export default function App() {
       trackQuestionAnswered({
         practice_type: '1v1',
         category: normalizeAnalyticsCategory(currentQ.category || selectedCategory),
-        exam_family: normalizeAnalyticsExamFamily(currentQ.examTag || selectedExam),
+        exam_family: normalizeAnalyticsExamFamily((currentQ as any)?.examTag || selectedExam),
         correct: playerAns.isCorrect,
       });
     }
@@ -1574,13 +1610,14 @@ export default function App() {
 
   const handleResetStats = async () => {
     const cleanAuthName = extractCleanUserName(currentUser?.displayName, currentUser?.email);
+    const resolvedExam = resolveTargetExam(null, player.targetExam);
     const cleanPlayer: PlayerProfile = {
       id: currentUser ? currentUser.uid : 'user-live-1',
       name: cleanAuthName || player.name || 'Govt Aspirant',
       avatar: player.avatar || '👨‍💼',
       country: 'India',
       countryCode: 'IN',
-      targetExam: player.targetExam || 'SSC CGL 2026 (GST Inspector)',
+      targetExam: resolvedExam,
       photoURL: currentUser?.photoURL || player.photoURL || undefined,
       email: currentUser?.email || player.email || undefined,
       rankPoints: 0,
@@ -1606,6 +1643,42 @@ export default function App() {
         currentUser
       );
       setIsSyncing(false);
+    }
+  };
+
+  const handleUpdatePlayerProfile = async (updated: Partial<PlayerProfile>) => {
+    const updatedTargetExam = updated.targetExam
+      ? updated.targetExam
+      : resolveTargetExam(null, player.targetExam);
+
+    if (updated.targetExam && typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('vocabclash_user_chosen_target_exam', updated.targetExam);
+      } catch {}
+    }
+
+    const updatedPlayer: PlayerProfile = {
+      ...player,
+      ...updated,
+      targetExam: updatedTargetExam,
+    };
+
+    setPlayer(updatedPlayer);
+
+    try {
+      localStorage.setItem(STORAGE_KEY_PLAYER, JSON.stringify(updatedPlayer));
+    } catch { /* storage quota */ }
+
+    // Fast asynchronous sync to Firestore users and leaderboard collections
+    if (currentUser && !currentUser.isAnonymous) {
+      try {
+        await Promise.all([
+          saveUserProfileFieldsToFirestore(currentUser.uid, updatedPlayer, currentUser),
+          syncUserToLeaderboard(updatedPlayer, currentUser.uid),
+        ]);
+      } catch (err) {
+        console.warn('Fast profile sync notice:', err);
+      }
     }
   };
 
@@ -1942,32 +2015,41 @@ export default function App() {
             />
           ) : (
             /* Post-Match Summary & Detailed Question Review */
-            <MatchSummary
-              player={player}
-              matchState={matchState}
-              onPlayAgain={() => {
-                setMatchState(null);
-                setIsMatchCompleted(false);
-                handleStartMatchmaking(matchMode);
-              }}
-              onBackToLobby={() => {
+            <ErrorBoundary 
+              componentName="1v1 Battle Result Summary"
+              onReset={() => {
                 setMatchState(null);
                 setIsMatchCompleted(false);
                 setCurrentTab('arena');
-                triggerAdIfDue();
               }}
-              onBookmarkQuestion={handleBookmarkQuestion}
-              onOpenAiDeepDive={handleOpenAiTutor}
-              onNavigateToMistakes={() => {
-                setMatchState(null);
-                setIsMatchCompleted(false);
-                setCurrentTab('mistakes');
-              }}
-              bookmarkedIds={bookmarkedIds}
-              isPremium={subscription.isPremium}
-              currentUser={currentUser}
-              onUserChange={user => setCurrentUser(user)}
-            />
+            >
+              <MatchSummary
+                player={player}
+                matchState={matchState}
+                onPlayAgain={() => {
+                  setMatchState(null);
+                  setIsMatchCompleted(false);
+                  handleStartMatchmaking(matchMode);
+                }}
+                onBackToLobby={() => {
+                  setMatchState(null);
+                  setIsMatchCompleted(false);
+                  setCurrentTab('arena');
+                  triggerAdIfDue();
+                }}
+                onBookmarkQuestion={handleBookmarkQuestion}
+                onOpenAiDeepDive={handleOpenAiTutor}
+                onNavigateToMistakes={() => {
+                  setMatchState(null);
+                  setIsMatchCompleted(false);
+                  setCurrentTab('mistakes');
+                }}
+                bookmarkedIds={bookmarkedIds}
+                isPremium={subscription.isPremium}
+                currentUser={currentUser}
+                onUserChange={user => setCurrentUser(user)}
+              />
+            </ErrorBoundary>
           )
         ) : (
           /* Regular Tab Views */
@@ -1996,7 +2078,10 @@ export default function App() {
                 onOpenPremium={() => setShowPremiumModal(true)}
                 onOpenStreak={() => setShowStreakModal(true)}
                 onOpenProfile={() => setShowProfileModal(true)}
-                onOpenEditProfile={() => setShowEditProfileModal(true)}
+                onOpenEditProfile={() => {
+                  setEditProfileReturnToProfile(false);
+                  setShowEditProfileModal(true);
+                }}
                 onOpenTour={() => setShowTourModal(true)}
                 onNavigateTab={setCurrentTab}
                 onRewardLP={handleRewardLP}
@@ -2258,7 +2343,7 @@ export default function App() {
           currentUser={currentUser}
           isSyncing={isSyncing}
           onClose={() => setShowProfileModal(false)}
-          onUpdatePlayer={updated => setPlayer(prev => ({ ...prev, ...updated }))}
+          onUpdatePlayer={handleUpdatePlayerProfile}
           onResetStats={handleResetStats}
           onOpenPremium={() => {
             setShowProfileModal(false);
@@ -2278,6 +2363,7 @@ export default function App() {
           }}
           onOpenEditProfile={() => {
             setShowProfileModal(false);
+            setEditProfileReturnToProfile(true);
             setShowEditProfileModal(true);
           }}
           onUserChange={user => setCurrentUser(user)}
@@ -2286,29 +2372,19 @@ export default function App() {
         />
       )}
 
-      {/* 🎯 Direct Edit Profile & Target Exam Modal (from CadreRankCard "Change" button) */}
+      {/* 🎯 Direct Edit Profile & Target Exam Modal (linked to CadreRankCard and ProfileModal) */}
       {showEditProfileModal && (
         <EditProfileModal
           player={player}
           currentUser={currentUser}
-          onClose={() => setShowEditProfileModal(false)}
-          onUpdatePlayer={async updated => {
-            const updatedPlayer = { ...player, ...updated };
-            setPlayer(updatedPlayer);
-            try {
-              localStorage.setItem(STORAGE_KEY_PLAYER, JSON.stringify(updatedPlayer));
-              if (currentUser && !currentUser.isAnonymous) {
-                await saveUserDataToFirestore(currentUser.uid, {
-                  player: updatedPlayer,
-                  subscription,
-                  streak,
-                  savedWords,
-                });
-              }
-            } catch (err) {
-              console.error('Failed to sync profile update to Firebase:', err);
+          onClose={() => {
+            setShowEditProfileModal(false);
+            if (editProfileReturnToProfile) {
+              setEditProfileReturnToProfile(false);
+              setShowProfileModal(true);
             }
           }}
+          onUpdatePlayer={handleUpdatePlayerProfile}
         />
       )}
 
@@ -2477,7 +2553,6 @@ export default function App() {
         <DueRevisionSessionModal
           isOpen={showDueRevisionModal}
           dueWords={dueRevisionWords}
-          targetExam={selectedExam || player.targetExam || 'all'}
           onClose={() => setShowDueRevisionModal(false)}
           onSessionFinished={() => {
             if (typeof window !== 'undefined') {

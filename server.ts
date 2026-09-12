@@ -478,16 +478,22 @@ app.post('/api/matchmaking/join', (req, res) => {
     const uid = player.id;
     const now = Date.now();
 
-    // Look for another waiting human candidate in queue (excluding current player, active within last 10s)
+    // Look for another waiting human candidate in queue (excluding current player, active within last 12s, matching category)
     let matchedCandidate: ServerQueueEntry | null = null;
     for (const [cId, candidate] of serverMatchmakingQueue.entries()) {
       if (
         cId !== uid &&
         candidate.status === 'waiting' &&
-        now - candidate.heartbeatAt < 10000
+        now - candidate.heartbeatAt < 12000
       ) {
-        matchedCandidate = candidate;
-        break;
+        const matchesCategory =
+          category === 'mixed' ||
+          candidate.category === 'mixed' ||
+          candidate.category === category;
+        if (matchesCategory) {
+          matchedCandidate = candidate;
+          break;
+        }
       }
     }
 

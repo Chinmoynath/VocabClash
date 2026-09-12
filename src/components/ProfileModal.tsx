@@ -4,7 +4,7 @@ import { soundManager } from '../utils/audio';
 import { User as FirebaseUser } from 'firebase/auth';
 import { GoogleAuthCard } from './GoogleAuthCard';
 import { VocabClashLogo } from './VocabClashLogo';
-import { extractCleanUserName } from '../utils/nameHelper';
+import { extractCleanUserName, resolvePlayerName } from '../utils/nameHelper';
 import { 
   User, 
   X, 
@@ -23,11 +23,13 @@ import {
   Mail,
   Scale,
   BarChart3,
-  BookOpen
+  BookOpen,
+  Pencil
 } from 'lucide-react';
 import { SupportModal } from './SupportModal';
 import { LegalAccountModal } from './LegalAccountModal';
 import { parseTargetExam } from './CadreRankCard';
+import { getCadreConfigForTarget, getCategoryTierTitle } from '../utils/cadreCategoryService';
 
 export const TARGET_EXAM_GROUPS = [
   {
@@ -135,7 +137,11 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   const [showResetConfirm, setShowResetConfirm] = useState<boolean>(false);
   const [showSupportModal, setShowSupportModal] = useState<boolean>(false);
   const [showLegalModal, setShowLegalModal] = useState<boolean>(false);
-  const cleanInitialName = extractCleanUserName(player.name, currentUser?.email || player.email);
+  const cleanInitialName = resolvePlayerName({
+    cloudName: player.name,
+    authDisplayName: currentUser?.displayName,
+    email: currentUser?.email || player.email,
+  });
   const [name, setName] = useState<string>(cleanInitialName !== 'Govt Aspirant' ? cleanInitialName : player.name);
   const [avatar, setAvatar] = useState<string>(player.avatar);
   const [targetExam, setTargetExam] = useState<string>(player.targetExam);
@@ -186,6 +192,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
           currentUser={currentUser}
           isSyncing={isSyncing}
           onUserChange={onUserChange}
+          onUpdatePlayer={onUpdatePlayer}
           onManualSync={onManualSync}
           onSignOut={onSignOut}
         />
@@ -301,7 +308,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                   key={av}
                   onClick={() => {
                     setAvatar(av);
-                    onUpdatePlayer({ photoURL: undefined });
+                    onUpdatePlayer({ avatar: av, photoURL: null });
                   }}
                   className={`w-8 h-8 rounded-full text-lg flex items-center justify-center border ${
                     avatar === av ? 'border-amber-400 bg-amber-950/60 scale-110' : 'border-slate-700 bg-slate-800'
@@ -335,7 +342,11 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
           ) : (
             <div>
               <h2 className="text-base font-extrabold text-slate-100">
-                {extractCleanUserName(player.name, currentUser?.email || player.email)}
+                {resolvePlayerName({
+                  cloudName: player.name,
+                  authDisplayName: currentUser?.displayName,
+                  email: currentUser?.email || player.email
+                })}
               </h2>
               {currentUser?.email && (
                 <div className="text-[10px] text-slate-400 font-mono mt-0.5">{currentUser.email}</div>
@@ -345,24 +356,25 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
 
           <div className="text-xs font-semibold text-amber-400 flex items-center justify-center gap-1.5 max-w-full px-2">
             <Shield className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">{player.tierTitle}</span>
+            <span className="truncate">{player.tierTitle || getCategoryTierTitle(player.tier, player.targetExam)}</span>
           </div>
 
           {isEditing ? (
             <div className="space-y-1 text-left">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block text-center">
-                🎯 Select Your Target Post / Exam:
+              <label className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider block text-center flex items-center justify-center gap-1">
+                <Target className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Select Your Target Post / Exam:</span>
               </label>
               <select
                 value={targetExam}
                 onChange={e => setTargetExam(e.target.value)}
-                className="bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-emerald-300 w-full font-semibold focus:outline-none focus:border-amber-400 shadow-inner"
+                className="bg-slate-900 border border-cyan-500/40 rounded-xl px-2.5 py-1.5 text-xs text-cyan-300 w-full font-semibold focus:outline-none focus:border-cyan-400 shadow-inner"
               >
                 {TARGET_EXAM_GROUPS.map((groupObj, gIdx) => (
                   <optgroup
                     key={gIdx}
                     label={groupObj.group}
-                    className="bg-slate-950 font-bold text-amber-300 py-1"
+                    className="bg-slate-950 font-bold text-cyan-300 py-1"
                   >
                     {groupObj.exams.map(ex => (
                       <option
@@ -378,12 +390,77 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
               </select>
             </div>
           ) : (
-            <div className="w-full max-w-full bg-slate-900/70 border border-slate-800/80 px-3 py-2 rounded-xl text-xs text-center leading-relaxed">
-              <span className="text-slate-400 font-medium">Target: </span>
-              <span className="text-emerald-400 font-semibold break-words">
-                {player.targetExam}
-              </span>
-            </div>
+            (() => {
+              const parsed = parseTargetExam(player.targetExam || 'SSC CGL - Assistant Section Officer (ASO - CSS / MEA / IB / 4600 GP)');
+              const cadreConfig = getCadreConfigForTarget(player.targetExam);
+              const currentCadre = cadreConfig.cadres.find(c => player.rankPoints >= c.minLP && (c.maxLP >= 99999 ? true : player.rankPoints <= c.maxLP)) || cadreConfig.cadres[cadreConfig.cadres.length - 1];
+
+              return (
+                <div 
+                  onClick={() => {
+                    soundManager.playTap();
+                    if (onOpenEditProfile) {
+                      onClose();
+                      onOpenEditProfile();
+                    } else {
+                      setIsEditing(true);
+                    }
+                  }}
+                  className="w-full max-w-full relative overflow-hidden bg-gradient-to-r from-cyan-950/40 via-slate-900/90 to-sky-950/30 hover:from-cyan-950/60 hover:to-sky-950/50 border border-cyan-500/30 hover:border-cyan-400/60 p-3.5 rounded-2xl text-xs transition-all duration-200 cursor-pointer group shadow-[0_2px_12px_rgba(6,182,212,0.08)] hover:shadow-[0_4px_20px_rgba(6,182,212,0.18)] text-left space-y-2"
+                  title="Click to edit target exam & aspirant profile"
+                >
+                  {/* Subtle decorative glow */}
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-cyan-500/10 rounded-full blur-2xl pointer-events-none -mr-8 -mt-8 group-hover:bg-cyan-400/15 transition-all" />
+
+                  {/* Top Header Row: Target Label, Badge & Edit Button */}
+                  <div className="flex items-center justify-between gap-2 relative z-10">
+                    <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-cyan-400 flex items-center gap-1">
+                        <Target className="w-3.5 h-3.5 text-cyan-400 group-hover:scale-110 transition-transform" />
+                        <span>Target Track:</span>
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md bg-cyan-500/15 border border-cyan-400/30 text-cyan-300 text-[10px] font-extrabold tracking-wide uppercase shadow-sm">
+                        {cadreConfig.icon} {parsed.tag}
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        soundManager.playTap();
+                        if (onOpenEditProfile) {
+                          onClose();
+                          onOpenEditProfile();
+                        } else {
+                          setIsEditing(true);
+                        }
+                      }}
+                      className="flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/25 text-cyan-300 hover:text-cyan-100 border border-cyan-500/30 hover:border-cyan-400/70 transition-all shrink-0 font-bold cursor-pointer shadow-sm group/btn"
+                    >
+                      <Pencil className="w-3 h-3 text-cyan-400 group-hover/btn:scale-110 transition-transform" />
+                      <span>Change</span>
+                    </button>
+                  </div>
+
+                  {/* Detail Row: Cadre Post Title */}
+                  <div className="relative z-10 text-xs font-semibold text-cyan-100/90 group-hover:text-cyan-50 leading-relaxed break-words pl-0.5">
+                    {parsed.detail}
+                  </div>
+
+                  {/* Category Cadre & Active Perk preview */}
+                  <div className="relative z-10 pt-1.5 border-t border-cyan-500/20 flex flex-col gap-0.5">
+                    <div className="text-[10px] text-cyan-400 font-bold flex items-center gap-1">
+                      <Sparkles className="w-3 h-3 text-cyan-400" />
+                      <span>{currentCadre.title}</span>
+                    </div>
+                    <div className="text-[10.5px] text-cyan-200/80 line-clamp-1 pl-4 font-medium">
+                      Perks: {currentCadre.perks.slice(0, 2).join(' • ')}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()
           )}
         </div>
 

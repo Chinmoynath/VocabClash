@@ -1,5 +1,4 @@
 import { initializeApp, getApps } from 'firebase/app';
-import { getAnalytics, isSupported, Analytics } from 'firebase/analytics';
 import { 
   getAuth, 
   initializeAuth,
@@ -47,37 +46,7 @@ try {
 }
 
 // Initialize Firebase App
-export const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
-
-// Safe, asynchronous Firebase Analytics initialization
-let analyticsInstance: Analytics | null = null;
-let analyticsPromise: Promise<Analytics | null> | null = null;
-
-export async function getFirebaseAnalytics(): Promise<Analytics | null> {
-  if (analyticsInstance) return analyticsInstance;
-  if (typeof window === 'undefined') return null;
-  if (analyticsPromise) return analyticsPromise;
-
-  analyticsPromise = (async () => {
-    try {
-      const supported = await isSupported();
-      if (supported) {
-        analyticsInstance = getAnalytics(app);
-        return analyticsInstance;
-      }
-    } catch (err) {
-      console.info('[Firebase Analytics] Analytics not supported in this environment:', err);
-    }
-    return null;
-  })();
-
-  return analyticsPromise;
-}
-
-// Start eager initialization in browser environments
-if (typeof window !== 'undefined') {
-  getFirebaseAnalytics().catch(() => {});
-}
+const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
 
 // Standard Firebase Auth instance with browser popup/redirect resolver and multi-tier persistence
 let authInstance: ReturnType<typeof getAuth>;
@@ -417,8 +386,16 @@ export async function verifySignupOtp(email: string, otp: string): Promise<{ suc
   }
 }
 
-// Sign in with Google (Popup with optional redirect fallback)
+// Sign in with Google (Popup with optional redirect fallback & debounce protection)
+let isGoogleAuthInProgress = false;
+
 export async function signInWithGoogle(forceRedirect = false): Promise<FirebaseUser | null> {
+  if (isGoogleAuthInProgress) {
+    console.log('Google sign-in is already in progress, avoiding concurrent popup conflict.');
+    return null;
+  }
+  isGoogleAuthInProgress = true;
+
   try {
     const provider = createGoogleProvider();
     if (forceRedirect) {
@@ -436,7 +413,20 @@ export async function signInWithGoogle(forceRedirect = false): Promise<FirebaseU
     }
     return result.user;
   } catch (error: any) {
+    const code = String(error?.code || '').toLowerCase();
     const msg = String(error?.message || error || '').toLowerCase();
+
+    // If the user closed or cancelled the popup, or a duplicate request was cancelled, resolve cleanly
+    if (
+      code.includes('cancelled-popup-request') || 
+      msg.includes('cancelled-popup-request') ||
+      code.includes('popup-closed-by-user') || 
+      msg.includes('popup-closed-by-user')
+    ) {
+      console.log('Google Sign-In popup was closed or cancelled by user.');
+      return null;
+    }
+
     if (msg.includes('database is closing') || msg.includes('closing/hidden')) {
       console.warn('Transient IndexedDB closing during popup; retrying Google Sign-in after brief pause...');
       await new Promise(r => setTimeout(r, 400));
@@ -456,8 +446,10 @@ export async function signInWithGoogle(forceRedirect = false): Promise<FirebaseU
         throw retryErr;
       }
     }
-    console.warn('Google Sign-In failed or was cancelled:', error);
+    console.warn('Google Sign-In notice:', error);
     throw error;
+  } finally {
+    isGoogleAuthInProgress = false;
   }
 }
 
@@ -488,22 +480,55 @@ export async function checkRedirectAuthResult(): Promise<FirebaseUser | null> {
   }
 }
 
+let pendingRegistrationDisplayName: string | null = null;
+
+export function getPendingRegistrationDisplayName(): string | null {
+  if (pendingRegistrationDisplayName) return pendingRegistrationDisplayName;
+  if (typeof window !== 'undefined') {
+    try {
+      return sessionStorage.getItem('vocabclash_pending_display_name');
+    } catch {}
+  }
+  return null;
+}
+
+export function setPendingRegistrationDisplayName(name: string | null): void {
+  pendingRegistrationDisplayName = name;
+  if (typeof window !== 'undefined') {
+    try {
+      if (name) {
+        sessionStorage.setItem('vocabclash_pending_display_name', name);
+      } else {
+        sessionStorage.removeItem('vocabclash_pending_display_name');
+      }
+    } catch {}
+  }
+}
+
 // Create Account / Register with Email & Password
 export async function registerWithEmailPassword(
   email: string, 
   password: string, 
   displayName?: string
 ): Promise<FirebaseUser> {
+  const trimmedName = displayName?.trim();
+  if (trimmedName) {
+    setPendingRegistrationDisplayName(trimmedName);
+  }
   try {
     const userCredential = await createUserWithEmailAndPassword(auth, email.trim(), password);
-    if (displayName && displayName.trim()) {
+    if (trimmedName) {
       await updateProfile(userCredential.user, {
-        displayName: displayName.trim(),
+        displayName: trimmedName,
       });
+      try {
+        await userCredential.user.reload();
+      } catch {}
     }
     trackSignup('email');
-    return userCredential.user;
+    return auth.currentUser || userCredential.user;
   } catch (error: any) {
+    setPendingRegistrationDisplayName(null);
     console.error('Email Registration Error:', error);
     throw error;
   }
@@ -533,9 +558,13 @@ export async function sendPasswordReset(email: string): Promise<void> {
   }
 }
 
-// Sign out
+// Sign out with timeout guard so user is never stuck in infinite loading
 export async function logOut(): Promise<void> {
-  await fbSignOut(auth);
+  try {
+    await withTimeout(fbSignOut(auth), 1200, undefined);
+  } catch (e) {
+    console.warn('Notice during sign out:', e);
+  }
 }
 
 // Clean deeply to remove any `undefined` fields which Firestore rejects
@@ -556,6 +585,21 @@ export function sanitizeForFirestore<T>(data: T): T {
     return clean as T;
   }
   return data;
+}
+
+// Helper to wrap promises with guaranteed timeout fallback
+export async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallbackValue: T): Promise<T> {
+  let timer: any;
+  const timeoutPromise = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(fallbackValue), timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } catch (err) {
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // In-memory write tracking to prevent write stream flooding
@@ -631,13 +675,13 @@ export async function saveUserDataToFirestore(
     }
 
     if (isWritingUserData) {
-      // If a write is currently in-flight, wait a short moment to avoid concurrent write stream overloading
-      await new Promise(r => setTimeout(r, 200));
+      // If a write is currently in-flight, continue without queuing deep lag
+      await new Promise(r => setTimeout(r, 100));
     }
 
     isWritingUserData = true;
     const userDocRef = doc(db, 'users', uid);
-    await setDoc(userDocRef, cleanPayload, { merge: true });
+    await withTimeout(setDoc(userDocRef, cleanPayload, { merge: true }), 2500, undefined);
     lastSavedPayloadMap.set(uid, serialized);
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
@@ -646,8 +690,56 @@ export async function saveUserDataToFirestore(
   }
 }
 
+/**
+ * Fast targeted update for player profile (name, avatar, photoURL, targetExam, etc.)
+ * Writes directly to `users/{uid}` with merge: true without serializing huge savedWords arrays.
+ * This executes in milliseconds and ensures the chosen target exam and profile details are instantly persisted.
+ */
+export async function saveUserProfileFieldsToFirestore(
+  uid: string,
+  player: PlayerProfile,
+  currentUser?: FirebaseUser | null
+): Promise<void> {
+  if (!uid) return;
+  const path = `users/${uid}`;
+  try {
+    const rawPayload = {
+      uid,
+      displayName: player.name || currentUser?.displayName || null,
+      photoURL: player.photoURL !== undefined ? player.photoURL : (currentUser?.photoURL || null),
+      email: player.email || currentUser?.email || null,
+      player: {
+        ...player,
+        photoURL: player.photoURL !== undefined ? player.photoURL : (currentUser?.photoURL || null),
+        email: player.email || currentUser?.email || null,
+      },
+      updatedAt: Date.now(),
+    };
+    const cleanPayload = sanitizeForFirestore(rawPayload);
+
+    // Save local backup snapshot
+    if (typeof window !== 'undefined') {
+      try {
+        const key = `vocabclash_cloud_backup_${uid}`;
+        const existingRaw = localStorage.getItem(key);
+        const existingData = existingRaw ? JSON.parse(existingRaw) : {};
+        existingData.player = cleanPayload.player;
+        existingData.displayName = cleanPayload.displayName;
+        existingData.photoURL = cleanPayload.photoURL;
+        existingData.updatedAt = cleanPayload.updatedAt;
+        localStorage.setItem(key, JSON.stringify(existingData));
+      } catch { /* storage full */ }
+    }
+
+    const userDocRef = doc(db, 'users', uid);
+    await withTimeout(setDoc(userDocRef, cleanPayload, { merge: true }), 2000, undefined);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, path);
+  }
+}
+
 // Fetch user state from Firestore (with local cloud backup fallback)
-export async function fetchUserDataFromFirestore(uid: string): Promise<UserCloudData | null> {
+export async function fetchUserDataFromFirestore(uid: string, timeoutMs: number = 2200): Promise<UserCloudData | null> {
   const path = `users/${uid}`;
   try {
     if (isFirestoreQuotaExhausted() && typeof window !== 'undefined') {
@@ -658,8 +750,8 @@ export async function fetchUserDataFromFirestore(uid: string): Promise<UserCloud
     }
 
     const userDocRef = doc(db, 'users', uid);
-    const docSnap = await getDoc(userDocRef);
-    if (docSnap.exists()) {
+    const docSnap = await withTimeout(getDoc(userDocRef), timeoutMs, null);
+    if (docSnap && docSnap.exists()) {
       const data = docSnap.data() as UserCloudData;
       if (typeof window !== 'undefined') {
         try {

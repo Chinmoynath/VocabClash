@@ -85,6 +85,8 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
   // Authoritative live state from Firestore (for real-player matches)
   const [liveRoom, setLiveRoom] = useState<LiveDuelRoom | null>(null);
   const [opponentLeft, setOpponentLeft] = useState<boolean>(false);
+  const [showOpponentLeftNotice, setShowOpponentLeftNotice] = useState<boolean>(false);
+  const [isOpponentLeftNoticeFading, setIsOpponentLeftNoticeFading] = useState<boolean>(false);
 
   // Authoritative live scores & combos for instant real-time UI synchronization
   const [livePlayerScore, setLivePlayerScore] = useState<number>(matchState.playerScore);
@@ -273,6 +275,28 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
       if (reconnectIntervalRef.current) clearInterval(reconnectIntervalRef.current);
     };
   }, [isDisconnected, isForfeitedDueToDisconnect]);
+
+  // Opponent left notice timer: show for 5 seconds, then smoothly fade out
+  useEffect(() => {
+    if (opponentLeft && isRealMatch) {
+      setShowOpponentLeftNotice(true);
+      setIsOpponentLeftNoticeFading(false);
+
+      // Start fade out at 4.2s so it transitions smoothly before disappearing at 5.0s
+      const fadeTimer = setTimeout(() => {
+        setIsOpponentLeftNoticeFading(true);
+      }, 4200);
+
+      const hideTimer = setTimeout(() => {
+        setShowOpponentLeftNotice(false);
+      }, 5000);
+
+      return () => {
+        clearTimeout(fadeTimer);
+        clearTimeout(hideTimer);
+      };
+    }
+  }, [opponentLeft, isRealMatch]);
 
   const handleDisconnectTimeout = () => {
     setIsForfeitedDueToDisconnect(true);
@@ -950,9 +974,13 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
         </div>
       )}
 
-      {/* Opponent Disconnected Notice Banner (Real Player Match) */}
-      {isRealMatch && opponentLeft && (
-        <div className="bg-amber-950/90 border border-amber-500/50 rounded-2xl p-2.5 text-amber-200 text-xs flex items-center justify-between gap-2 shadow-md">
+      {/* Opponent Disconnected Notice Banner (Real Player Match - displays for 5s then fades out) */}
+      {isRealMatch && showOpponentLeftNotice && (
+        <div 
+          className={`bg-amber-950/90 border border-amber-500/50 rounded-2xl p-2.5 text-amber-200 text-xs flex items-center justify-between gap-2 shadow-md transition-all duration-800 ease-out ${
+            isOpponentLeftNoticeFading ? 'opacity-0 -translate-y-2 pointer-events-none' : 'opacity-100 translate-y-0'
+          }`}
+        >
           <div className="flex items-center gap-2">
             <Radio className="w-4 h-4 text-amber-400 animate-pulse" />
             <span className="font-bold">Opponent left the match! Your final score will determine the victory.</span>
@@ -995,13 +1023,6 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
               <span className={`w-1.5 h-1.5 rounded-full ${network.isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
               <span>{network.isOnline ? (network.pingMs ? `${network.pingMs}ms` : 'Online') : 'Offline'}</span>
             </div>
-
-            {isRealMatch && (
-              <div className="hidden sm:flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-950/80 border border-emerald-500/50 text-emerald-400 text-xs font-bold">
-                <Radio className="w-3.5 h-3.5 animate-pulse" />
-                <span>Live 1v1</span>
-              </div>
-            )}
           </div>
 
           <div 

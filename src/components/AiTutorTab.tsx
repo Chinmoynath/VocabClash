@@ -61,7 +61,7 @@ export const AiTutorTab: React.FC<AiTutorTabProps> = ({
     return calculateMentorAnalytics(
       selectedPeriod,
       player,
-      streak || { currentStreak: 0, highestStreak: 0, lastPlayedDate: '', streakFreezeActive: false },
+      streak || { currentStreak: 0, longestStreak: 0, lastActiveDate: '', lastActiveTimestamp: 0, claimedToday: false, totalDaysActive: 0, history: {} },
       savedWords
     );
   }, [selectedPeriod, player, streak, savedWords]);

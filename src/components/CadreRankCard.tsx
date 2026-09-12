@@ -1,9 +1,15 @@
 import React from 'react';
 import { 
-  Pencil 
+  Pencil,
+  Target
 } from 'lucide-react';
 import { PlayerProfile } from '../types';
 import { soundManager } from '../utils/audio';
+import { getTierFromLP } from '../services/matchmakingService';
+import { 
+  getCategoryTierTitle, 
+  getCategoryNextTierInfo 
+} from '../utils/cadreCategoryService';
 
 interface CadreRankCardProps {
   player: PlayerProfile;
@@ -57,41 +63,22 @@ export const CadreRankCard: React.FC<CadreRankCardProps> = ({
 }) => {
   // LP Tier progress computation
   const currentLP = player.rankPoints;
-  let nextTierLP = 2000;
-  let prevTierLP = 1200;
-  let nextTierName = 'Auditor / Accountant';
+  const nextTierData = getCategoryNextTierInfo(currentLP, player.targetExam);
+  
+  const nextTierLP = nextTierData.nextTierLP;
+  const prevTierLP = nextTierData.prevTierLP;
+  const lpRemaining = nextTierData.lpRemaining;
+  const progressPercent = nextTierData.progressPercent;
 
-  if (currentLP < 600) { 
-    prevTierLP = 0; 
-    nextTierLP = 600; 
-    nextTierName = 'Clerk / Assistant Cadre';
-  } else if (currentLP < 1200) { 
-    prevTierLP = 600; 
-    nextTierLP = 1200; 
-    nextTierName = 'Auditor / Accountant';
-  } else if (currentLP < 2000) { 
-    prevTierLP = 1200; 
-    nextTierLP = 2000; 
-    nextTierName = 'GST / IT Inspector';
-  } else if (currentLP < 3000) { 
-    prevTierLP = 2000; 
-    nextTierLP = 3000; 
-    nextTierName = 'Gazetted Officer';
-  } else { 
-    prevTierLP = 3000; 
-    nextTierLP = 4500; 
-    nextTierName = 'All India Rank #1';
-  }
-
-  const lpRange = Math.max(1, nextTierLP - prevTierLP);
-  const lpEarnedInTier = Math.max(0, currentLP - prevTierLP);
-  const progressPercent = Math.min(100, Math.max(0, Math.round((lpEarnedInTier / lpRange) * 100)));
-  const lpRemaining = Math.max(0, nextTierLP - currentLP);
+  // Compute dynamic category-aware rank title
+  const effectiveTier = player.tier || getTierFromLP(currentLP);
+  const dynamicTierTitle = getCategoryTierTitle(effectiveTier, player.targetExam);
 
   const parsedGoal = parseTargetExam(player.targetExam || 'SSC CPO - Sub-Inspector');
 
   // Tier Medal Icon
   const getTierInsignia = () => {
+    if (currentLP >= 4500) return '👑';
     if (currentLP >= 3000) return '🎖️';
     if (currentLP >= 2000) return '💎';
     if (currentLP >= 1200) return '🥇';
@@ -100,7 +87,7 @@ export const CadreRankCard: React.FC<CadreRankCardProps> = ({
   };
 
   const tierIcon = getTierInsignia();
-  const cleanTierTitle = (player.tierTitle || '').replace(/^[\p{Extended_Pictographic}\p{Emoji}\uFE0F\u200d\s]+/u, '').trim() || player.tierTitle;
+  const cleanTierTitle = (dynamicTierTitle || player.tierTitle || '').replace(/^[\p{Extended_Pictographic}\p{Emoji}\uFE0F\u200d\s]+/u, '').trim() || dynamicTierTitle;
 
   const handleEditClick = () => {
     soundManager.playTap();
@@ -156,6 +143,10 @@ export const CadreRankCard: React.FC<CadreRankCardProps> = ({
         title="Click to change target exam"
       >
         <div className="flex items-center gap-2 min-w-0 flex-1">
+          <span className="text-[11px] font-bold text-slate-400 shrink-0 flex items-center gap-1">
+            <Target className="w-3 h-3 text-sky-400" />
+            <span>Target:</span>
+          </span>
           <span className="px-2 py-0.5 rounded-md bg-sky-500/10 border border-sky-500/20 text-sky-400 text-[10px] font-bold shrink-0">
             {parsedGoal.tag}
           </span>

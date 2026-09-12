@@ -510,7 +510,7 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
   onBookmarkQuestion,
   onOpenAiDeepDive,
   onNavigateToMistakes,
-  bookmarkedIds,
+  bookmarkedIds = [],
   isPremium = false,
   currentUser = null,
   onUserChange,
@@ -521,22 +521,49 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
   const [activeTab, setActiveTab] = useState<'summary' | 'solutions'>('summary');
   const [filterType, setFilterType] = useState<'all' | 'mistakes' | 'correct'>('all');
   
-  const isWinner = matchState.playerScore > matchState.opponentScore || (matchState.finalResult?.winnerId === player.id && matchState.playerScore >= matchState.opponentScore);
-  const isDraw = !isWinner && matchState.playerScore === matchState.opponentScore;
+  if (!matchState) {
+    return (
+      <div className="flex-1 min-h-0 w-full flex items-center justify-center p-4 bg-slate-950 text-slate-100">
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 text-center max-w-sm w-full space-y-4 shadow-xl">
+          <div className="text-3xl">🏆</div>
+          <div className="space-y-1">
+            <h2 className="text-base font-bold text-slate-100">Match Completed</h2>
+            <p className="text-xs text-slate-400">Your score and leaderboard LP have been safely saved.</p>
+          </div>
+          <button
+            type="button"
+            onClick={onBackToLobby}
+            className="w-full py-3 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs shadow-lg active:scale-95 transition-all"
+          >
+            Return to Arena Lobby
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const playerScore = typeof matchState.playerScore === 'number' ? matchState.playerScore : 0;
+  const opponentScore = typeof matchState.opponentScore === 'number' ? matchState.opponentScore : 0;
+  const opponent = matchState.opponent || { name: 'Opponent', avatar: '🎯', rankPoints: 1000, accuracyRate: 50 };
+  const questions = Array.isArray(matchState.questions) ? matchState.questions : [];
+  const playerAnswers = Array.isArray(matchState.playerAnswers) ? matchState.playerAnswers : [];
+
+  const isWinner = playerScore > opponentScore || (matchState.finalResult?.winnerId === player?.id && playerScore >= opponentScore);
+  const isDraw = !isWinner && playerScore === opponentScore;
 
   // Authoritative LP calculation
   const playerLpChange = isWinner ? 30 : isDraw ? 5 : -15;
   const opponentLpChange = isWinner ? -15 : isDraw ? 5 : 30;
 
   // Match statistics calculations
-  const totalQuestions = matchState.questions.length;
+  const totalQuestions = questions.length;
   let correctCount = 0;
   let mistakeCount = 0;
   let maxCombo = 0;
   let currentCombo = 0;
 
-  matchState.questions.forEach((_, idx) => {
-    const pAns = matchState.playerAnswers[idx];
+  questions.forEach((_, idx) => {
+    const pAns = playerAnswers[idx];
     if (pAns?.isCorrect) {
       correctCount++;
       currentCombo++;
@@ -551,30 +578,42 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
 
   // Track guest battle completion event for non-authenticated players
   useEffect(() => {
-    if (!currentUser) {
-      trackGuestBattleComplete({
-        score: matchState.playerScore,
-        accuracy: accuracyPct,
-        result: isWinner ? 'win' : isDraw ? 'draw' : 'defeat',
-      });
+    try {
+      if (!currentUser) {
+        trackGuestBattleComplete({
+          score: playerScore,
+          accuracy: accuracyPct,
+          result: isWinner ? 'win' : isDraw ? 'draw' : 'defeat',
+        });
+      }
+    } catch (err) {
+      console.warn('Analytics trackGuestBattleComplete notice:', err);
     }
   }, []);
 
   const handleReviewSolutionsClick = () => {
-    soundManager.playTap();
+    try {
+      soundManager.playTap();
+    } catch {}
     if (currentUser) {
       setActiveTab('solutions');
       return;
     }
 
     // Guest conversion flow: Optional prompt, doesn't block review
-    trackGuestReviewClick({ mistakesCount: mistakeCount });
+    try {
+      trackGuestReviewClick({ mistakesCount: mistakeCount });
+    } catch {}
     setShowGuestReviewModal(true);
-    trackGuestReviewSignupPromptView();
+    try {
+      trackGuestReviewSignupPromptView();
+    } catch {}
   };
 
   const handleGuestReviewModalClose = () => {
-    trackGuestReviewSignupPromptClose();
+    try {
+      trackGuestReviewSignupPromptClose();
+    } catch {}
     setShowGuestReviewModal(false);
     // User pressed X or dismiss: Immediately open the Solutions / Answer Review page anyway
     setActiveTab('solutions');
@@ -591,40 +630,45 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
 
   // Authoritative share data package
   const shareData: BattleShareData = {
-    playerName: player.name || 'Govt Aspirant',
-    playerAvatar: player.avatar,
-    playerScore: matchState.playerScore,
+    playerName: player?.name || 'Govt Aspirant',
+    playerAvatar: player?.avatar || '🎓',
+    playerScore: playerScore,
     playerLpChange,
-    opponentName: matchState.opponent.name || 'Opponent',
-    opponentAvatar: matchState.opponent.avatar,
-    opponentScore: matchState.opponentScore,
+    opponentName: opponent.name || 'Opponent',
+    opponentAvatar: opponent.avatar || '🎯',
+    opponentScore: opponentScore,
     isWinner,
     isDraw,
-    exam: matchState.examFilter,
-    category: matchState.categoryFilter,
+    exam: matchState.examFilter || 'ALL',
+    category: matchState.categoryFilter || 'mixed',
     accuracyPct,
     totalQuestions,
   };
 
   useEffect(() => {
-    if (isWinner) {
-      soundManager.playVictory();
-    } else {
-      soundManager.playWrong();
+    try {
+      if (isWinner) {
+        soundManager.playVictory();
+      } else {
+        soundManager.playWrong();
+      }
+    } catch (err) {
+      console.warn('Sound play notice in MatchSummary:', err);
     }
   }, [isWinner]);
 
   // Filter questions based on user selection
-  const filteredQuestions = matchState.questions.map((q, idx) => {
-    const pAns = matchState.playerAnswers[idx];
+  const filteredQuestions = questions.map((q, idx) => {
+    const pAns = playerAnswers[idx];
     return {
       question: q,
       originalIndex: idx,
       playerAnswer: pAns,
       isCorrect: pAns?.isCorrect ?? false,
-      selectedOptionIndex: pAns?.selectedOption ?? -1,
+      selectedOptionIndex: pAns?.selectedIndex ?? -1,
     };
   }).filter(item => {
+    if (!item.question) return false;
     if (filterType === 'mistakes') return !item.isCorrect;
     if (filterType === 'correct') return item.isCorrect;
     return true;
@@ -682,15 +726,14 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
                     YOU
                   </div>
                   <div className="w-14 h-14 rounded-2xl bg-amber-500/20 border-2 border-amber-400/80 flex items-center justify-center text-2xl shadow-inner mt-1 mb-2">
-                    {player.avatar}
+                    {player?.avatar || '🎓'}
                   </div>
                   <div className="min-w-0 w-full mb-2">
-                    <div className="font-extrabold text-sm sm:text-base text-slate-100 truncate">{player.name}</div>
-                    <div className="text-[11px] text-amber-400/90 font-medium truncate">{player.title || 'Govt Job Aspirant'}</div>
+                    <div className="font-extrabold text-sm sm:text-base text-slate-100 truncate">{player?.name || 'You'}</div>
                   </div>
                   <div className="bg-slate-950/80 border border-slate-800 rounded-xl py-2 px-4 w-full relative group/score">
                     <div className="text-2xl sm:text-3xl font-black text-amber-400 font-mono tracking-tight">
-                      {matchState.playerScore}
+                      {playerScore}
                     </div>
                     <div className={`text-xs font-bold font-mono mt-0.5 ${playerLpChange >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                       {playerLpChange >= 0 ? `+${playerLpChange} LP` : `${playerLpChange} LP`}
@@ -701,7 +744,9 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        soundManager.playTap();
+                        try {
+                          soundManager.playTap();
+                        } catch {}
                         setShowShareModal(true);
                       }}
                       aria-label="Share result"
@@ -723,15 +768,14 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
                     OPPONENT
                   </div>
                   <div className="w-14 h-14 rounded-2xl bg-orange-500/20 border-2 border-orange-400/80 flex items-center justify-center text-2xl shadow-inner mt-1 mb-2">
-                    {matchState.opponent.avatar}
+                    {opponent.avatar || '🎯'}
                   </div>
                   <div className="min-w-0 w-full mb-2">
-                    <div className="font-extrabold text-sm sm:text-base text-slate-100 truncate">{matchState.opponent.name}</div>
-                    <div className="text-[11px] text-orange-400/90 font-medium truncate">{matchState.opponent.tierTitle}</div>
+                    <div className="font-extrabold text-sm sm:text-base text-slate-100 truncate">{opponent.name || 'Opponent'}</div>
                   </div>
                   <div className="bg-slate-950/80 border border-slate-800 rounded-xl py-2 px-4 w-full">
                     <div className="text-2xl sm:text-3xl font-black text-orange-400 font-mono tracking-tight">
-                      {matchState.opponentScore}
+                      {opponentScore}
                     </div>
                     <div className={`text-xs font-bold font-mono mt-0.5 ${opponentLpChange >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                       {opponentLpChange >= 0 ? `+${opponentLpChange} LP` : `${opponentLpChange} LP`}

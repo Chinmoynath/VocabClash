@@ -94,7 +94,7 @@ export interface Question {
   canonicalQuestionId?: string;
   sourceQuestionId?: string;
   appearances?: ExamAppearance[]; // Canonical list of all exam occurrences
-  sourceType?: 'verified_pyq' | 'generated_practice';
+  sourceType?: 'verified_pyq' | 'generated_practice' | 'json_import' | 'pdf_import' | 'manual_text';
   reviewReason?: 'fresh' | 'due_review' | 'mistake_review' | 'saved_review' | 'pool_exhausted_review' | 'weak_category';
   examFamily?: string;
   exam?: string;
@@ -116,7 +116,7 @@ export interface PlayerProfile {
   id: string;
   name: string;
   avatar: string;
-  photoURL?: string;
+  photoURL?: string | null;
   email?: string;
   country: string;
   countryCode: string;
@@ -207,7 +207,7 @@ export interface LeaderboardUser {
   id: string;
   name: string;
   avatar: string;
-  photoURL?: string;
+  photoURL?: string | null;
   countryCode: string;
   targetExam: string;
   rankPoints: number;

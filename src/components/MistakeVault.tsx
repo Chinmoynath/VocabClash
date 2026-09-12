@@ -173,7 +173,7 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
       opacity: 1,
       scale: 1,
       transition: {
-        x: { type: 'spring', stiffness: 360, damping: 28 },
+        x: { type: 'spring' as const, stiffness: 360, damping: 28 },
         opacity: { duration: 0.18 },
         scale: { duration: 0.18 },
       },

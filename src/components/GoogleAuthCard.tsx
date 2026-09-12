@@ -6,6 +6,7 @@ interface GoogleAuthCardProps {
   currentUser: FirebaseUser | null;
   isSyncing: boolean;
   onUserChange?: (user: FirebaseUser | null) => void;
+  onUpdatePlayer?: (updated: { name?: string }) => void;
   onManualSync?: () => void;
   onSignOut?: () => Promise<void>;
   onSuccessClose?: () => void;

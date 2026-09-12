@@ -11,6 +11,13 @@ import { INITIAL_LEADERBOARD, OPPONENT_POOL } from '../data/mockQuestions';
 
 export const TOTAL_LEADERBOARD_ASPIRANTS = 5480;
 
+/**
+ * Toggle whether synthetic/simulated bots are merged into the ranklist.
+ * Currently set to false per user request to experiment exclusively with real players.
+ * Easily flip to true if/when bringing bots back to the ranklist.
+ */
+export const INCLUDE_BOTS_IN_RANKLIST = false;
+
 const FIRST_NAMES = [
   'Aarav', 'Vivaan', 'Aditya', 'Vihaan', 'Arjun', 'Sai', 'Reyansh', 'Ayaan', 'Krishna', 'Ishaan',
   'Shaurya', 'Atharv', 'Advik', 'Pranav', 'Advaith', 'Kabir', 'Ananya', 'Diya', 'Aadhya', 'Saanvi',
@@ -203,14 +210,26 @@ export async function syncUserToLeaderboard(
 
   try {
     const docRef = doc(db, 'leaderboard_users', uid);
+    
+    // Resolve Google photoURL vs custom emoji:
+    // If player has photoURL set to a valid URL string, use it.
+    // If player has photoURL undefined and auth.currentUser has a Google photoURL, default to it.
+    // If player has photoURL explicitly set to null (user chose an emoji), keep it null.
+    let resolvedPhotoURL: string | null = null;
+    if (typeof player.photoURL === 'string' && player.photoURL.trim().length > 0) {
+      resolvedPhotoURL = player.photoURL;
+    } else if (player.photoURL === undefined && auth.currentUser?.photoURL) {
+      resolvedPhotoURL = auth.currentUser.photoURL;
+    }
+
     const payload: FirestoreLeaderboardDoc = {
       id: uid,
       uid,
       name: player.name || 'Govt Aspirant',
       avatar: player.avatar || '👨‍💼',
-      photoURL: player.photoURL || null,
+      photoURL: resolvedPhotoURL,
       countryCode: player.countryCode || 'IN',
-      targetExam: player.targetExam || 'SSC CGL 2026',
+      targetExam: player.targetExam || (typeof window !== 'undefined' ? localStorage.getItem('vocabclash_user_chosen_target_exam') : null) || 'SSC CGL - Assistant Section Officer (ASO - CSS / MEA / IB / 4600 GP)',
       rankPoints: typeof player.rankPoints === 'number' ? Math.max(0, player.rankPoints) : 100,
       tierTitle: player.tierTitle || 'Aspirant',
       winRate: typeof player.accuracyRate === 'number' ? player.accuracyRate : 0,
@@ -244,7 +263,8 @@ export async function syncUserToLeaderboard(
 export function buildMergedLeaderboard(
   baseBots: LeaderboardUser[],
   realUsers: LeaderboardUser[],
-  currentPlayer: PlayerProfile
+  currentPlayer: PlayerProfile,
+  includeBots: boolean = INCLUDE_BOTS_IN_RANKLIST
 ): LeaderboardUser[] {
   const currentUid = auth.currentUser?.uid || currentPlayer.id;
 
@@ -256,15 +276,22 @@ export function buildMergedLeaderboard(
     }
   }
 
+  // Resolve current user's photoURL (Google photo by default, or explicit custom avatar choice)
+  const currentUserPhotoURL = typeof currentPlayer.photoURL === 'string' && currentPlayer.photoURL.trim().length > 0
+    ? currentPlayer.photoURL
+    : currentPlayer.photoURL === null
+    ? null
+    : (auth.currentUser?.photoURL || null);
+
   // Ensure current player is present in real users with fresh state
   const currentUserEntry: LeaderboardUser = {
     rank: 1,
     id: currentUid,
     name: currentPlayer.name || 'Govt Aspirant',
     avatar: currentPlayer.avatar || '👨‍💼',
-    photoURL: currentPlayer.photoURL,
+    photoURL: currentUserPhotoURL,
     countryCode: currentPlayer.countryCode || 'IN',
-    targetExam: currentPlayer.targetExam || 'SSC CGL 2026',
+    targetExam: currentPlayer.targetExam || (typeof window !== 'undefined' ? localStorage.getItem('vocabclash_user_chosen_target_exam') : null) || 'SSC CGL - Assistant Section Officer (ASO - CSS / MEA / IB / 4600 GP)',
     rankPoints: typeof currentPlayer.rankPoints === 'number' ? Math.max(0, currentPlayer.rankPoints) : 100,
     tierTitle: currentPlayer.tierTitle || 'Aspirant',
     winRate: typeof currentPlayer.accuracyRate === 'number' ? currentPlayer.accuracyRate : 0,
@@ -279,13 +306,15 @@ export function buildMergedLeaderboard(
   // Combine bots and real users into a single list
   const combined: LeaderboardUser[] = [];
 
-  // Add all deterministic bots (unless a real user has an identical ID)
-  for (const bot of baseBots) {
-    if (!realUsersMap.has(bot.id)) {
-      combined.push({
-        ...bot,
-        isCurrentUser: false,
-      });
+  // Add deterministic bots ONLY if includeBots is enabled (disabled while experimenting with real players)
+  if (includeBots) {
+    for (const bot of baseBots) {
+      if (!realUsersMap.has(bot.id)) {
+        combined.push({
+          ...bot,
+          isCurrentUser: false,
+        });
+      }
     }
   }
 
@@ -297,9 +326,11 @@ export function buildMergedLeaderboard(
       isCurrentUser: isMe,
       name: isMe ? `${currentPlayer.name} (You)` : realUser.name,
       avatar: isMe ? currentPlayer.avatar : realUser.avatar,
-      photoURL: isMe ? currentPlayer.photoURL : realUser.photoURL,
+      photoURL: isMe ? currentUserPhotoURL : realUser.photoURL,
       rankPoints: isMe ? currentPlayer.rankPoints : realUser.rankPoints,
-      targetExam: isMe ? currentPlayer.targetExam : realUser.targetExam,
+      targetExam: isMe 
+        ? (currentPlayer.targetExam || (typeof window !== 'undefined' ? localStorage.getItem('vocabclash_user_chosen_target_exam') : null) || realUser.targetExam) 
+        : realUser.targetExam,
     });
   }
 

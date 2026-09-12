@@ -516,8 +516,8 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
         const sortedApps = sortAppearances(mergedApps);
 
         const dynamicTags = sortedApps.map(a => formatExamTag(a.exam, a.year, a.tier));
-        const examHistoryTags = Array.from(new Set([...(q.examHistory || []), ...dynamicTags]));
-        const repeatCount = computeRepeatCount(sortedApps, q.repeatCount || 1);
+        const examHistoryTags = Array.from(new Set([...((q as any).examHistory || []), ...dynamicTags]));
+        const repeatCount = computeRepeatCount(sortedApps, (q as any).repeatCount || 1);
         const importanceLevel = computeImportanceLevel(repeatCount);
 
         return {
@@ -554,7 +554,7 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
           examHistory: examHistoryTags,
           repeatCount,
           importanceLevel,
-          difficulty: q.difficulty || 'medium',
+          difficulty: (q as any).difficulty || 'medium',
           verified: q.verified !== undefined ? q.verified : true,
           sourceType: q.sourceType || (q.isPYQ === false ? 'generated_practice' : 'verified_pyq'),
           isPYQ: q.isPYQ !== undefined ? q.isPYQ : true,
@@ -567,7 +567,7 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
         : null;
       const resolvedExamDate = metadata.examDate ? normalizeExamDate(metadata.examDate) : null;
 
-      const batchMetadata: ImportBatch = currentBatch 
+      const batchMetadata: any = currentBatch 
         ? {
             ...currentBatch,
             shift: currentBatch.shift || resolvedShift || undefined,
@@ -602,7 +602,7 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
       const registerResult = questionBankEngine.registerApprovedQuestions(finalQuestionsToPublish, true);
 
       setImportSummary({
-        totalInput: (currentBatch?.totalQuestionsInFile || extractedQuestions.length + skippedItems.length),
+        totalInput: ((currentBatch as any)?.totalQuestionsInFile || extractedQuestions.length + skippedItems.length),
         eligibleCount: extractedQuestions.length,
         skippedCount: skippedItems.length,
         publishedCount: firestoreResult.publishedCount,
@@ -1343,10 +1343,10 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
                                   <div className="bg-rose-950/40 border border-rose-500/30 rounded-lg p-2.5 text-xs text-rose-200 space-y-1">
                                     <div className="font-bold flex items-center gap-1.5 text-rose-300">
                                       <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                                      <span>{q.conflictDetails.message || 'Answer Key Conflict Detected'}</span>
+                                      <span>{(q.conflictDetails as any)?.message || 'Answer Key Conflict Detected'}</span>
                                     </div>
                                     <div className="text-[11px] text-rose-300/80">
-                                      Incoming import answer: <b className="text-white">Option {q.conflictDetails.incomingCorrectIndex + 1} ({q.conflictDetails.incomingCorrectAnswer})</b> vs Existing canonical answer: <b className="text-white">Option {q.conflictDetails.existingCorrectIndex + 1} ({q.conflictDetails.existingCorrectAnswer})</b>
+                                      Incoming import answer: <b className="text-white">{(q.conflictDetails as any)?.incomingCorrectAnswer || `Option ${((q.conflictDetails as any)?.incomingCorrectIndex ?? 0) + 1}`}</b> vs Existing canonical answer: <b className="text-white">{(q.conflictDetails as any)?.existingCorrectAnswer || `Option ${((q.conflictDetails as any)?.existingCorrectIndex ?? 0) + 1}`}</b>
                                     </div>
                                   </div>
                                 )}
@@ -2288,10 +2288,9 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
                               appearances={q.appearances}
                               examHistory={q.examHistory}
                               repeatCount={q.repeatCount}
-                              examFamily={q.examFamily}
+                              exam={q.exam}
                               year={q.year}
                               tier={q.tier}
-                              shift={q.shift}
                               size="sm"
                             />
                             <button
@@ -2782,7 +2781,7 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
                         newOpts[oIdx] = e.target.value;
                         const newDetails = editingQuestion.optionDetails ? [...editingQuestion.optionDetails] : [];
                         if (newDetails[oIdx]) {
-                          newDetails[oIdx] = { ...newDetails[oIdx], text: e.target.value, option: e.target.value };
+                          newDetails[oIdx] = { ...newDetails[oIdx], option: e.target.value };
                         }
                         setEditingQuestion({ ...editingQuestion, options: newOpts, optionDetails: newDetails.length > 0 ? newDetails : undefined });
                       }}
@@ -2805,12 +2804,11 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
                       />
                       <input
                         type="text"
-                        value={(editingQuestion.optionDetails[oIdx] as any).englishMeaning || editingQuestion.optionDetails[oIdx].meaning || ''}
+                        value={editingQuestion.optionDetails[oIdx].englishMeaning || ''}
                         onChange={e => {
                           const newDetails = [...(editingQuestion.optionDetails || [])];
                           newDetails[oIdx] = { 
                             ...newDetails[oIdx], 
-                            meaning: e.target.value, 
                             englishMeaning: e.target.value,
                             explanation: e.target.value
                           };

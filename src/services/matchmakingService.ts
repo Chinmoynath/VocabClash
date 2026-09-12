@@ -132,15 +132,10 @@ export function getTierFromLP(lp: number): PlayerProfile['tier'] {
   return 'Aspirant';
 }
 
-export function getTierTitle(tier: PlayerProfile['tier']): string {
-  switch (tier) {
-    case 'Apex_Officer': return '👑 Apex Cadre Officer (Level 14+)';
-    case 'Gazetted_Officer': return '🎖️ Gazetted Officer (Group A / 5400 GP)';
-    case 'GST_IT_Inspector': return '💎 GST / IT Inspector (4600 GP)';
-    case 'Auditor_Accountant': return '🥇 Auditor / Accountant (2800 GP)';
-    case 'Clerk_Assistant': return '🥈 Assistant / Clerk (2400 GP)';
-    case 'Aspirant': return '🥉 Govt Job Aspirant';
-  }
+import { getCategoryTierTitle } from '../utils/cadreCategoryService';
+
+export function getTierTitle(tier: PlayerProfile['tier'], targetExam?: string | null): string {
+  return getCategoryTierTitle(tier, targetExam);
 }
 
 export function calculateScore(isCorrect: boolean, timeRemainingSec: number, maxTimeSec: number, combo: number): number {

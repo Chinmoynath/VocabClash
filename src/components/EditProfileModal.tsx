@@ -5,6 +5,7 @@ import { User as FirebaseUser } from 'firebase/auth';
 import { soundManager } from '../utils/audio';
 import { parseTargetExam } from './CadreRankCard';
 import { TARGET_EXAM_GROUPS } from './ProfileModal';
+import { resolvePlayerName } from '../utils/nameHelper';
 
 interface EditProfileModalProps {
   player: PlayerProfile;
@@ -19,10 +20,21 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
   onClose,
   onUpdatePlayer,
 }) => {
-  const [name, setName] = useState<string>(player.name);
+  const resolvedInitialName = resolvePlayerName({
+    cloudName: player.name,
+    authDisplayName: currentUser?.displayName,
+    email: currentUser?.email || player.email,
+  });
+  const [name, setName] = useState<string>(resolvedInitialName);
   const [avatar, setAvatar] = useState<string>(player.avatar);
-  const [targetExam, setTargetExam] = useState<string>(player.targetExam || 'SSC CPO - Sub-Inspector (Delhi Police / CAPF)');
-  const [selectedPhotoURL, setSelectedPhotoURL] = useState<string | undefined>(player.photoURL);
+  const [targetExam, setTargetExam] = useState<string>(
+    player.targetExam ||
+    (typeof window !== 'undefined' ? localStorage.getItem('vocabclash_user_chosen_target_exam') : null) ||
+    'SSC CGL - Assistant Section Officer (ASO - CSS / MEA / IB / 4600 GP)'
+  );
+  const [selectedPhotoURL, setSelectedPhotoURL] = useState<string | null | undefined>(
+    player.photoURL !== undefined ? player.photoURL : (currentUser?.photoURL || null)
+  );
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [savedSuccess, setSavedSuccess] = useState<boolean>(false);
 
@@ -42,16 +54,19 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
     soundManager.playTap();
     setIsSaving(true);
     try {
+      if (typeof window !== 'undefined' && targetExam) {
+        localStorage.setItem('vocabclash_user_chosen_target_exam', targetExam);
+      }
       await onUpdatePlayer({
         name: name.trim() || player.name,
         avatar,
         targetExam,
-        photoURL: selectedPhotoURL,
+        photoURL: selectedPhotoURL !== undefined ? selectedPhotoURL : null,
       });
       setSavedSuccess(true);
       setTimeout(() => {
         onClose();
-      }, 500);
+      }, 250);
     } catch (err) {
       console.error('Failed to save profile changes:', err);
     } finally {
@@ -194,7 +209,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
               }}
               className="text-[10px] text-sky-400 hover:underline font-medium cursor-pointer"
             >
-              Use Google Name: {currentUser.displayName}
+              Use Account Name: {currentUser.displayName}
             </button>
           )}
         </div>
@@ -236,7 +251,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
                   onClick={() => {
                     soundManager.playTap();
                     setAvatar(av);
-                    setSelectedPhotoURL(undefined);
+                    setSelectedPhotoURL(null);
                   }}
                   className={`w-9 h-9 rounded-xl text-lg flex items-center justify-center border transition-all cursor-pointer ${
                     isSelected
@@ -266,9 +281,9 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
             <Check className="w-4 h-4" />
             <span>
               {savedSuccess
-                ? 'SAVED & SYNCED TO FIREBASE!'
+                ? 'SAVED!'
                 : isSaving
-                ? 'SAVING TO FIREBASE...'
+                ? 'SAVING...'
                 : 'SAVE CHANGES & SYNC'}
             </span>
           </button>

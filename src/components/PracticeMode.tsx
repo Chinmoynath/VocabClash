@@ -61,8 +61,7 @@ import {
   trackGuestPyqSignupPromptView, 
   trackGuestPyqSignupPromptClose, 
   trackGuestPyqSignupClick,
-  trackGuestSignupComplete,
-  trackPyqDrillStarted
+  trackGuestSignupComplete
 } from '../services/analyticsService';
 import { User as FirebaseUser } from 'firebase/auth';
 import { GuestConversionModal } from './GuestConversionModal';
@@ -674,7 +673,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     const isDailySprint = attemptSource === 'daily_sprint' || Boolean(customSessionTitle && customSessionTitle.includes('Daily Sprint'));
     const currentPracticeType: PracticeType = isTop100 ? 'ssc_top100' : isDailySprint ? 'daily_sprint' : 'pyq_drill';
     const currentAnalyticsCat = normalizeAnalyticsCategory(currentQ.category || category);
-    const currentAnalyticsExam = normalizeAnalyticsExamFamily(currentQ.examTag || exam);
+    const currentAnalyticsExam = normalizeAnalyticsExamFamily((currentQ as any)?.examTag || exam);
 
     // 1. GA4: practice_start (fired once when user genuinely starts answering the practice session)
     if (!hasFiredPracticeStartRef.current) {
@@ -684,13 +683,6 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
         category: currentAnalyticsCat,
         exam_family: currentAnalyticsExam,
       });
-      if (currentPracticeType === 'pyq_drill') {
-        trackPyqDrillStarted({
-          target_exam: currentAnalyticsExam,
-          category: currentAnalyticsCat,
-          user_logged_in: !!currentUser,
-        });
-      }
     }
 
     // 2. GA4: question_answered (fired for every submitted answer with non-PII metadata)

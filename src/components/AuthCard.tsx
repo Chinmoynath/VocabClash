@@ -33,6 +33,7 @@ interface AuthCardProps {
   currentUser: FirebaseUser | null;
   isSyncing?: boolean;
   onUserChange?: (user: FirebaseUser | null) => void;
+  onUpdatePlayer?: (updated: { name?: string }) => void;
   onManualSync?: () => void;
   onSignOut?: () => Promise<void>;
   onSuccessClose?: () => void;
@@ -44,6 +45,7 @@ export const AuthCard: React.FC<AuthCardProps> = ({
   currentUser,
   isSyncing = false,
   onUserChange,
+  onUpdatePlayer,
   onManualSync,
   onSignOut,
   onSuccessClose,
@@ -64,6 +66,7 @@ export const AuthCard: React.FC<AuthCardProps> = ({
 
   // Handle Google 1-Tap Sign In
   const handleGoogleSignIn = async (forceRedirect = false) => {
+    if (loading) return;
     try {
       soundManager.playTap();
       setLoading(true);
@@ -81,7 +84,18 @@ export const AuthCard: React.FC<AuthCardProps> = ({
         }
       }
     } catch (err: any) {
-      console.error('Google Sign-In Error:', err);
+      const code = String(err?.code || '').toLowerCase();
+      const msg = String(err?.message || err || '').toLowerCase();
+      if (
+        code.includes('cancelled-popup-request') || 
+        msg.includes('cancelled-popup-request') ||
+        code.includes('popup-closed-by-user') || 
+        msg.includes('popup-closed-by-user')
+      ) {
+        // User closed or dismissed popup, no error needed
+        return;
+      }
+      console.warn('Google Sign-In notice:', err);
       setErrorMsg(getFriendlyAuthErrorMessage(err));
     } finally {
       setLoading(false);
@@ -145,6 +159,9 @@ export const AuthCard: React.FC<AuthCardProps> = ({
 
       // Create Firebase user directly
       const user = await registerWithEmailPassword(cleanEmail, password, name.trim());
+      if (onUpdatePlayer) {
+        onUpdatePlayer({ name: name.trim() });
+      }
       if (onUserChange) {
         onUserChange(user);
       }
@@ -191,7 +208,10 @@ export const AuthCard: React.FC<AuthCardProps> = ({
       soundManager.playTap();
       setLoading(true);
       if (onSignOut) {
-        await onSignOut();
+        await Promise.race([
+          onSignOut(),
+          new Promise(r => setTimeout(r, 1200))
+        ]);
       } else {
         await logOut();
         if (onUserChange) {
@@ -294,7 +314,9 @@ export const AuthCard: React.FC<AuthCardProps> = ({
                 <div className="text-xs text-slate-100 font-bold truncate flex items-center gap-1">
                   <span>{extractCleanUserName(currentUser.displayName, currentUser.email)}</span>
                   {currentUser.emailVerified && (
-                    <ShieldCheck className="w-3 h-3 text-emerald-400" title="Email Verified" />
+                    <span title="Email Verified">
+                      <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                    </span>
                   )}
                 </div>
                 <div className="text-[10px] text-slate-400 font-mono truncate">

@@ -7,7 +7,9 @@ export type AttemptSource =
   | 'practice' 
   | 'battle' 
   | 'daily_challenge' 
+  | 'daily_sprint'
   | 'mistake_review' 
+  | 'weak_areas'
   | 'historical_summary'
   | 'ssc_top100';
 

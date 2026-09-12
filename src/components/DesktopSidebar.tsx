@@ -79,8 +79,8 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
     },
     {
       id: 'leaderboard' as TabType,
-      label: 'All-India Ranks',
-      sublabel: 'Leaderboard & Tiers',
+      label: 'Leaderboard',
+      sublabel: 'Ranks & Cadres',
       icon: Trophy,
       color: 'text-yellow-400',
       activeBg: 'bg-yellow-500/10 border-yellow-500/30 text-yellow-300',

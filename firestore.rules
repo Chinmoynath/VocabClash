@@ -247,11 +247,15 @@ service cloud.firestore {
       allow delete: if (isAuthenticated() && request.auth.uid == resource.data.host.id) || isPyqAdmin();
     }
 
-    // 6. Global Leaderboard Users (Public read projection, direct client writes DENIED)
-    // Direct client writes with arbitrary self-reported points are strictly forbidden.
+    // 6. Global Leaderboard Users (Public read projection, authenticated user syncs their own record)
     match /leaderboard_users/{userId} {
       allow read: if true;
-      allow write: if isPyqAdmin();
+      allow create, update: if (
+        isOwner(userId) &&
+        request.resource.data.uid == request.auth.uid &&
+        request.resource.data.id == request.auth.uid
+      ) || isPyqAdmin();
+      allow delete: if isPyqAdmin();
     }
 
     // 7. Authoritative Match Records (Participants create on match, read by participants/admin)

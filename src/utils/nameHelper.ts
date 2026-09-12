@@ -80,3 +80,69 @@ export function extractCleanUserName(displayName?: string | null, email?: string
 
   return fallback;
 }
+
+// Resolves the definitive user display name by prioritizing authenticated account identity
+export function resolvePlayerName({
+  cloudName,
+  localName,
+  authDisplayName,
+  email,
+}: {
+  cloudName?: string | null;
+  localName?: string | null;
+  authDisplayName?: string | null;
+  email?: string | null;
+}): string {
+  const cleanAuth = authDisplayName?.trim();
+  const emailDerived = email ? formatNameFromEmail(email) : '';
+
+  // 1. If authDisplayName is a real, valid name (e.g. "Kulbhusan")
+  if (cleanAuth && cleanAuth !== 'Govt Aspirant' && cleanAuth !== 'Aspirant Rahul') {
+    // If cloudName is missing, default, or equal to the synthetic email derivation
+    if (!cloudName || cloudName === 'Govt Aspirant' || cloudName === 'Aspirant Rahul' || cloudName === emailDerived) {
+      return cleanAuth;
+    }
+    // If the account email is NOT chinmoy and cloudName is "Chin Nath", it was caused by the email regex bug!
+    if (cloudName === 'Chin Nath' && (!email || !email.toLowerCase().includes('nathchinmoy'))) {
+      return cleanAuth;
+    }
+    // If cloudName has digits/email pattern, prefer cleanAuth
+    if (!cloudName.includes(' ') && /\d/.test(cloudName)) {
+      return cleanAuth;
+    }
+    // If localName is equal to emailDerived or default, prefer cleanAuth
+    if (!localName || localName === 'Govt Aspirant' || localName === 'Aspirant Rahul' || localName === emailDerived) {
+      return cleanAuth;
+    }
+    return cloudName;
+  }
+
+  // 2. If no authDisplayName, check cloudName
+  if (cloudName && cloudName !== 'Govt Aspirant' && cloudName !== 'Aspirant Rahul') {
+    // Clean up if it was a raw email prefix with digits
+    if (!cloudName.includes(' ') && /\d/.test(cloudName)) {
+      return extractCleanUserName(cloudName, email);
+    }
+    // If cloudName is "Chin Nath" but email does not belong to Chinmoy Nath
+    if (cloudName === 'Chin Nath' && email && !email.toLowerCase().includes('nathchinmoy')) {
+      const prefix = email.split('@')[0].replace(/[._\-+]/g, ' ').replace(/\d+$/, '').trim();
+      return prefix ? prefix.charAt(0).toUpperCase() + prefix.slice(1) : 'Govt Aspirant';
+    }
+    return cloudName;
+  }
+
+  // 3. Check localName
+  if (localName && localName !== 'Govt Aspirant' && localName !== 'Aspirant Rahul') {
+    if (localName === 'Chin Nath' && email && !email.toLowerCase().includes('nathchinmoy')) {
+      return 'Govt Aspirant';
+    }
+    return localName;
+  }
+
+  // 4. Fallback to email derivation or default
+  if (email) {
+    return formatNameFromEmail(email);
+  }
+
+  return 'Govt Aspirant';
+}

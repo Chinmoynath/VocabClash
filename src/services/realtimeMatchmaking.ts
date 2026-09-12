@@ -200,7 +200,7 @@ export class RealtimeMatchmakingManager {
     }
 
     // =========================================================================
-    // 5-SECOND BOT FALLBACK TIMER (Guaranteed max 5.0s human search window)
+    // 6-SECOND BOT FALLBACK TIMER (Active 5-8s human search window)
     // =========================================================================
     this.fallbackTimer = setTimeout(async () => {
       if (this.hasMatched || this.currentState !== 'searching' || this.isPairingInProgress) {
@@ -217,7 +217,7 @@ export class RealtimeMatchmakingManager {
         if (pollRes.ok) {
           const pData = await pollRes.json();
           if (pData && pData.success && pData.matched && pData.roomId && pData.opponent) {
-            console.log('[MATCHMAKING] Match caught in final 5s check!');
+            console.log('[MATCHMAKING] Match caught in final check!');
             this.transitionToMatched({
               roomId: pData.roomId,
               opponent: pData.opponent,
@@ -233,12 +233,12 @@ export class RealtimeMatchmakingManager {
 
       if (this.hasMatched || this.currentState !== 'searching') return;
 
-      // Transition to bot fallback at 5 seconds
-      console.log('[MATCHMAKING] bot fallback started after 5 seconds');
+      // Transition to bot fallback at 6 seconds
+      console.log('[MATCHMAKING] bot fallback started after 6 seconds');
       this.currentState = 'bot_fallback';
       this.cleanup();
       onFallbackToBot();
-    }, 5000);
+    }, 6000);
 
     // =========================================================================
     // CHANNEL 2: FIRESTORE REALTIME SYNC (Authoritative Firestore queue)
@@ -335,7 +335,13 @@ export class RealtimeMatchmakingManager {
               data.status === 'waiting' &&
               (currentTime - (data.heartbeatAt || data.createdAt)) < 15000 // Fresh within 15s
             ) {
-              waitingCandidates.push(data);
+              const matchesCategory =
+                category === 'mixed' ||
+                data.category === 'mixed' ||
+                data.category === category;
+              if (matchesCategory) {
+                waitingCandidates.push(data);
+              }
             }
           }
 

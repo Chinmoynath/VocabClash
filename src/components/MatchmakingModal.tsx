@@ -39,15 +39,16 @@ export const MatchmakingModal: React.FC<MatchmakingModalProps> = ({
   const [isRealOpponent, setIsRealOpponent] = useState<boolean>(false);
   const [matchedQuestions, setMatchedQuestions] = useState<Question[] | undefined>(undefined);
   const [sharedRoomId, setSharedRoomId] = useState<string | undefined>(undefined);
-  const [searchSecondsLeft, setSearchSecondsLeft] = useState<number>(5);
+  const SEARCH_DURATION_SECONDS = 6;
+  const [searchSecondsLeft, setSearchSecondsLeft] = useState<number>(SEARCH_DURATION_SECONDS);
   const [isRetryingOffline, setIsRetryingOffline] = useState<boolean>(false);
 
   const isMatchedRef = useRef<boolean>(false);
 
-  // Active 5s search countdown visual
+  // Active search countdown visual (5-8s window)
   useEffect(() => {
     if (searchStep >= 2 || !network.isOnline) return;
-    setSearchSecondsLeft(5);
+    setSearchSecondsLeft(SEARCH_DURATION_SECONDS);
     const interval = setInterval(() => {
       setSearchSecondsLeft(prev => {
         if (prev <= 1) {
@@ -223,12 +224,12 @@ export const MatchmakingModal: React.FC<MatchmakingModalProps> = ({
                 Finding Live Opponent ({searchSecondsLeft}s)
               </h3>
               <p className="text-xs text-slate-400">
-                Matching Rank: <span className="text-amber-300 font-bold">{player.rankPoints} ± 150 LP</span>
+                Category: <span className="text-amber-300 font-bold capitalize">{category === 'mixed' ? 'Mixed PYQs' : category}</span>
               </p>
               <div className="w-44 h-1.5 bg-slate-800 rounded-full mx-auto overflow-hidden border border-slate-700/50 mt-1">
                 <div 
                   className="h-full bg-gradient-to-r from-amber-500 to-orange-500 rounded-full transition-all duration-1000 ease-linear"
-                  style={{ width: `${Math.max(0, (searchSecondsLeft / 5) * 100)}%` }}
+                  style={{ width: `${Math.max(0, (searchSecondsLeft / SEARCH_DURATION_SECONDS) * 100)}%` }}
                 />
               </div>
             </div>
@@ -249,7 +250,6 @@ export const MatchmakingModal: React.FC<MatchmakingModalProps> = ({
                   {player.avatar}
                 </div>
                 <div className="font-bold text-xs text-slate-100 truncate w-full">{player.name}</div>
-                <div className="text-[10px] text-emerald-400 font-mono font-semibold">{player.rankPoints} LP</div>
                 <div className="text-[9px] text-slate-400 mt-1 line-clamp-1">{player.targetExam}</div>
               </div>
 
@@ -265,7 +265,6 @@ export const MatchmakingModal: React.FC<MatchmakingModalProps> = ({
                     {matchedOpponent.avatar}
                   </div>
                   <div className="font-bold text-xs text-slate-100 truncate w-full">{matchedOpponent.name}</div>
-                  <div className="text-[10px] text-orange-400 font-mono font-semibold">{matchedOpponent.rankPoints} LP</div>
                   <div className="text-[9px] text-slate-400 mt-1 line-clamp-1">{matchedOpponent.targetExam}</div>
                 </div>
               )}
