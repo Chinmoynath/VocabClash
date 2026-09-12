@@ -26,6 +26,7 @@ import {
   DailyTargetState
 } from '../utils/dailyTargetManager';
 import { soundManager } from '../utils/audio';
+import { trackPyqDrillStarted } from '../services/analyticsService';
 
 interface DailyTargetCardProps {
   onStartMatchmaking?: (mode: '1v1_ranked' | 'quick_duel' | 'daily_challenge') => void;
@@ -115,6 +116,10 @@ export const DailyTargetCard: React.FC<DailyTargetCardProps> = ({
   const handleQuickAction = () => {
     soundManager.playTap();
     if (onNavigateTab) {
+      trackPyqDrillStarted({
+        target_exam: 'all',
+        category: 'mixed',
+      });
       onNavigateTab('practice');
     } else if (onStartMatchmaking) {
       onStartMatchmaking('1v1_ranked');

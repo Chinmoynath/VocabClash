@@ -106,7 +106,11 @@ import {
   trackTop100Start, 
   trackTop100Complete,
   normalizeAnalyticsCategory,
-  normalizeAnalyticsExamFamily
+  normalizeAnalyticsExamFamily,
+  trackOneVOneStarted,
+  trackSpeedBlitzStarted,
+  trackDailySprintStarted,
+  trackPlayFriendStarted
 } from './services/analyticsService';
 
 const STORAGE_KEY_PLAYER = 'vocabclash_player_v5';
@@ -1138,6 +1142,22 @@ export default function App() {
       setShowOfflineWarningModal(true);
       return;
     }
+
+    // Benchmark Analytics: Track homepage competitive mode starts
+    const actionParams = {
+      target_exam: selectedExam || player.targetExam || 'all',
+      category: selectedCategory || 'mixed',
+      user_logged_in: !!currentUser,
+    };
+
+    if (mode === '1v1_ranked') {
+      trackOneVOneStarted(actionParams);
+    } else if (mode === 'quick_duel') {
+      trackSpeedBlitzStarted(actionParams);
+    } else if (mode === 'daily_challenge') {
+      trackDailySprintStarted(actionParams);
+    }
+
     setMatchMode(mode);
     const opp = generateMatchedOpponent(player.rankPoints, selectedExam);
     setMatchedOpponent(opp);
@@ -1149,6 +1169,13 @@ export default function App() {
       setShowOfflineWarningModal(true);
       return;
     }
+
+    trackPlayFriendStarted({
+      target_exam: selectedExam || player.targetExam || 'all',
+      category: selectedCategory || 'mixed',
+      user_logged_in: !!currentUser,
+    });
+
     setShowFriendLobbyModal(true);
   };
 
@@ -2450,6 +2477,7 @@ export default function App() {
         <DueRevisionSessionModal
           isOpen={showDueRevisionModal}
           dueWords={dueRevisionWords}
+          targetExam={selectedExam || player.targetExam || 'all'}
           onClose={() => setShowDueRevisionModal(false)}
           onSessionFinished={() => {
             if (typeof window !== 'undefined') {

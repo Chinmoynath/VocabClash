@@ -1,9 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SavedWord, Question } from '../types';
 import { questionReviewScheduler } from '../services/questionReviewScheduler';
 import { recordAttemptEvent } from '../services/attemptTrackingService';
-import { trackDueRevisionStart, trackDueRevisionComplete } from '../services/analyticsService';
+import { 
+  trackDueRevisionStart, 
+  trackDueRevisionComplete,
+  trackRevisionAnswer,
+  trackRevisionCompleted,
+  trackRevisionAbandoned,
+  trackRevisionStarted,
+  trackRevisionRepeat,
+  getRevisionCompletedCount,
+  incrementRevisionCompletedCount
+} from '../services/analyticsService';
 import { soundManager } from '../utils/audio';
 import { resolveRevisionCard, NormalizedMistakeVaultItem } from '../utils/mistakeVaultCardResolver';
 import { 
@@ -25,6 +35,8 @@ import {
 interface DueRevisionSessionModalProps {
   isOpen: boolean;
   dueWords: SavedWord[];
+  weakestCategory?: string | null;
+  targetExam?: string | null;
   onClose: () => void;
   onSessionFinished?: () => void;
 }
@@ -34,6 +46,8 @@ const BATCH_SIZE = 10;
 export const DueRevisionSessionModal: React.FC<DueRevisionSessionModalProps> = ({
   isOpen,
   dueWords,
+  weakestCategory,
+  targetExam,
   onClose,
   onSessionFinished,
 }) => {
@@ -51,6 +65,8 @@ export const DueRevisionSessionModal: React.FC<DueRevisionSessionModalProps> = (
   });
   const [isCompleted, setIsCompleted] = useState<boolean>(false);
   const [cardStartTime, setCardStartTime] = useState<number>(Date.now());
+  const sessionStartTimeRef = useRef<number>(Date.now());
+  const hasTrackedAbandonRef = useRef<boolean>(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -60,6 +76,8 @@ export const DueRevisionSessionModal: React.FC<DueRevisionSessionModalProps> = (
       setIsCompleted(false);
       setSessionResults({ reviewed: 0, strengthened: 0, stillWeak: 0 });
       setCardStartTime(Date.now());
+      sessionStartTimeRef.current = Date.now();
+      hasTrackedAbandonRef.current = false;
       if (dueWords.length > 0) {
         trackDueRevisionStart(Math.min(BATCH_SIZE, dueWords.length));
       }
@@ -72,6 +90,19 @@ export const DueRevisionSessionModal: React.FC<DueRevisionSessionModalProps> = (
   const totalInBatch = currentBatch.length;
   const currentItem = currentBatch[currentIndex];
   const remainingDueCount = Math.max(0, dueWords.length - (batchStartIndex + currentBatch.length));
+
+  const handleCloseOrAbandon = () => {
+    if (!isCompleted && !hasTrackedAbandonRef.current && sessionResults.reviewed < totalInBatch) {
+      hasTrackedAbandonRef.current = true;
+      trackRevisionAbandoned({
+        questions_completed: sessionResults.reviewed,
+        total_questions: totalInBatch,
+        weakest_category: weakestCategory || currentItem?.question.category || 'mixed',
+        target_exam: targetExam || currentItem?.question.examTag || 'all',
+      });
+    }
+    onClose();
+  };
 
   const handleRateCard = (grade: 'again' | 'good' | 'easy') => {
     if (!currentItem) return;
@@ -99,6 +130,14 @@ export const DueRevisionSessionModal: React.FC<DueRevisionSessionModalProps> = (
       responseTimeMs,
     });
 
+    // 3. Track revision_question_answered (Strictly NO PII, NO question text, NO vocabulary word)
+    trackRevisionAnswer({
+      category: currentItem.question.category,
+      is_correct: isCorrect,
+      question_number: currentIndex + 1,
+      target_exam: targetExam || currentItem.question.examTag || 'all',
+    });
+
     const nextReviewed = sessionResults.reviewed + 1;
     const nextStrengthened = sessionResults.strengthened + (isStrengthened ? 1 : 0);
     const nextStillWeak = sessionResults.stillWeak + (!isStrengthened ? 1 : 0);
@@ -118,11 +157,28 @@ export const DueRevisionSessionModal: React.FC<DueRevisionSessionModalProps> = (
       setIsCompleted(true);
       soundManager.playVictory();
       const accuracy = Math.round((nextStrengthened / totalInBatch) * 100);
+      const sessionDurationSeconds = Math.max(1, Math.round((Date.now() - sessionStartTimeRef.current) / 1000));
+
+      // Persist completed session counter
+      incrementRevisionCompletedCount();
+
       trackDueRevisionComplete({
         count: totalInBatch,
         strengthenedCount: nextStrengthened,
         accuracy,
       });
+
+      // Dedicated Funnel: revision_completed
+      trackRevisionCompleted({
+        questions_completed: totalInBatch,
+        correct_answers: nextStrengthened,
+        incorrect_answers: nextStillWeak,
+        accuracy_percentage: accuracy,
+        weakest_category: weakestCategory || currentItem.question.category || 'mixed',
+        target_exam: targetExam || currentItem.question.examTag || 'all',
+        session_duration_seconds: sessionDurationSeconds,
+      });
+
       if (onSessionFinished) {
         onSessionFinished();
       }
@@ -164,7 +220,7 @@ export const DueRevisionSessionModal: React.FC<DueRevisionSessionModalProps> = (
             <button
               onClick={() => {
                 soundManager.playTap();
-                onClose();
+                handleCloseOrAbandon();
               }}
               className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
             >
@@ -348,12 +404,31 @@ export const DueRevisionSessionModal: React.FC<DueRevisionSessionModalProps> = (
                   <button
                     onClick={() => {
                       soundManager.playTap();
+                      const nextBatchSize = Math.min(10, remainingDueCount);
+                      const prevCompleted = getRevisionCompletedCount();
+                      if (prevCompleted > 0) {
+                        trackRevisionRepeat({
+                          previous_revision_completed: prevCompleted,
+                          due_count: remainingDueCount,
+                          weakest_category: weakestCategory || 'mixed',
+                          target_exam: targetExam || 'all',
+                        });
+                      }
+                      trackRevisionStarted({
+                        due_count: remainingDueCount,
+                        weakest_category: weakestCategory || 'mixed',
+                        target_exam: targetExam || 'all',
+                        revision_size: nextBatchSize,
+                      });
+
                       setBatchStartIndex(prev => prev + BATCH_SIZE);
                       setCurrentIndex(0);
                       setIsRevealed(false);
                       setIsCompleted(false);
                       setSessionResults({ reviewed: 0, strengthened: 0, stillWeak: 0 });
                       setCardStartTime(Date.now());
+                      sessionStartTimeRef.current = Date.now();
+                      hasTrackedAbandonRef.current = false;
                     }}
                     className="w-full py-3.5 px-6 rounded-xl bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-bold text-sm uppercase tracking-wide shadow-md cursor-pointer transition-all flex items-center justify-center gap-2"
                   >

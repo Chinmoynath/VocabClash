@@ -1,4 +1,5 @@
 import { initializeApp, getApps } from 'firebase/app';
+import { getAnalytics, isSupported, Analytics } from 'firebase/analytics';
 import { 
   getAuth, 
   initializeAuth,
@@ -46,7 +47,37 @@ try {
 }
 
 // Initialize Firebase App
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+export const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+
+// Safe, asynchronous Firebase Analytics initialization
+let analyticsInstance: Analytics | null = null;
+let analyticsPromise: Promise<Analytics | null> | null = null;
+
+export async function getFirebaseAnalytics(): Promise<Analytics | null> {
+  if (analyticsInstance) return analyticsInstance;
+  if (typeof window === 'undefined') return null;
+  if (analyticsPromise) return analyticsPromise;
+
+  analyticsPromise = (async () => {
+    try {
+      const supported = await isSupported();
+      if (supported) {
+        analyticsInstance = getAnalytics(app);
+        return analyticsInstance;
+      }
+    } catch (err) {
+      console.info('[Firebase Analytics] Analytics not supported in this environment:', err);
+    }
+    return null;
+  })();
+
+  return analyticsPromise;
+}
+
+// Start eager initialization in browser environments
+if (typeof window !== 'undefined') {
+  getFirebaseAnalytics().catch(() => {});
+}
 
 // Standard Firebase Auth instance with browser popup/redirect resolver and multi-tier persistence
 let authInstance: ReturnType<typeof getAuth>;

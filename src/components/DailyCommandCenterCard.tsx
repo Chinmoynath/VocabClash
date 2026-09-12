@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   ChevronRight, 
   CheckCircle2, 
@@ -9,7 +9,15 @@ import {
   getDailyStudySummary, 
   DailyStudySummary, 
 } from '../services/dailyCommandCenterService';
-import { trackNextBestActionView, trackNextBestActionClick } from '../services/analyticsService';
+import { 
+  trackNextBestActionView, 
+  trackNextBestActionClick,
+  trackRevisionCardViewed,
+  trackRevisionStarted,
+  trackRevisionRepeat,
+  getRevisionCompletedCount,
+  trackPyqDrillStarted
+} from '../services/analyticsService';
 import { soundManager } from '../utils/audio';
 import { SscTop100Category } from '../data/sscTop100';
 
@@ -55,12 +63,26 @@ export const DailyCommandCenterCard: React.FC<DailyCommandCenterCardProps> = ({
     };
   }, [player, dailyStreak, savedWords, currentUser]);
 
+  // Ref to de-duplicate revision_card_viewed across React re-renders (at most once per card/session)
+  const hasTrackedRevisionCardViewRef = useRef<boolean>(false);
+
   // Track Next Best Action View in GA4 once per session / action type
   useEffect(() => {
     if (summary.nextBestAction) {
       trackNextBestActionView(summary.nextBestAction.type, summary.nextBestAction.priority);
+
+      // Track personalized revision card view once per session
+      if (summary.nextBestAction.type === 'due_mistakes' && !hasTrackedRevisionCardViewRef.current) {
+        hasTrackedRevisionCardViewRef.current = true;
+        trackRevisionCardViewed({
+          user_logged_in: !!currentUser,
+          due_count: summary.dueSavedWords?.length || summary.dueMistakesCount || 0,
+          weakest_category: summary.weakestCategory || 'mixed',
+          target_exam: player.targetExam || 'all',
+        });
+      }
     }
-  }, [summary.nextBestAction.type]);
+  }, [summary.nextBestAction.type, currentUser, summary.dueMistakesCount, summary.dueSavedWords?.length, summary.weakestCategory, player.targetExam]);
 
   const action = summary.nextBestAction;
 
@@ -69,26 +91,62 @@ export const DailyCommandCenterCard: React.FC<DailyCommandCenterCardProps> = ({
     trackNextBestActionClick(action.type, action.priority);
 
     if (action.type === 'due_mistakes') {
+      const dueCount = summary.dueSavedWords?.length || summary.dueMistakesCount || 0;
+      const weakestCat = summary.weakestCategory || 'mixed';
+      const targetExam = player.targetExam || 'all';
+
+      // Track repeat revision if user has completed a revision session in the past
+      const prevCompletedCount = getRevisionCompletedCount();
+      if (prevCompletedCount > 0) {
+        trackRevisionRepeat({
+          previous_revision_completed: prevCompletedCount,
+          due_count: dueCount,
+          weakest_category: weakestCat,
+          target_exam: targetExam,
+        });
+      }
+
+      // Track revision_started
+      trackRevisionStarted({
+        due_count: dueCount,
+        weakest_category: weakestCat,
+        target_exam: targetExam,
+        revision_size: 10,
+      });
+
       if (summary.dueSavedWords && summary.dueSavedWords.length > 0) {
         onStartDueRevision(summary.dueSavedWords);
       } else {
-        if (onNavigateTab) onNavigateTab('practice');
+        if (onNavigateTab) {
+          trackPyqDrillStarted({ target_exam: targetExam, category: weakestCat, user_logged_in: !!currentUser });
+          onNavigateTab('practice');
+        }
       }
     } else if (action.type === 'resume_top100') {
       if (action.data?.top100Category && onStartSscTop100Drill) {
         onStartSscTop100Drill(action.data.top100Category, (action.data.top100Progress || 1) - 1);
       } else if (onNavigateTab) {
+        trackPyqDrillStarted({ target_exam: player.targetExam || 'all', category: action.data?.top100Category || 'all', user_logged_in: !!currentUser });
         onNavigateTab('practice');
       }
     } else if (action.type === 'daily_goal') {
-      if (onNavigateTab) onNavigateTab('practice');
+      if (onNavigateTab) {
+        trackPyqDrillStarted({ target_exam: player.targetExam || 'all', category: 'mixed', user_logged_in: !!currentUser });
+        onNavigateTab('practice');
+      }
     } else if (action.type === 'weakest_area') {
       if (action.data?.category && onSelectCategory) {
         onSelectCategory(action.data.category);
       }
-      if (onNavigateTab) onNavigateTab('practice');
+      if (onNavigateTab) {
+        trackPyqDrillStarted({ target_exam: player.targetExam || 'all', category: action.data?.category || 'mixed', user_logged_in: !!currentUser });
+        onNavigateTab('practice');
+      }
     } else {
-      if (onNavigateTab) onNavigateTab('practice');
+      if (onNavigateTab) {
+        trackPyqDrillStarted({ target_exam: player.targetExam || 'all', category: 'mixed', user_logged_in: !!currentUser });
+        onNavigateTab('practice');
+      }
     }
   };
 

@@ -10,6 +10,9 @@
  * 4. Development-safe Debugging: Sends `debug_mode: true` when debugging so events stream into GA4 DebugView.
  */
 
+import { logEvent } from 'firebase/analytics';
+import { getFirebaseAnalytics } from './firebaseService';
+
 declare global {
   interface Window {
     dataLayer?: any[];
@@ -129,6 +132,17 @@ export function trackEvent(eventName: string, params?: Record<string, any>): voi
         ...safeParams,
       });
     }
+
+    // Also dispatch to Firebase Analytics SDK when initialized
+    getFirebaseAnalytics().then(analytics => {
+      if (analytics) {
+        try {
+          logEvent(analytics, eventName, safeParams);
+        } catch {
+          // Handled gracefully without interrupting execution
+        }
+      }
+    }).catch(() => {});
   } catch (err) {
     // Analytics failure must never break user experience
     console.warn('[Analytics] trackEvent suppressed error:', err);
@@ -452,5 +466,226 @@ export function trackDueRevisionComplete(params: {
     accuracy: Math.min(100, Math.max(0, Math.round(params.accuracy))),
   });
 }
+
+// ----------------------------------------------------
+// 10-Word Revision / Next Best Action Dedicated Funnel
+// ----------------------------------------------------
+
+const REVISION_COMPLETED_KEY = 'vocabclash_revision_completed_count';
+
+/**
+ * Returns how many revision sessions this user has completed on this device/account
+ */
+export function getRevisionCompletedCount(): number {
+  if (typeof window === 'undefined') return 0;
+  try {
+    return parseInt(localStorage.getItem(REVISION_COMPLETED_KEY) || '0', 10);
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Increments the user's completed revision counter upon completing a 10-word session
+ */
+export function incrementRevisionCompletedCount(): number {
+  if (typeof window === 'undefined') return 1;
+  try {
+    const current = getRevisionCompletedCount();
+    const updated = current + 1;
+    localStorage.setItem(REVISION_COMPLETED_KEY, String(updated));
+    return updated;
+  } catch {
+    return 1;
+  }
+}
+
+/**
+ * 1. revision_card_viewed
+ * Fired when the personalized "Next Best Action / Revise 10 due mistakes" card
+ * is actually shown to the user. De-duplicated to fire at most once per view/card session.
+ */
+export function trackRevisionCardViewed(params: {
+  user_logged_in: boolean;
+  due_count: number;
+  weakest_category?: string | null;
+  target_exam?: string | null;
+}): void {
+  trackEvent('revision_card_viewed', {
+    user_logged_in: Boolean(params.user_logged_in),
+    due_count: Math.max(0, Math.round(params.due_count)),
+    weakest_category: normalizeAnalyticsCategory(params.weakest_category),
+    target_exam: normalizeAnalyticsExamFamily(params.target_exam),
+  });
+}
+
+/**
+ * 2. revision_started
+ * Fired when the user taps "START 10-WORD REVISION".
+ */
+export function trackRevisionStarted(params: {
+  due_count: number;
+  weakest_category?: string | null;
+  target_exam?: string | null;
+  revision_size?: number;
+}): void {
+  trackEvent('revision_started', {
+    due_count: Math.max(0, Math.round(params.due_count)),
+    weakest_category: normalizeAnalyticsCategory(params.weakest_category),
+    target_exam: normalizeAnalyticsExamFamily(params.target_exam),
+    revision_size: Math.max(1, Math.round(params.revision_size ?? 10)),
+  });
+}
+
+/**
+ * 3. revision_question_answered
+ * Fired whenever the user answers a revision question.
+ * Strictly avoids PII, vocabulary words, and question text.
+ */
+export function trackRevisionAnswer(params: {
+  category?: string | null;
+  is_correct: boolean;
+  question_number: number;
+  target_exam?: string | null;
+}): void {
+  trackEvent('revision_question_answered', {
+    category: normalizeAnalyticsCategory(params.category),
+    is_correct: Boolean(params.is_correct),
+    question_number: Math.max(1, Math.round(params.question_number)),
+    target_exam: normalizeAnalyticsExamFamily(params.target_exam),
+  });
+}
+
+/**
+ * 4. revision_completed
+ * Fired when the user finishes the entire 10-word revision session.
+ */
+export function trackRevisionCompleted(params: {
+  questions_completed: number;
+  correct_answers: number;
+  incorrect_answers: number;
+  accuracy_percentage: number;
+  weakest_category?: string | null;
+  target_exam?: string | null;
+  session_duration_seconds: number;
+}): void {
+  trackEvent('revision_completed', {
+    questions_completed: Math.max(0, Math.round(params.questions_completed)),
+    correct_answers: Math.max(0, Math.round(params.correct_answers)),
+    incorrect_answers: Math.max(0, Math.round(params.incorrect_answers)),
+    accuracy_percentage: Math.min(100, Math.max(0, Math.round(params.accuracy_percentage))),
+    weakest_category: normalizeAnalyticsCategory(params.weakest_category),
+    target_exam: normalizeAnalyticsExamFamily(params.target_exam),
+    session_duration_seconds: Math.max(0, Math.round(params.session_duration_seconds)),
+  });
+}
+
+/**
+ * 5. revision_abandoned
+ * Fired when a user starts a revision session but leaves before completing it.
+ */
+export function trackRevisionAbandoned(params: {
+  questions_completed: number;
+  total_questions: number;
+  weakest_category?: string | null;
+  target_exam?: string | null;
+}): void {
+  trackEvent('revision_abandoned', {
+    questions_completed: Math.max(0, Math.round(params.questions_completed)),
+    total_questions: Math.max(1, Math.round(params.total_questions)),
+    weakest_category: normalizeAnalyticsCategory(params.weakest_category),
+    target_exam: normalizeAnalyticsExamFamily(params.target_exam),
+  });
+}
+
+/**
+ * 6. revision_repeat
+ * Fired when a user who has previously completed a revision session starts another
+ * revision session on a later occasion.
+ */
+export function trackRevisionRepeat(params: {
+  previous_revision_completed: number;
+  due_count: number;
+  weakest_category?: string | null;
+  target_exam?: string | null;
+}): void {
+  trackEvent('revision_repeat', {
+    previous_revision_completed: Math.max(1, Math.round(params.previous_revision_completed)),
+    due_count: Math.max(0, Math.round(params.due_count)),
+    weakest_category: normalizeAnalyticsCategory(params.weakest_category),
+    target_exam: normalizeAnalyticsExamFamily(params.target_exam),
+  });
+}
+
+// ----------------------------------------------------
+// Main Homepage Action Events (For Funnel Cannibalization Analysis)
+// ----------------------------------------------------
+
+export interface HomepageActionParams {
+  target_exam?: string | null;
+  category?: string | null;
+  user_logged_in?: boolean;
+}
+
+/**
+ * pyq_drill_started
+ * Fired when a PYQ Drill session is started.
+ */
+export function trackPyqDrillStarted(params: HomepageActionParams): void {
+  trackEvent('pyq_drill_started', {
+    target_exam: normalizeAnalyticsExamFamily(params.target_exam),
+    category: normalizeAnalyticsCategory(params.category),
+    user_logged_in: Boolean(params.user_logged_in),
+  });
+}
+
+/**
+ * one_v_one_started
+ * Fired when 1v1 ranked or online matchmaking is initiated.
+ */
+export function trackOneVOneStarted(params: HomepageActionParams): void {
+  trackEvent('one_v_one_started', {
+    target_exam: normalizeAnalyticsExamFamily(params.target_exam),
+    category: normalizeAnalyticsCategory(params.category),
+    user_logged_in: Boolean(params.user_logged_in),
+  });
+}
+
+/**
+ * speed_blitz_started
+ * Fired when Speed Blitz (10-question instant queue) is started.
+ */
+export function trackSpeedBlitzStarted(params: HomepageActionParams): void {
+  trackEvent('speed_blitz_started', {
+    target_exam: normalizeAnalyticsExamFamily(params.target_exam),
+    category: normalizeAnalyticsCategory(params.category),
+    user_logged_in: Boolean(params.user_logged_in),
+  });
+}
+
+/**
+ * daily_sprint_started
+ * Fired when 20-question Daily Sprint is started.
+ */
+export function trackDailySprintStarted(params: HomepageActionParams): void {
+  trackEvent('daily_sprint_started', {
+    target_exam: normalizeAnalyticsExamFamily(params.target_exam),
+    category: normalizeAnalyticsCategory(params.category),
+    user_logged_in: Boolean(params.user_logged_in),
+  });
+}
+
+/**
+ * play_friend_started
+ * Fired when Play Friend / Custom Lobby flow is started from homepage.
+ */
+export function trackPlayFriendStarted(params: HomepageActionParams): void {
+  trackEvent('play_friend_started', {
+    target_exam: normalizeAnalyticsExamFamily(params.target_exam),
+    category: normalizeAnalyticsCategory(params.category),
+    user_logged_in: Boolean(params.user_logged_in),
+  });
+}
+
 
 

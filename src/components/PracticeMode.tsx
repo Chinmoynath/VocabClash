@@ -61,7 +61,8 @@ import {
   trackGuestPyqSignupPromptView, 
   trackGuestPyqSignupPromptClose, 
   trackGuestPyqSignupClick,
-  trackGuestSignupComplete
+  trackGuestSignupComplete,
+  trackPyqDrillStarted
 } from '../services/analyticsService';
 import { User as FirebaseUser } from 'firebase/auth';
 import { GuestConversionModal } from './GuestConversionModal';
@@ -683,6 +684,13 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
         category: currentAnalyticsCat,
         exam_family: currentAnalyticsExam,
       });
+      if (currentPracticeType === 'pyq_drill') {
+        trackPyqDrillStarted({
+          target_exam: currentAnalyticsExam,
+          category: currentAnalyticsCat,
+          user_logged_in: !!currentUser,
+        });
+      }
     }
 
     // 2. GA4: question_answered (fired for every submitted answer with non-PII metadata)
