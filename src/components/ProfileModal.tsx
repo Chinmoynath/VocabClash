@@ -108,7 +108,6 @@ interface ProfileModalProps {
   onOpenStats?: () => void;
   onOpenTour?: () => void;
   onOpenEditProfile?: () => void;
-  onOpenBattleAnalytics?: () => void;
   onUserChange?: (user: FirebaseUser | null) => void;
   onManualSync?: () => void;
   onSignOut?: () => Promise<void>;
@@ -129,7 +128,6 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   onOpenStats,
   onOpenTour,
   onOpenEditProfile,
-  onOpenBattleAnalytics,
   onUserChange,
   onManualSync,
   onSignOut,
@@ -680,45 +678,24 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
             </button>
           )}
 
-          {/* Admin Tools (Admin UID/Email Only) */}
+          {/* Admin PYQ Ingestion Pipeline Link (Admin UID/Email Only) */}
           {(currentUser?.email === 'Nathchinmoy777@gmail.com' || (currentUser?.email && currentUser.email.toLowerCase().includes('admin'))) && (
-            <div className="space-y-1.5 pt-1">
-              <button
-                onClick={() => {
-                  soundManager.playTap();
-                  if (onOpenBattleAnalytics) {
-                    onOpenBattleAnalytics();
-                  } else if (typeof window !== 'undefined') {
-                    window.location.hash = 'admin-analytics';
-                  }
-                  onClose();
-                }}
-                className="w-full py-2.5 px-3 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/40 rounded-xl text-emerald-300 text-xs font-bold flex items-center justify-between transition shadow-sm cursor-pointer"
-              >
-                <div className="flex items-center gap-2">
-                  <span>📊</span>
-                  <span>1v1 Battle Analytics & Funnel</span>
-                </div>
-                <span className="text-[10px] bg-emerald-500/20 px-2 py-0.5 rounded font-mono">Open Metrics →</span>
-              </button>
-
-              <button
-                onClick={() => {
-                  soundManager.playTap();
-                  if (typeof window !== 'undefined') {
-                    window.location.hash = 'admin-pyq';
-                  }
-                  onClose();
-                }}
-                className="w-full py-2.5 px-3 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/40 rounded-xl text-amber-300 text-xs font-bold flex items-center justify-between transition shadow-sm cursor-pointer"
-              >
-                <div className="flex items-center gap-2">
-                  <span>📁</span>
-                  <span>Admin PYQ PDF Importer</span>
-                </div>
-                <span className="text-[10px] bg-amber-500/20 px-2 py-0.5 rounded font-mono">Open Portal →</span>
-              </button>
-            </div>
+            <button
+              onClick={() => {
+                soundManager.playTap();
+                if (typeof window !== 'undefined') {
+                  window.location.hash = 'admin-pyq';
+                }
+                onClose();
+              }}
+              className="w-full py-2.5 px-3 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/40 rounded-xl text-amber-300 text-xs font-bold flex items-center justify-between transition shadow-sm"
+            >
+              <div className="flex items-center gap-2">
+                <span>📁</span>
+                <span>Admin PYQ PDF Importer</span>
+              </div>
+              <span className="text-[10px] bg-amber-500/20 px-2 py-0.5 rounded font-mono">Open Portal →</span>
+            </button>
           )}
 
           {onResetStats && !isEditing && (

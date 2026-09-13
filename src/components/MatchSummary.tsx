@@ -54,10 +54,6 @@ import {
   trackGuestReviewSignupPromptClose, 
   trackGuestReviewSignupClick 
 } from '../services/analyticsService';
-import { 
-  recordBattleSignupPromptView, 
-  recordBattleSignupCompleted 
-} from '../services/battleAnalyticsService';
 
 interface MatchSummaryProps {
   player: PlayerProfile;
@@ -611,7 +607,6 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
     setShowGuestReviewModal(true);
     try {
       trackGuestReviewSignupPromptView();
-      recordBattleSignupPromptView(matchState.matchId, 'match_summary');
     } catch {}
   };
 
@@ -625,9 +620,6 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
   };
 
   const handleGuestReviewModalSuccess = (user: FirebaseUser) => {
-    try {
-      recordBattleSignupCompleted(user.uid, user.providerData?.[0]?.providerId || 'google');
-    } catch {}
     if (onUserChange) {
       onUserChange(user);
     }

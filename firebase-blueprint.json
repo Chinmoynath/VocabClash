@@ -258,49 +258,9 @@
         "createdAt": { "type": "number", "description": "Creation timestamp in ms" }
       },
       "required": ["matchId", "player1Uid", "player2Uid", "status", "createdAt"]
-    },
-    "BattleAnalyticsSummary": {
-      "title": "BattleAnalyticsSummary",
-      "description": "Global and daily aggregate analytics for 1v1 battle match starts, completions, mid-match dropoffs, and post-match signups",
-      "type": "object",
-      "properties": {
-        "totalMatchesStarted": { "type": "number" },
-        "totalMatchesCompleted": { "type": "number" },
-        "totalMatchesAbandoned": { "type": "number" },
-        "guestMatchesStarted": { "type": "number" },
-        "authMatchesStarted": { "type": "number" },
-        "guestMatchesCompleted": { "type": "number" },
-        "authMatchesCompleted": { "type": "number" },
-        "postMatchSignupPromptsShown": { "type": "number" },
-        "postMatchSignupsCompleted": { "type": "number" },
-        "lastUpdated": { "type": "number" }
-      }
-    },
-    "BattleAnalyticsEvent": {
-      "title": "BattleAnalyticsEvent",
-      "description": "Granular 1v1 battle lifecycle events for real-time analytics stream",
-      "type": "object",
-      "properties": {
-        "id": { "type": "string" },
-        "type": { "type": "string" },
-        "matchId": { "type": "string" },
-        "timestamp": { "type": "number" },
-        "mode": { "type": "string" },
-        "isGuest": { "type": "boolean" },
-        "questionsAnswered": { "type": "number" }
-      },
-      "required": ["id", "type", "matchId", "timestamp"]
     }
   },
   "firestore": {
-    "/battle_analytics/{docId}": {
-      "schema": "BattleAnalyticsSummary",
-      "description": "Global aggregate and daily breakdown records for 1v1 battle completions, dropoffs, and post-match signups"
-    },
-    "/battle_analytics_events/{eventId}": {
-      "schema": "BattleAnalyticsEvent",
-      "description": "Recent 1v1 battle events for real-time stream"
-    },
     "/matches/{matchId}": {
       "schema": "MatchRecord",
       "description": "Authoritative match records between two paired players"

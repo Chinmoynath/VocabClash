@@ -414,76 +414,8 @@ export function trackGuestReviewSignupClick(): void {
   trackEvent('guest_review_signup_click');
 }
 
-export function trackGuestSignupComplete(source?: 'pyq' | 'battle_review' | 'battle_1v1'): void {
+export function trackGuestSignupComplete(source?: 'pyq' | 'battle_review'): void {
   trackEvent('guest_signup_complete', { source: source || 'unknown' });
-}
-
-/**
- * 1v1 Battle Arena Analytics & Funnel Tracking
- */
-export function trackBattle1v1Start(params: {
-  mode: string;
-  is_guest: boolean;
-  is_real_opponent: boolean;
-  round_count: number;
-  category?: string;
-  exam?: string;
-}): void {
-  trackEvent('battle_1v1_start', {
-    battle_mode: params.mode,
-    is_guest: params.is_guest,
-    is_real_opponent: params.is_real_opponent,
-    round_count: params.round_count,
-    category: params.category || 'mixed',
-    exam_family: params.exam || 'all',
-  });
-}
-
-export function trackBattle1v1Complete(params: {
-  mode: string;
-  is_guest: boolean;
-  outcome: 'win' | 'loss' | 'draw';
-  questions_answered: number;
-  duration_sec: number;
-  player_score: number;
-  opponent_score: number;
-}): void {
-  trackEvent('battle_1v1_complete', {
-    battle_mode: params.mode,
-    is_guest: params.is_guest,
-    outcome: params.outcome,
-    questions_answered: params.questions_answered,
-    duration_sec: params.duration_sec,
-    player_score: params.player_score,
-    opponent_score: params.opponent_score,
-  });
-}
-
-export function trackBattle1v1Abandoned(params: {
-  mode: string;
-  is_guest: boolean;
-  reason: string;
-  dropoff_question_index: number;
-  questions_answered: number;
-}): void {
-  trackEvent('battle_1v1_abandoned', {
-    battle_mode: params.mode,
-    is_guest: params.is_guest,
-    abandon_reason: params.reason,
-    dropoff_index: params.dropoff_question_index,
-    questions_answered: params.questions_answered,
-  });
-}
-
-export function trackBattle1v1PostMatchSignup(params: {
-  time_after_match_sec?: number;
-  auth_provider?: string;
-  match_id?: string;
-}): void {
-  trackEvent('battle_1v1_post_match_signup', {
-    time_after_match_sec: params.time_after_match_sec || 0,
-    auth_provider: params.auth_provider || 'google',
-  });
 }
 
 /**

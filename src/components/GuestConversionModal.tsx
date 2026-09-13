@@ -25,10 +25,6 @@ import {
   getFriendlyAuthErrorMessage 
 } from '../services/firebaseService';
 import { soundManager } from '../utils/audio';
-import { 
-  recordBattleSignupPromptView, 
-  recordBattleSignupCompleted 
-} from '../services/battleAnalyticsService';
 
 export interface GuestConversionModalProps {
   isOpen: boolean;
@@ -78,11 +74,8 @@ export const GuestConversionModal: React.FC<GuestConversionModalProps> = ({
       setEmailInput('');
       setPasswordInput('');
       setShowPassword(false);
-      if (variant === 'battle_review') {
-        recordBattleSignupPromptView(undefined, 'guest_modal');
-      }
     }
-  }, [isOpen, variant]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -102,7 +95,6 @@ export const GuestConversionModal: React.FC<GuestConversionModalProps> = ({
       const user = await signInWithGoogle(forceRedirect);
       if (user) {
         soundManager.playVictory();
-        recordBattleSignupCompleted(user.uid, 'google');
         onSuccess(user);
       }
     } catch (err: any) {
@@ -169,7 +161,6 @@ export const GuestConversionModal: React.FC<GuestConversionModalProps> = ({
 
       if (user) {
         soundManager.playVictory();
-        recordBattleSignupCompleted(user.uid, 'email');
         onSuccess(user);
       }
     } catch (err: any) {

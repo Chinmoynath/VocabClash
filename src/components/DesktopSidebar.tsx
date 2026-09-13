@@ -39,7 +39,6 @@ interface DesktopSidebarProps {
   isAdmin?: boolean;
   onOpenAdminArticles?: () => void;
   onOpenAdminImporter?: () => void;
-  onOpenBattleAnalytics?: () => void;
 }
 
 export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
@@ -60,7 +59,6 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
   isAdmin = false,
   onOpenAdminArticles,
   onOpenAdminImporter,
-  onOpenBattleAnalytics,
 }) => {
   const navItems = [
     {
@@ -279,31 +277,17 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
               <span>Admin Studio</span>
               <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" />
             </div>
-            <div className="grid grid-cols-3 gap-1 pt-0.5">
-              {onOpenBattleAnalytics && (
-                <button
-                  onClick={() => {
-                    soundManager.playTap();
-                    onOpenBattleAnalytics();
-                  }}
-                  className="px-1.5 py-1.5 rounded-lg bg-emerald-900/50 hover:bg-emerald-800 text-emerald-200 text-[10px] font-bold transition flex flex-col items-center justify-center gap-0.5 border border-emerald-500/40"
-                  title="Open 1v1 Battle Analytics & Funnels"
-                >
-                  <span>📊</span>
-                  <span className="truncate">1v1 Stats</span>
-                </button>
-              )}
+            <div className="grid grid-cols-2 gap-1.5 pt-0.5">
               {onOpenAdminArticles && (
                 <button
                   onClick={() => {
                     soundManager.playTap();
                     onOpenAdminArticles();
                   }}
-                  className="px-1.5 py-1.5 rounded-lg bg-purple-900/60 hover:bg-purple-800 text-purple-200 text-[10px] font-bold transition flex flex-col items-center justify-center gap-0.5 border border-purple-500/40"
+                  className="px-2 py-1.5 rounded-lg bg-purple-900/60 hover:bg-purple-800 text-purple-200 text-[11px] font-bold transition flex items-center justify-center gap-1 border border-purple-500/40"
                   title="Open Article Publishing Studio"
                 >
-                  <span>✍️</span>
-                  <span className="truncate">Articles</span>
+                  <span>✍️</span> Articles
                 </button>
               )}
               {onOpenAdminImporter && (
@@ -312,11 +296,10 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
                     soundManager.playTap();
                     onOpenAdminImporter();
                   }}
-                  className="px-1.5 py-1.5 rounded-lg bg-amber-900/40 hover:bg-amber-800/60 text-amber-300 text-[10px] font-bold transition flex flex-col items-center justify-center gap-0.5 border border-amber-500/40"
+                  className="px-2 py-1.5 rounded-lg bg-amber-900/40 hover:bg-amber-800/60 text-amber-300 text-[11px] font-bold transition flex items-center justify-center gap-1 border border-amber-500/40"
                   title="Open PYQ Importer"
                 >
-                  <span>📁</span>
-                  <span className="truncate">PYQ PDF</span>
+                  <span>📁</span> PYQ
                 </button>
               )}
             </div>

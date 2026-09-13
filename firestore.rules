@@ -303,17 +303,5 @@ service cloud.firestore {
       allow read: if true;
       allow create, update, delete: if isPyqAdmin();
     }
-
-    // 12. 1v1 Battle Analytics & Funnel Tracking
-    match /battle_analytics/{docId} {
-      allow read: if true;
-      allow create, update: if true;
-      allow delete: if isPyqAdmin();
-    }
-    match /battle_analytics_events/{eventId} {
-      allow read: if isPyqAdmin();
-      allow create: if true;
-      allow update, delete: if isPyqAdmin();
-    }
   }
 }

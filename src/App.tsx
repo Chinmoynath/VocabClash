@@ -102,13 +102,6 @@ import { PublicArticlesIndex } from './components/public/PublicArticlesIndex';
 import { PublicArticleDetail } from './components/public/PublicArticleDetail';
 import { Article } from './types/article';
 import { isUserAdmin } from './services/pyqFirestoreService';
-import { BattleAnalyticsDashboard } from './components/admin/BattleAnalyticsDashboard';
-import { 
-  recordBattleStarted, 
-  recordBattleCompleted, 
-  recordBattleAbandoned, 
-  recordBattleSignupCompleted 
-} from './services/battleAnalyticsService';
 import { 
   trackPageView, 
   trackPracticeStart, 
@@ -581,23 +574,6 @@ export default function App() {
   const [matchedOpponent, setMatchedOpponent] = useState<PlayerProfile | null>(null);
   const [matchState, setMatchState] = useState<MatchState | null>(null);
   const [isMatchCompleted, setIsMatchCompleted] = useState<boolean>(false);
-  const matchStartTimeRef = useRef<number>(0);
-
-  // 1v1 Battle Analytics & Funnel Dashboard
-  const [showBattleAnalytics, setShowBattleAnalytics] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      const p = window.location.pathname.toLowerCase();
-      const h = window.location.hash.toLowerCase();
-      return (
-        p.includes('/admin/analytics') ||
-        p.includes('/admin/battle-analytics') ||
-        h.includes('admin-analytics') ||
-        h.includes('admin-battle-analytics') ||
-        window.location.search.includes('admin=analytics')
-      );
-    }
-    return false;
-  });
 
   // Modals
   const [activeAiQuestion, setActiveAiQuestion] = useState<Question | null>(null);
@@ -693,23 +669,6 @@ export default function App() {
     if (typeof window === 'undefined') return;
     const handleHashOrPopState = () => {
       const rawPath = window.location.pathname.toLowerCase();
-
-      // 0. Admin 1v1 Battle Analytics Route (/admin/analytics, /admin/battle-analytics, #admin-analytics)
-      const isAnalyticsRoute = 
-        rawPath.includes('/admin/analytics') ||
-        rawPath.includes('/admin/battle-analytics') ||
-        window.location.hash.includes('admin-analytics') ||
-        window.location.hash.includes('admin-battle-analytics') ||
-        window.location.search.includes('admin=analytics');
-      setShowBattleAnalytics(isAnalyticsRoute);
-      if (isAnalyticsRoute) {
-        setShowAdminArticles(false);
-        setShowAdminImporter(false);
-        setIsViewingArticlesIndex(false);
-        setActiveArticleSlug(null);
-        setActiveSeoSlug(null);
-        return;
-      }
 
       // 1. Admin Articles Route (/admin/articles)
       if (rawPath === '/admin/articles' || rawPath === '/admin/articles/' || window.location.hash.includes('admin-articles')) {
@@ -879,32 +838,6 @@ export default function App() {
     }
   }, []);
 
-  // Track window/tab close during active match as match abandonment
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const handleBeforeUnload = () => {
-      if (matchState && !isMatchCompleted) {
-        try {
-          recordBattleAbandoned({
-            matchId: matchState.matchId,
-            mode: (matchState.mode as any) || '1v1_ranked',
-            isGuest: !currentUser,
-            isRealPlayer: Boolean(matchState.isRealPlayer),
-            roundCount: matchState.questions.length,
-            currentQuestionIndex: matchState.currentQuestionIndex,
-            questionsAnswered: matchState.playerAnswers.length,
-            reason: 'window_close',
-            userId: currentUser?.uid,
-          });
-        } catch {}
-      }
-    };
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-    };
-  }, [matchState, isMatchCompleted, currentUser]);
-
   // Listen to Firebase Auth state & sync with Google Account
   const [sessionLoaded, setSessionLoaded] = useState<boolean>(false);
 
@@ -919,9 +852,6 @@ export default function App() {
         previousUserUidRef.current = user.uid;
         setCurrentUser(user);
         questionReviewScheduler.setAuthUser(user.uid);
-        try {
-          recordBattleSignupCompleted(user.uid, user.providerData?.[0]?.providerId || 'google');
-        } catch {}
         hydrateStatsFromCloud(user.uid).catch(e => console.warn('Hydrate stats error:', e));
         setIsSyncing(true);
         try {
@@ -1352,22 +1282,6 @@ export default function App() {
     setIsMatchmaking(false);
     setIsMatchCompleted(false);
 
-    const matchStartTime = Date.now();
-    matchStartTimeRef.current = matchStartTime;
-
-    try {
-      recordBattleStarted({
-        matchId: newMatch.matchId,
-        mode: matchMode,
-        isGuest: !currentUser,
-        isRealPlayer,
-        roundCount: questions.length,
-        userId: currentUser?.uid,
-        category: selectedCategory,
-        exam: selectedExam,
-      });
-    } catch {}
-
     // GA4: practice_start for 1v1 Arena match
     trackPracticeStart({
       practice_type: '1v1',
@@ -1527,27 +1441,8 @@ export default function App() {
 
     setIsMatchCompleted(true);
 
+    // GA4: practice_complete for 1v1 Arena duel
     if (matchState) {
-      const durationSec = Math.max(
-        1,
-        Math.round((Date.now() - (matchStartTimeRef.current || matchState.questionStartTime || Date.now())) / 1000)
-      );
-      try {
-        recordBattleCompleted({
-          matchId: matchState.matchId,
-          mode: (matchState.mode as any) || '1v1_ranked',
-          isGuest: !currentUser,
-          isRealPlayer: Boolean(matchState.isRealPlayer),
-          roundCount: matchState.questions?.length || 5,
-          questionsAnswered: matchState.playerAnswers?.length || 5,
-          durationSec,
-          outcome: isWinner ? 'win' : isDraw ? 'draw' : 'loss',
-          playerScore: finalPlayerScore,
-          opponentScore: finalOpponentScore,
-          userId: currentUser?.uid,
-        });
-      } catch {}
-
       const totalAns = matchState.playerAnswers.length;
       const correctAns = matchState.playerAnswers.filter(a => a.isCorrect).length;
       const accuracy = Math.round((correctAns / Math.max(1, totalAns)) * 100);
@@ -1659,20 +1554,6 @@ export default function App() {
 
     // If leaving an active match in progress, penalize with -15 LP and reset win streak
     if (matchState && !isMatchCompleted) {
-      try {
-        recordBattleAbandoned({
-          matchId: matchState.matchId,
-          mode: (matchState.mode as any) || '1v1_ranked',
-          isGuest: !currentUser,
-          isRealPlayer: Boolean(matchState.isRealPlayer),
-          roundCount: matchState.questions.length,
-          currentQuestionIndex: matchState.currentQuestionIndex,
-          questionsAnswered: matchState.playerAnswers.length,
-          reason: 'forfeit',
-          userId: currentUser?.uid,
-        });
-      } catch {}
-
       const forfeitPenalty = -15;
       const newLP = Math.max(0, player.rankPoints + forfeitPenalty);
       const newTier = getTierFromLP(newLP);
@@ -2098,13 +1979,6 @@ export default function App() {
             setShowTourModal(true);
           }}
           isAdmin={(currentUser?.email?.toLowerCase() === 'nathchinmoy777@gmail.com' || (currentUser?.email && currentUser.email.toLowerCase().includes('admin')))}
-          onOpenBattleAnalytics={() => {
-            soundManager.playTap();
-            setShowBattleAnalytics(true);
-            if (typeof window !== 'undefined') {
-              window.history.pushState(null, '', '/admin/analytics');
-            }
-          }}
           onOpenAdminArticles={() => {
             soundManager.playTap();
             setShowAdminArticles(true);
@@ -2487,13 +2361,6 @@ export default function App() {
             setShowProfileModal(false);
             setShowTourModal(true);
           }}
-          onOpenBattleAnalytics={() => {
-            setShowProfileModal(false);
-            setShowBattleAnalytics(true);
-            if (typeof window !== 'undefined') {
-              window.history.pushState(null, '', '/admin/analytics');
-            }
-          }}
           onOpenEditProfile={() => {
             setShowProfileModal(false);
             setEditProfileReturnToProfile(true);
@@ -2656,30 +2523,7 @@ export default function App() {
               window.history.pushState(null, '', '/admin/articles');
             }
           }}
-          onOpenAnalytics={() => {
-            setShowAdminImporter(false);
-            setShowBattleAnalytics(true);
-            if (typeof window !== 'undefined') {
-              window.history.pushState(null, '', '/admin/analytics');
-            }
-          }}
         />
-      )}
-
-      {/* 1v1 Battle Analytics & Funnel Dashboard Modal */}
-      {showBattleAnalytics && (
-        <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md overflow-y-auto flex items-start justify-center p-2 sm:p-6 animate-in fade-in duration-200">
-          <div className="w-full max-w-6xl bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl my-4">
-            <BattleAnalyticsDashboard 
-              onClose={() => {
-                setShowBattleAnalytics(false);
-                if (typeof window !== 'undefined' && (window.location.pathname.includes('/admin/analytics') || window.location.hash.includes('admin-analytics'))) {
-                  window.history.pushState(null, '', '/');
-                }
-              }}
-            />
-          </div>
-        </div>
       )}
 
       {/* SSC Vocab Guides & PYQ Hub Modal */}

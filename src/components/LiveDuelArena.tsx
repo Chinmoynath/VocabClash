@@ -22,7 +22,6 @@ import {
 import { soundManager } from '../utils/audio';
 import { formatRepeatCount } from '../utils/questionFingerprint';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
-import { recordBattleAbandoned } from '../services/battleAnalyticsService';
 import { 
   Zap, 
   Clock, 
@@ -306,20 +305,6 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
 
     const pScore = currentLiveScoresRef.current.playerScore;
     const oScore = currentLiveScoresRef.current.opponentScore;
-
-    try {
-      recordBattleAbandoned({
-        matchId: matchState.matchId,
-        mode: (matchState.mode as any) || '1v1_ranked',
-        isGuest: !player.id || player.id.startsWith('guest_') || player.id === 'user-live-1',
-        isRealPlayer: Boolean(isRealMatch),
-        roundCount: matchState.questions.length,
-        currentQuestionIndex: currentQIndex,
-        questionsAnswered: currentQIndex,
-        reason: 'disconnect',
-        userId: player.id,
-      });
-    } catch {}
 
     if (isRealMatch && roomId) {
       forfeitLiveRoom(roomId, myPlayerId).catch(() => {});
