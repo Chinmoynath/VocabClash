@@ -32,7 +32,8 @@ import {
   Calendar,
   Tag,
   Tv,
-  FileText
+  FileText,
+  Swords
 } from 'lucide-react';
 import { ADS_ENABLED, ADSENSE_CLIENT_ID, ADSENSE_BANNER_SLOT, ADSENSE_INTERSTITIAL_SLOT } from '../services/adSenseService';
 import { ExtractedQuestion, ImportBatch, ReviewStatus } from '../types/pyqImport';
@@ -66,9 +67,10 @@ interface AdminPyqImporterProps {
   userEmail?: string | null;
   onClose: () => void;
   onOpenArticles?: () => void;
+  onOpenAnalytics?: () => void;
 }
 
-export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, onClose, onOpenArticles }) => {
+export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, onClose, onOpenArticles, onOpenAnalytics }) => {
   const isAdmin = isUserAdmin(userEmail) || (typeof window !== 'undefined' && window.location.hostname === 'localhost');
 
   // Navigation mode
@@ -856,6 +858,17 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
               >
                 <FileText className="w-3.5 h-3.5" />
                 Articles / Blog CMS
+              </button>
+            )}
+
+            {onOpenAnalytics && (
+              <button
+                onClick={onOpenAnalytics}
+                className="px-3 py-1.5 bg-gradient-to-r from-rose-500 to-indigo-600 text-white hover:brightness-110 font-bold text-xs rounded-xl flex items-center gap-1.5 transition shadow-md shadow-rose-950/40 shrink-0 whitespace-nowrap"
+                title="Open 1v1 Battle Analytics & Funnel Tracking"
+              >
+                <Swords className="w-3.5 h-3.5" />
+                1v1 Analytics
               </button>
             )}
 
