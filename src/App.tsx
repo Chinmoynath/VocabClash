@@ -609,7 +609,32 @@ export default function App() {
   const [showAdModal, setShowAdModal] = useState<boolean>(false);
   const [showStreakModal, setShowStreakModal] = useState<boolean>(false);
   const [showStatsModal, setShowStatsModal] = useState<boolean>(false);
-  const [showTourModal, setShowTourModal] = useState<boolean>(false);
+  const [showTourModal, setShowTourModal] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const rawPath = window.location.pathname.toLowerCase();
+        const rawHash = window.location.hash.toLowerCase();
+        // Skip onboarding modal on admin or direct deep link routes
+        if (
+          rawPath.startsWith('/admin') ||
+          rawPath.startsWith('/articles') ||
+          rawHash.includes('admin-') ||
+          rawPath.includes('/pyq-drill') ||
+          rawPath.includes('/mistake-vault') ||
+          rawPath.includes('/ranks') ||
+          rawPath.includes('/ai-coach') ||
+          window.location.search.includes('admin=')
+        ) {
+          return false;
+        }
+        const tourSeen = localStorage.getItem('vocabclash_onboarding_seen_v1');
+        return !tourSeen;
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  });
   const [showPlayModeModal, setShowPlayModeModal] = useState<boolean>(false);
   const [showFriendLobbyModal, setShowFriendLobbyModal] = useState<boolean>(false);
   const [showOfflineWarningModal, setShowOfflineWarningModal] = useState<boolean>(false);
@@ -864,15 +889,20 @@ export default function App() {
     }
   }, []);
 
-  // Auto-trigger onboarding tour for first-time visitors
+  // Auto-trigger onboarding tour for first-time visitors (State is initialized synchronously on first mount)
   useEffect(() => {
     try {
       const tourSeen = localStorage.getItem('vocabclash_onboarding_seen_v1');
       if (!tourSeen) {
-        const timer = setTimeout(() => {
+        const rawPath = window.location.pathname.toLowerCase();
+        const rawHash = window.location.hash.toLowerCase();
+        if (
+          !rawPath.startsWith('/admin') &&
+          !rawPath.startsWith('/articles') &&
+          !rawHash.includes('admin-')
+        ) {
           setShowTourModal(true);
-        }, 500);
-        return () => clearTimeout(timer);
+        }
       }
     } catch {
       // ignore localStorage errors

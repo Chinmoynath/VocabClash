@@ -15,6 +15,7 @@ interface TopBarProps {
   onOpenStreak: () => void;
   onOpenStats?: () => void;
   onOpenTour?: () => void;
+  onOpenBattleAnalytics?: () => void;
   onOpenAdminImporter?: () => void;
   onOpenAdminArticles?: () => void;
   isAdmin?: boolean;
@@ -30,6 +31,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenPremium,
   onOpenStreak,
   onOpenStats,
+  onOpenBattleAnalytics,
   onOpenAdminImporter,
   onOpenAdminArticles,
   isAdmin = false,
