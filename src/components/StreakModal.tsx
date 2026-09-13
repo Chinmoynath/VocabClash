@@ -43,15 +43,27 @@ export const StreakModal: React.FC<StreakModalProps> = ({
 
   const isBonusClaimed = claimedBonus || isBonusAlreadyClaimed;
 
-  // Calculate 7-day recent status window
+  // Calculate 7-day recent status window matching currentStreak
   const last7Days = Array.from({ length: 7 }, (_, i) => {
-    const offset = 6 - i;
+    const offset = 6 - i; // 6 (6 days ago), 5, 4, 3, 2, 1 (yesterday), 0 (today)
     const d = new Date();
     d.setDate(d.getDate() - offset);
     const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     const dayName = d.toLocaleDateString('en-US', { weekday: 'short' });
     const isToday = offset === 0;
-    const isActive = !!streak.history[dateStr];
+
+    // A day is active in the current streak if:
+    // 1) When solved today: the last `currentStreak` consecutive days (offsets 0 to currentStreak - 1)
+    // 2) When not yet solved today: the last `currentStreak` consecutive days ending yesterday (offsets 1 to currentStreak)
+    let isActive = false;
+    if (streak.currentStreak > 0) {
+      if (isSolvedToday) {
+        isActive = offset >= 0 && offset < streak.currentStreak;
+      } else {
+        isActive = offset >= 1 && offset <= streak.currentStreak;
+      }
+    }
+
     return {
       dateStr,
       dayName,
