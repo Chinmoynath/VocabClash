@@ -144,30 +144,19 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ player, isPrem
     return mergedLeaderboard.slice(start, end);
   }, [mergedLeaderboard, myIndex]);
 
-  // 8. Next Higher LP target calculation
+  // 8. Next Higher LP target calculation (one rank directly above the current user)
   const nextTargetInfo = useMemo(() => {
-    if (myIndex <= 0) return null;
+    if (myIndex <= 0 || !mergedLeaderboard[myIndex - 1]) return null;
     
-    let nextHigher: LeaderboardUser | null = null;
-    for (let i = myIndex - 1; i >= 0; i--) {
-      if (mergedLeaderboard[i].rankPoints > player.rankPoints) {
-        nextHigher = mergedLeaderboard[i];
-        break;
-      }
-    }
-
-    if (!nextHigher) {
-      return {
-        lpNeeded: 10,
-        targetRank: Math.max(1, userRank - 1),
-      };
-    }
+    const playerAbove = mergedLeaderboard[myIndex - 1];
+    const diff = playerAbove.rankPoints - player.rankPoints;
+    const lpNeeded = diff > 0 ? diff + 1 : 10;
 
     return {
-      lpNeeded: Math.max(1, nextHigher.rankPoints - player.rankPoints + 1),
-      targetRank: nextHigher.rank,
+      lpNeeded,
+      targetRank: playerAbove.rank,
     };
-  }, [mergedLeaderboard, myIndex, player.rankPoints, userRank]);
+  }, [mergedLeaderboard, myIndex, player.rankPoints]);
 
   return (
     <div className="p-3.5 sm:p-5 lg:p-6 space-y-4 pb-8 max-w-5xl mx-auto w-full">

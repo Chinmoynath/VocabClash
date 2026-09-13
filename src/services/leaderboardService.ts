@@ -151,6 +151,7 @@ export interface FirestoreLeaderboardDoc {
   winStreak: number;
   matchesPlayed: number;
   matchesWon: number;
+  createdAt?: number;
   updatedAt: number;
 }
 
@@ -184,6 +185,7 @@ export function subscribeToRealLeaderboardUsers(
             winStreak: typeof data.winStreak === 'number' ? data.winStreak : 0,
             matchesPlayed: data.matchesPlayed || 0,
             matchesWon: data.matchesWon || 0,
+            createdAt: data.createdAt || data.updatedAt || Date.now(),
             updatedAt: data.updatedAt || Date.now(),
             isCurrentUser: false,
           });
@@ -236,6 +238,7 @@ export async function syncUserToLeaderboard(
       winStreak: typeof player.winStreak === 'number' ? player.winStreak : 0,
       matchesPlayed: typeof player.matchesPlayed === 'number' ? player.matchesPlayed : 0,
       matchesWon: typeof player.matchesWon === 'number' ? player.matchesWon : 0,
+      createdAt: player.createdAt || Date.now(),
       updatedAt: Date.now(),
     };
 
@@ -252,13 +255,13 @@ export async function syncUserToLeaderboard(
  * 1. Bots + real users form ONE single merged leaderboard.
  * 2. Real users override duplicate IDs (if any) and integrate smoothly alongside bots.
  * 3. Sorted with deterministic multi-key comparator:
- *    - LP descending (rankPoints DESC)
- *    - Wins descending (matchesWon DESC)
- *    - Timestamp ascending (updatedAt ASC)
- *    - Unique ID ascending (id ASC)
- * 4. Standard Competition Ranking is applied:
- *    - If two or more players have the EXACT SAME LP, they share the SAME rank number.
- *    - Next player gets the rank corresponding to their 1-indexed position.
+ *    - Primary: LP descending (rankPoints DESC)
+ *    - Secondary: Matches Won descending (matchesWon DESC)
+ *    - Tertiary: Win rate descending (winRate DESC)
+ *    - Quaternary: Total Matches Played descending (matchesPlayed DESC)
+ *    - Quinary: Account creation / join time ascending (createdAt / firstJoinedAt ASC)
+ *    - Senary: Stable unique ID string comparison (id ASC)
+ * 4. Distinct sequential ranking is applied (#1, #2, #3, ..., #N) so no duplicate ranks or giant gaps occur.
  */
 export function buildMergedLeaderboard(
   baseBots: LeaderboardUser[],
@@ -298,6 +301,7 @@ export function buildMergedLeaderboard(
     winStreak: typeof currentPlayer.winStreak === 'number' ? currentPlayer.winStreak : 0,
     matchesPlayed: currentPlayer.matchesPlayed || 0,
     matchesWon: currentPlayer.matchesWon || 0,
+    createdAt: currentPlayer.createdAt || Date.now(),
     updatedAt: Date.now(),
     isCurrentUser: true,
   };
@@ -334,7 +338,7 @@ export function buildMergedLeaderboard(
     });
   }
 
-  // Deterministic multi-key sort
+  // Deterministic multi-key sort with join-date tie-breaking
   combined.sort((a, b) => {
     // 1. Primary: LP descending
     if (b.rankPoints !== a.rankPoints) {
@@ -346,25 +350,31 @@ export function buildMergedLeaderboard(
     if (bWins !== aWins) {
       return bWins - aWins;
     }
-    // 3. Tertiary: Timestamp ascending
-    const aTime = a.updatedAt ?? 0;
-    const bTime = b.updatedAt ?? 0;
-    if (aTime !== bTime) {
-      return aTime - bTime;
+    // 3. Tertiary: Win Rate descending
+    const aRate = a.winRate ?? 0;
+    const bRate = b.winRate ?? 0;
+    if (bRate !== aRate) {
+      return bRate - aRate;
     }
-    // 4. Quaternary: Unique ID string comparison for stable tie-breaking
+    // 4. Quaternary: Total Matches Played descending (rewards engagement)
+    const aPlayed = a.matchesPlayed ?? 0;
+    const bPlayed = b.matchesPlayed ?? 0;
+    if (bPlayed !== aPlayed) {
+      return bPlayed - aPlayed;
+    }
+    // 5. Quinary: Join / Creation Time ascending (earlier joined players rank higher)
+    const aJoinTime = a.createdAt || a.updatedAt || 0;
+    const bJoinTime = b.createdAt || b.updatedAt || 0;
+    if (aJoinTime !== bJoinTime) {
+      return aJoinTime - bJoinTime;
+    }
+    // 6. Senary: Stable unique ID string comparison
     return a.id.localeCompare(b.id);
   });
 
-  // Apply Standard Competition Ranking (120 LP = #1, 110 LP = #2, 110 LP = #2, 100 LP = #4)
+  // Assign clean sequential ranks (1, 2, 3, ..., N) without skips or duplicate ranks
   for (let i = 0; i < combined.length; i++) {
-    if (i > 0 && combined[i].rankPoints === combined[i - 1].rankPoints) {
-      // Equal LP -> Exactly same rank as preceding player
-      combined[i].rank = combined[i - 1].rank;
-    } else {
-      // Standard competition rank: 1-indexed position
-      combined[i].rank = i + 1;
-    }
+    combined[i].rank = i + 1;
   }
 
   return combined;

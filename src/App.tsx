@@ -270,6 +270,7 @@ function sanitizeProfile(raw: any, googleUser?: FirebaseUser | null): PlayerProf
     winStreak,
     accuracyRate,
     level,
+    createdAt: raw.createdAt || (googleUser?.metadata?.creationTime ? new Date(googleUser.metadata.creationTime).getTime() : Date.now()),
     ...(practiceFilters ? { practiceFilters } : {}),
   };
 }

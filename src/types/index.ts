@@ -132,6 +132,7 @@ export interface PlayerProfile {
   accuracyRate: number;
   bestCategory: QuestionCategory;
   badges: string[];
+  createdAt?: number;
   practiceFilters?: {
     category: QuestionCategory | 'mixed';
     exam: ExamType;
@@ -216,6 +217,7 @@ export interface LeaderboardUser {
   winStreak: number;
   matchesPlayed?: number;
   matchesWon?: number;
+  createdAt?: number;
   updatedAt?: number;
   isCurrentUser?: boolean;
 }
