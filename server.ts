@@ -1393,6 +1393,17 @@ app.get('/robots.txt', (req, res) => {
   res.send('User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /admin/\nDisallow: /api/\nDisallow: /.well-known/\n\nSitemap: https://vocabclash.in/sitemap.xml\n');
 });
 
+// ads.txt & app-ads.txt Endpoints for Google AdSense & Google AdMob verification
+const serveAdsTxt = (req: express.Request, res: express.Response) => {
+  const adsContent = 'google.com, pub-6402582146558440, DIRECT, f08c47fec0942fa0\n';
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.send(adsContent);
+};
+
+app.get('/ads.txt', serveAdsTxt);
+app.get('/app-ads.txt', serveAdsTxt);
+
 // Service Worker Endpoints (sw.js and service-worker.js) with proper PWA & TWA headers
 const serveServiceWorker = (req: express.Request, res: express.Response) => {
   const swPath = path.join(process.cwd(), 'public', 'sw.js');

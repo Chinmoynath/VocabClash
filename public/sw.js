@@ -1,5 +1,5 @@
 // VocabClash High-Performance Service Worker for PWA, PWABuilder & Google Play TWA
-const CACHE_NAME = 'vocabclash-v2.5';
+const CACHE_NAME = 'vocabclash-v2.6';
 const OFFLINE_FALLBACK_URL = '/';
 
 const PRECACHE_ASSETS = [
@@ -51,8 +51,17 @@ self.addEventListener('fetch', (event) => {
   // Skip cross-origin non-app requests (e.g., razorpay, ads, firebase streaming)
   if (url.origin !== self.location.origin) return;
 
-  // For API endpoints, pass directly through network
-  if (url.pathname.startsWith('/api/')) return;
+  // For API endpoints and verification crawler files, pass directly through network without SW caching
+  if (
+    url.pathname.startsWith('/api/') ||
+    url.pathname === '/ads.txt' ||
+    url.pathname === '/app-ads.txt' ||
+    url.pathname === '/robots.txt' ||
+    url.pathname === '/sitemap.xml' ||
+    url.pathname.startsWith('/.well-known/')
+  ) {
+    return;
+  }
 
   // Stale-while-revalidate / Network-first strategy
   event.respondWith(
