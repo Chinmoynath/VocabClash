@@ -5,6 +5,7 @@ import { realtimeMatchmaker, MatchSuccessResult } from '../services/realtimeMatc
 import { getSpeedBlitzSessionQuestions, deduplicateAndEnsureCount, getFilteredQuestions } from '../services/matchmakingService';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { Swords, X, Radio, WifiOff, RefreshCw, BookOpen } from 'lucide-react';
+import { UserAvatar } from './UserAvatar';
 
 interface MatchmakingModalProps {
   player: PlayerProfile;
@@ -209,9 +210,12 @@ export const MatchmakingModal: React.FC<MatchmakingModalProps> = ({
               <div className="absolute inset-0 rounded-full border border-amber-500/20 animate-ping opacity-30"></div>
               <div className="absolute inset-2 rounded-full border border-amber-500/30 animate-pulse"></div>
               <div className="absolute inset-6 rounded-full border border-amber-500/40"></div>
-              <div className="w-16 h-16 rounded-full bg-gradient-to-tr from-amber-600 to-amber-400 flex items-center justify-center text-2xl shadow-xl z-10">
-                {player.avatar}
-              </div>
+              <UserAvatar
+                photoURL={player.photoURL}
+                avatar={player.avatar}
+                name={player.name}
+                className="w-16 h-16 rounded-full bg-gradient-to-tr from-amber-600 to-amber-400 flex items-center justify-center text-2xl shadow-xl z-10 shrink-0 overflow-hidden"
+              />
               <div className="absolute inset-0 rounded-full border-t-2 border-amber-400 animate-spin"></div>
             </div>
 
@@ -246,9 +250,12 @@ export const MatchmakingModal: React.FC<MatchmakingModalProps> = ({
             <div className="grid grid-cols-2 gap-3 relative py-2">
               {/* Player Side */}
               <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-3 flex flex-col items-center text-center shadow-md">
-                <div className="w-12 h-12 rounded-full bg-amber-500/20 border border-amber-400 flex items-center justify-center text-2xl shadow-md mb-1.5">
-                  {player.avatar}
-                </div>
+                <UserAvatar
+                  photoURL={player.photoURL}
+                  avatar={player.avatar}
+                  name={player.name}
+                  className="w-12 h-12 rounded-full bg-amber-500/20 border border-amber-400 flex items-center justify-center text-2xl shadow-md mb-1.5 shrink-0 overflow-hidden"
+                />
                 <div className="font-bold text-xs text-slate-100 truncate w-full">{player.name}</div>
                 <div className="text-[9px] text-slate-400 mt-1 line-clamp-1">{player.targetExam}</div>
               </div>
@@ -261,9 +268,12 @@ export const MatchmakingModal: React.FC<MatchmakingModalProps> = ({
               {/* Opponent Side */}
               {matchedOpponent && (
                 <div className="bg-slate-800/80 border border-orange-700/40 rounded-2xl p-3 flex flex-col items-center text-center shadow-md">
-                  <div className="w-12 h-12 rounded-full bg-orange-500/20 border border-orange-400 flex items-center justify-center text-2xl shadow-md mb-1.5">
-                    {matchedOpponent.avatar}
-                  </div>
+                  <UserAvatar
+                    photoURL={matchedOpponent.photoURL}
+                    avatar={matchedOpponent.avatar}
+                    name={matchedOpponent.name}
+                    className="w-12 h-12 rounded-full bg-orange-500/20 border border-orange-400 flex items-center justify-center text-2xl shadow-md mb-1.5 shrink-0 overflow-hidden"
+                  />
                   <div className="font-bold text-xs text-slate-100 truncate w-full">{matchedOpponent.name}</div>
                   <div className="text-[9px] text-slate-400 mt-1 line-clamp-1">{matchedOpponent.targetExam}</div>
                 </div>

@@ -38,6 +38,7 @@ import { ReportQuestionModal } from './ReportQuestionModal';
 import { ShareBattleResultModal } from './ShareBattleResultModal';
 import { BattleShareData } from '../utils/shareCardGenerator';
 import { getOptionBreakdown, OptionDetail } from '../utils/optionExplanations';
+import { UserAvatar } from './UserAvatar';
 import { resolveCardEducation } from '../utils/questionEducationResolver';
 import { QuestionSolutionBreakdown } from './QuestionSolutionBreakdown';
 import { ExamAppearancesBadge } from './ExamAppearancesBadge';
@@ -733,9 +734,12 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
                   <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-amber-500 text-slate-950 text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full shadow">
                     YOU
                   </div>
-                  <div className="w-14 h-14 rounded-2xl bg-amber-500/20 border-2 border-amber-400/80 flex items-center justify-center text-2xl shadow-inner mt-1 mb-2">
-                    {player?.avatar || '🎓'}
-                  </div>
+                  <UserAvatar
+                    photoURL={player?.photoURL}
+                    avatar={player?.avatar || '🎓'}
+                    name={player?.name || 'You'}
+                    className="w-14 h-14 rounded-2xl bg-amber-500/20 border-2 border-amber-400/80 flex items-center justify-center text-2xl shadow-inner mt-1 mb-2 shrink-0 overflow-hidden"
+                  />
                   <div className="min-w-0 w-full mb-2">
                     <div className="font-extrabold text-sm sm:text-base text-slate-100 truncate">{player?.name || 'You'}</div>
                   </div>
@@ -775,9 +779,12 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
                   <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-slate-800 text-slate-300 border border-slate-700 text-[10px] font-bold uppercase px-2.5 py-0.5 rounded-full shadow">
                     OPPONENT
                   </div>
-                  <div className="w-14 h-14 rounded-2xl bg-orange-500/20 border-2 border-orange-400/80 flex items-center justify-center text-2xl shadow-inner mt-1 mb-2">
-                    {opponent.avatar || '🎯'}
-                  </div>
+                  <UserAvatar
+                    photoURL={'photoURL' in opponent ? opponent.photoURL : undefined}
+                    avatar={opponent.avatar || '🎯'}
+                    name={opponent.name || 'Opponent'}
+                    className="w-14 h-14 rounded-2xl bg-orange-500/20 border-2 border-orange-400/80 flex items-center justify-center text-2xl shadow-inner mt-1 mb-2 shrink-0 overflow-hidden"
+                  />
                   <div className="min-w-0 w-full mb-2">
                     <div className="font-extrabold text-sm sm:text-base text-slate-100 truncate">{opponent.name || 'Opponent'}</div>
                   </div>

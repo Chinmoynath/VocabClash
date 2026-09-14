@@ -23,6 +23,7 @@ import { soundManager } from '../utils/audio';
 import { formatRepeatCount } from '../utils/questionFingerprint';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { recordBattleAbandoned } from '../services/battleAnalyticsService';
+import { UserAvatar } from './UserAvatar';
 import { 
   Zap, 
   Clock, 
@@ -223,23 +224,56 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
         });
       }
 
-      // Check for match completion: ONLY if current player is on the last question and has finished
-      const isOnLastQuestion = currentQIndex + 1 >= matchState.questions.length;
-      if (isOnLastQuestion && roomData.finalResult && roomData.finalResult.finalised && !hasCompletedRef.current) {
-        hasCompletedRef.current = true;
-        onCompleteMatch(roomData.finalResult, {
-          playerScore: currentLiveScoresRef.current.playerScore,
-          opponentScore: currentLiveScoresRef.current.opponentScore,
-          combo: currentLiveScoresRef.current.combo,
-          opponentCombo: currentLiveScoresRef.current.opponentCombo,
-        });
+      // Check for match completion: ONLY when both players have finished or room is finalized
+      const totalQCount = matchState.questions.length;
+      const isOnLastQuestion = currentQIndex + 1 >= totalQCount || currentQIndex >= totalQCount;
+      if ((isOnLastQuestion || isWaitingForOpponent) && !hasCompletedRef.current) {
+        if (roomData.finalResult && roomData.finalResult.finalised) {
+          hasCompletedRef.current = true;
+          onCompleteMatch(roomData.finalResult, {
+            playerScore: currentLiveScoresRef.current.playerScore,
+            opponentScore: currentLiveScoresRef.current.opponentScore,
+            combo: currentLiveScoresRef.current.combo,
+            opponentCombo: currentLiveScoresRef.current.opponentCombo,
+          });
+        } else {
+          const myAns = roomData.answers?.[myPlayerId] || [];
+          const oppAns = roomData.answers?.[oppPlayerId] || [];
+          const bothFinished = 
+            (roomData.completedPlayers && roomData.completedPlayers.includes(myPlayerId) && roomData.completedPlayers.includes(oppPlayerId)) ||
+            (myAns.length >= totalQCount && oppAns.length >= totalQCount);
+
+          if (bothFinished) {
+            const pScore = currentLiveScoresRef.current.playerScore;
+            const oScore = currentLiveScoresRef.current.opponentScore;
+            const winnerId = pScore > oScore ? myPlayerId : (oScore > pScore ? oppPlayerId : 'draw');
+            const loserId = winnerId === myPlayerId ? oppPlayerId : (winnerId === oppPlayerId ? myPlayerId : '');
+            const calculatedFinalResult: LiveRoomFinalResult = {
+              winnerId,
+              loserId,
+              player1FinalScore: pScore,
+              player2FinalScore: oScore,
+              player1LPChange: winnerId === myPlayerId ? 30 : (winnerId === 'draw' ? 5 : -15),
+              player2LPChange: winnerId === oppPlayerId ? 30 : (winnerId === 'draw' ? 5 : -15),
+              finalised: true,
+            };
+            hasCompletedRef.current = true;
+            forceFinalizeLiveRoom(roomId, myPlayerId, pScore, oScore, calculatedFinalResult).catch(() => {});
+            onCompleteMatch(calculatedFinalResult, {
+              playerScore: pScore,
+              opponentScore: oScore,
+              combo: currentLiveScoresRef.current.combo,
+              opponentCombo: currentLiveScoresRef.current.opponentCombo,
+            });
+          }
+        }
       }
     });
 
     return () => {
       unsubscribe();
     };
-  }, [isRealMatch, roomId, myPlayerId, oppPlayerId, currentQIndex, matchState.questions.length, onCompleteMatch]);
+  }, [isRealMatch, roomId, myPlayerId, oppPlayerId, currentQIndex, isWaitingForOpponent, matchState.questions.length, onCompleteMatch]);
 
   // Listen to network changes for mid-match disconnection handling (Chess.com style)
   useEffect(() => {
@@ -803,18 +837,25 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isAnswered, currentQuestion, isWaitingForOpponent, isDisconnected, isForfeitedDueToDisconnect]);
 
-  // Safety completion if currentQIndex is out of bounds or match is ended
+  // Safety completion for bot matches if currentQIndex is out of bounds
   useEffect(() => {
-    if (isOutOfBounds && !hasCompletedRef.current) {
+    if (isOutOfBounds && !isRealMatch && !hasCompletedRef.current) {
       hasCompletedRef.current = true;
-      onCompleteMatch(liveRoom?.finalResult, {
+      onCompleteMatch(undefined, {
         playerScore: currentLiveScoresRef.current.playerScore,
         opponentScore: currentLiveScoresRef.current.opponentScore,
         combo: currentLiveScoresRef.current.combo,
         opponentCombo: currentLiveScoresRef.current.opponentCombo,
       });
     }
-  }, [isOutOfBounds, onCompleteMatch, liveRoom]);
+  }, [isOutOfBounds, isRealMatch, onCompleteMatch]);
+
+  // For real matches: if out of bounds (player finished all questions) but match not finalized yet, ensure waiting state
+  useEffect(() => {
+    if (isOutOfBounds && isRealMatch && !isWaitingForOpponent && !hasCompletedRef.current && !liveRoom?.finalResult?.finalised) {
+      setIsWaitingForOpponent(true);
+    }
+  }, [isOutOfBounds, isRealMatch, isWaitingForOpponent, liveRoom]);
 
   // Timer ring percentage
   const timerFraction = timeRemaining / ROUND_TIME_SEC;
@@ -824,11 +865,14 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
     return (
       <div className="flex-1 min-h-0 h-full flex flex-col items-center justify-center p-6 text-center text-slate-300">
         <div className="w-10 h-10 border-4 border-amber-400 border-t-transparent rounded-full animate-spin mb-3" />
-        <p className="text-sm font-bold text-slate-200">Completing round...</p>
-        <p className="text-xs text-slate-400 mt-1">Calculating final duel results & LP rating</p>
+        <p className="text-sm font-bold text-slate-200">Syncing final round...</p>
+        <p className="text-xs text-slate-400 mt-1">Waiting for opponent to complete remaining questions...</p>
       </div>
     );
   }
+
+  const oppQuestionsAnswered = liveRoom?.answers?.[oppPlayerId]?.length || 0;
+  const totalQuestionsInDuel = matchState.questions.length;
 
   return (
     <div className="flex-1 h-full min-h-0 flex flex-col justify-between p-3 sm:p-5 lg:p-6 space-y-2 sm:space-y-3 pb-2 sm:pb-4 relative max-w-4xl mx-auto w-full overflow-hidden">
@@ -851,22 +895,44 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
 
       {/* Waiting for Opponent Finalize Overlay */}
       {isWaitingForOpponent && (
-        <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 max-w-sm w-full text-center space-y-4 shadow-2xl">
-            <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 mx-auto">
-              <Loader2 className="w-7 h-7 animate-spin" />
+        <div className="fixed inset-0 z-50 bg-slate-950/92 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 sm:p-8 max-w-md w-full text-center space-y-5 shadow-2xl relative overflow-hidden">
+            <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border-2 border-amber-500/30 flex items-center justify-center text-amber-400 mx-auto shadow-inner">
+              <Loader2 className="w-8 h-8 animate-spin" />
             </div>
-            <div className="space-y-1">
-              <h3 className="text-base font-extrabold text-slate-100">
-                You Finished All Rounds!
+            <div className="space-y-1.5">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-bold uppercase tracking-wider">
+                <span>✓ You Completed All Questions</span>
+              </div>
+              <h3 className="text-lg font-black text-slate-100">
+                Waiting for {matchState.opponent.name}
               </h3>
-              <p className="text-xs text-slate-400">
-                Waiting for <span className="text-orange-400 font-bold">{matchState.opponent.name}</span> to complete the final question...
+              <p className="text-xs text-slate-400 max-w-xs mx-auto">
+                Your friend is solving the remaining questions. The final scoreboard will sync the instant they finish!
               </p>
             </div>
-            <div className="p-3 bg-slate-950/60 rounded-2xl border border-slate-800 flex items-center justify-between text-xs font-mono">
-              <span className="text-slate-400">Your Final Score:</span>
-              <span className="text-amber-400 font-bold text-sm">{livePlayerScore}</span>
+
+            {/* Live Synchronized Scores Card */}
+            <div className="grid grid-cols-2 gap-3 p-3 bg-slate-950/80 rounded-2xl border border-slate-800">
+              <div className="text-center p-2 rounded-xl bg-slate-900/80 border border-slate-800/80">
+                <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Your Score</div>
+                <div className="text-lg font-black text-amber-400 font-mono mt-0.5">{livePlayerScore}</div>
+                <div className="text-[10px] text-emerald-400 font-semibold mt-0.5">Finished (100%)</div>
+              </div>
+              <div className="text-center p-2 rounded-xl bg-slate-900/80 border border-slate-800/80">
+                <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider truncate">
+                  {matchState.opponent.name}
+                </div>
+                <div className="text-lg font-black text-orange-400 font-mono mt-0.5">{liveOpponentScore}</div>
+                <div className="text-[10px] text-amber-400 font-semibold mt-0.5">
+                  Question {Math.min(totalQuestionsInDuel, oppQuestionsAnswered + 1)} of {totalQuestionsInDuel}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-center gap-2 text-[11px] text-slate-500">
+              <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+              <span>Real-time lobby sync active</span>
             </div>
           </div>
         </div>
@@ -1052,9 +1118,12 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
         <div className="bg-slate-950/85 border border-slate-800 rounded-2xl p-2.5 sm:p-3 shadow-md flex items-center justify-between gap-2">
           {/* Player Side */}
           <div className="flex items-center gap-2 flex-1 min-w-0">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-amber-500/20 border border-amber-400 flex items-center justify-center text-lg shadow-sm shrink-0">
-              {player.avatar}
-            </div>
+            <UserAvatar
+              photoURL={player.photoURL}
+              avatar={player.avatar}
+              name={player.name}
+              className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-amber-500/20 border border-amber-400 flex items-center justify-center text-lg shadow-sm shrink-0 overflow-hidden"
+            />
             <div className="min-w-0 flex-1">
               <div className="text-xs sm:text-sm font-extrabold text-slate-100 truncate">{player.name}</div>
               <div className="flex items-center gap-1.5">
@@ -1154,9 +1223,12 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
                 )}
               </div>
             </div>
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-orange-500/20 border border-orange-400 flex items-center justify-center text-lg shadow-sm shrink-0">
-              {matchState.opponent.avatar}
-            </div>
+            <UserAvatar
+              photoURL={matchState.opponent.photoURL}
+              avatar={matchState.opponent.avatar}
+              name={matchState.opponent.name}
+              className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-orange-500/20 border border-orange-400 flex items-center justify-center text-lg shadow-sm shrink-0 overflow-hidden"
+            />
           </div>
         </div>
       </div>

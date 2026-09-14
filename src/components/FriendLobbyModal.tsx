@@ -38,6 +38,7 @@ import {
 } from '../types';
 import { soundManager } from '../utils/audio';
 import { validateProperEmail } from '../utils/emailValidator';
+import { UserAvatar } from './UserAvatar';
 import { 
   createFriendLobby, 
   joinFriendLobby, 
@@ -534,9 +535,12 @@ export const FriendLobbyModal: React.FC<FriendLobbyModalProps> = ({
                 <div className="absolute -top-2.5 px-2 py-0.5 bg-amber-500 text-slate-950 text-[9px] font-black uppercase rounded-full shadow-sm flex items-center gap-1">
                   <Crown className="w-2.5 h-2.5" /> Host
                 </div>
-                <div className="w-14 h-14 rounded-full bg-amber-500/20 border-2 border-amber-400 flex items-center justify-center text-3xl shadow-md my-1.5">
-                  {activeLobby.host.avatar || '👨‍💼'}
-                </div>
+                <UserAvatar
+                  photoURL={activeLobby.host.photoURL}
+                  avatar={activeLobby.host.avatar || '👨‍💼'}
+                  name={activeLobby.host.name}
+                  className="w-14 h-14 rounded-full bg-amber-500/20 border-2 border-amber-400 flex items-center justify-center text-3xl shadow-md my-1.5 shrink-0 overflow-hidden"
+                />
                 <div className="font-extrabold text-sm text-slate-100 truncate w-full">
                   {activeLobby.host.name}
                 </div>
@@ -564,9 +568,12 @@ export const FriendLobbyModal: React.FC<FriendLobbyModalProps> = ({
                   <div className="absolute -top-2.5 px-2 py-0.5 bg-sky-500 text-white text-[9px] font-black uppercase rounded-full shadow-sm flex items-center gap-1">
                     Challenger
                   </div>
-                  <div className="w-14 h-14 rounded-full bg-sky-500/20 border-2 border-sky-400 flex items-center justify-center text-3xl shadow-md my-1.5">
-                    {activeLobby.guest.avatar || '🎯'}
-                  </div>
+                  <UserAvatar
+                    photoURL={activeLobby.guest.photoURL}
+                    avatar={activeLobby.guest.avatar || '🎯'}
+                    name={activeLobby.guest.name}
+                    className="w-14 h-14 rounded-full bg-sky-500/20 border-2 border-sky-400 flex items-center justify-center text-3xl shadow-md my-1.5 shrink-0 overflow-hidden"
+                  />
                   <div className="font-extrabold text-sm text-slate-100 truncate w-full">
                     {activeLobby.guest.name}
                   </div>

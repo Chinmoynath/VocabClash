@@ -856,6 +856,27 @@ app.post('/api/match/room/sync', (req, res) => {
           room.completedPlayers.push(playerId);
         }
       }
+
+      // Check for dual completion
+      if (room.completedPlayers && (room.completedPlayers.length >= 2 || (isLastQuestion && room.forfeitedBy))) {
+        const p1Id = room.player1?.id;
+        const p2Id = room.player2?.id;
+        const p1Score = (p1Id ? room.scores?.[p1Id] : 0) ?? 0;
+        const p2Score = (p2Id ? room.scores?.[p2Id] : 0) ?? 0;
+        const winnerId = p1Score > p2Score ? p1Id : (p2Score > p1Score ? p2Id : 'draw');
+        const loserId = winnerId === p1Id ? p2Id : (winnerId === p2Id ? p1Id : '');
+
+        room.status = 'completed';
+        room.finalResult = {
+          winnerId,
+          loserId,
+          player1FinalScore: p1Score,
+          player2FinalScore: p2Score,
+          player1LPChange: winnerId === p1Id ? 30 : (winnerId === 'draw' ? 5 : -15),
+          player2LPChange: winnerId === p2Id ? 30 : (winnerId === 'draw' ? 5 : -15),
+          finalised: true,
+        };
+      }
     }
 
     if (emote) {

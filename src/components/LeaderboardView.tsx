@@ -26,46 +26,12 @@ import {
   ExamCategoryKey,
   CategoryCadreConfig 
 } from '../utils/cadreCategoryService';
+import { UserAvatar } from './UserAvatar';
 
 interface LeaderboardViewProps {
   player: PlayerProfile;
   isPremium?: boolean;
 }
-
-// Resilient avatar component that renders Google photo with fallback to emoji
-const UserAvatar: React.FC<{
-  photoURL?: string | null;
-  avatar: string;
-  className?: string;
-  imgClassName?: string;
-}> = ({
-  photoURL,
-  avatar,
-  className = 'w-9 h-9 rounded-full bg-slate-800 border border-slate-700/60 flex items-center justify-center text-lg shrink-0',
-  imgClassName = 'w-full h-full object-cover',
-}) => {
-  const [hasError, setHasError] = useState(false);
-
-  if (photoURL && !hasError) {
-    return (
-      <div className={`${className} overflow-hidden p-0`}>
-        <img
-          src={photoURL}
-          alt="avatar"
-          className={imgClassName}
-          referrerPolicy="no-referrer"
-          onError={() => setHasError(true)}
-        />
-      </div>
-    );
-  }
-
-  return (
-    <div className={className}>
-      {avatar || '👨‍💼'}
-    </div>
-  );
-};
 
 export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ player, isPremium = false }) => {
   const [activeTab, setActiveTab] = useState<'leaderboard' | 'tiers'>('leaderboard');

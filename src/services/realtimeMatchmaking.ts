@@ -22,6 +22,7 @@ export interface MatchQueueTicket {
   uid: string;
   displayName: string;
   avatar: string;
+  photoURL?: string | null;
   lp: number;
   targetExam: string;
   category: QuestionCategory | 'mixed';
@@ -422,6 +423,7 @@ export class RealtimeMatchmakingManager {
         id: candidate.uid,
         name: candidate.displayName || 'Govt Aspirant',
         avatar: candidate.avatar || '👨‍💼',
+        photoURL: candidate.photoURL || undefined,
         country: 'India',
         countryCode: 'IN',
         targetExam: candidate.targetExam || exam || 'SSC CGL',
