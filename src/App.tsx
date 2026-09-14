@@ -1330,7 +1330,10 @@ export default function App() {
     const roundCount = matchMode === 'quick_duel' ? 10 : (isFirstTimeMatch ? 10 : 20);
     
     let questions: Question[];
-    if (matchMode === 'quick_duel') {
+    if (isRealPlayer && matchedQuestions && matchedQuestions.length > 0) {
+      // Authoritative synchronized question list from Real-Time Matchmaker or Friend Lobby
+      questions = matchedQuestions;
+    } else if (matchMode === 'quick_duel') {
       // Speed Blitz: Exactly 10 unique questions by stable database ID, anti-repetition across sessions
       if (matchedQuestions && matchedQuestions.length > 0) {
         questions = deduplicateAndEnsureCount(matchedQuestions, selectedCategory, selectedExam, 10);
@@ -2162,14 +2165,21 @@ export default function App() {
         {matchState ? (
           !isMatchCompleted ? (
             /* Live 1v1 Battle Arena Screen */
-            <LiveDuelArena
-              player={player}
-              matchState={matchState}
-              onAnswerQuestion={handleAnswerQuestion}
-              onCompleteMatch={handleCompleteMatch}
-              onSendEmote={handleSendEmote}
-              onLeaveMatch={handleLeaveMatch}
-            />
+            <ErrorBoundary
+              componentName="1v1 Battle Arena"
+              onReset={() => {
+                handleCompleteMatch();
+              }}
+            >
+              <LiveDuelArena
+                player={player}
+                matchState={matchState}
+                onAnswerQuestion={handleAnswerQuestion}
+                onCompleteMatch={handleCompleteMatch}
+                onSendEmote={handleSendEmote}
+                onLeaveMatch={handleLeaveMatch}
+              />
+            </ErrorBoundary>
           ) : (
             /* Post-Match Summary & Detailed Question Review */
             <ErrorBoundary 

@@ -71,7 +71,16 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
   onLeaveMatch,
 }) => {
   const currentQIndex = matchState.currentQuestionIndex;
-  const currentQuestion = matchState.questions[currentQIndex];
+  const isOutOfBounds = !matchState.questions || matchState.questions.length === 0 || currentQIndex >= matchState.questions.length;
+  const currentQuestion = matchState.questions?.[currentQIndex] || matchState.questions?.[matchState.questions.length - 1] || ({
+    id: 'placeholder',
+    question: 'Loading next PYQ clash round...',
+    options: ['Option A', 'Option B', 'Option C', 'Option D'],
+    correctIndex: 0,
+    category: 'synonyms',
+    wordOrPhrase: '',
+    repeatCount: 1,
+  } as Question);
 
   const isRealMatch = Boolean(matchState.isRealPlayer && (matchState.realRoomId || matchState.matchId));
   const roomId = matchState.realRoomId || matchState.matchId;
@@ -618,7 +627,7 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
           }
         });
       }
-    }, 6000);
+    }, 60000); // 60s generous safety window for friend to finish remaining questions
 
     return () => clearTimeout(safetyTimer);
   }, [isWaitingForOpponent, isRealMatch, roomId, opponentLeft, liveRoom, myPlayerId, oppPlayerId, onCompleteMatch]);
@@ -794,42 +803,32 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isAnswered, currentQuestion, isWaitingForOpponent, isDisconnected, isForfeitedDueToDisconnect]);
 
-  if (!currentQuestion) {
-    return (
-      <div className="flex-1 flex items-center justify-center p-4">
-        <div className="text-center space-y-2">
-          <div className="w-10 h-10 border-4 border-amber-400 border-t-transparent rounded-full animate-spin mx-auto"></div>
-          <div className="text-xs text-slate-400">Loading next PYQ clash round...</div>
-        </div>
-      </div>
-    );
-  }
-
   // Safety completion if currentQIndex is out of bounds or match is ended
   useEffect(() => {
-    if (!currentQuestion && !hasCompletedRef.current) {
+    if (isOutOfBounds && !hasCompletedRef.current) {
       hasCompletedRef.current = true;
-      onCompleteMatch(undefined, {
+      onCompleteMatch(liveRoom?.finalResult, {
         playerScore: currentLiveScoresRef.current.playerScore,
         opponentScore: currentLiveScoresRef.current.opponentScore,
         combo: currentLiveScoresRef.current.combo,
         opponentCombo: currentLiveScoresRef.current.opponentCombo,
       });
     }
-  }, [currentQuestion, onCompleteMatch]);
-
-  if (!currentQuestion) {
-    return (
-      <div className="flex-1 h-full flex flex-col items-center justify-center p-6 text-center text-slate-300">
-        <div className="w-10 h-10 border-4 border-amber-400 border-t-transparent rounded-full animate-spin mb-3" />
-        <p className="text-sm font-bold">Completing round...</p>
-      </div>
-    );
-  }
+  }, [isOutOfBounds, onCompleteMatch, liveRoom]);
 
   // Timer ring percentage
   const timerFraction = timeRemaining / ROUND_TIME_SEC;
   const isTimerCritical = timeRemaining <= 3;
+
+  if (isOutOfBounds && !isWaitingForOpponent) {
+    return (
+      <div className="flex-1 min-h-0 h-full flex flex-col items-center justify-center p-6 text-center text-slate-300">
+        <div className="w-10 h-10 border-4 border-amber-400 border-t-transparent rounded-full animate-spin mb-3" />
+        <p className="text-sm font-bold text-slate-200">Completing round...</p>
+        <p className="text-xs text-slate-400 mt-1">Calculating final duel results & LP rating</p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 h-full min-h-0 flex flex-col justify-between p-3 sm:p-5 lg:p-6 space-y-2 sm:space-y-3 pb-2 sm:pb-4 relative max-w-4xl mx-auto w-full overflow-hidden">
