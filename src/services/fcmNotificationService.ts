@@ -3,6 +3,7 @@
  * Project: tactile-world-jq6d2
  * Messaging Sender ID: 970204579955
  * Auth Domain: auth.vocabclash.in
+ * Unified Service Worker: /sw.js
  */
 
 import { getMessaging, getToken, isSupported } from 'firebase/messaging';
@@ -44,7 +45,7 @@ export function getCurrentNotificationPermission(): NotificationPermission | 'un
 
 /**
  * Explicit user-triggered flow to enable push notifications and obtain FCM token.
- * Reuses the existing Firebase App instance and existing service worker registration.
+ * Reuses the existing unified PWA service worker registration (/sw.js) and existing Firebase App instance.
  */
 export async function enableNotifications(): Promise<NotificationSetupResult> {
   console.log('[FCM] Starting notification setup');
@@ -118,43 +119,55 @@ export async function enableNotifications(): Promise<NotificationSetupResult> {
   console.log('[FCM] Permission granted');
 
   try {
-    // 4. Register or reuse /firebase-messaging-sw.js
-    console.log('[FCM] Registering service worker');
-    
-    // Look for existing registration first
-    let registration: ServiceWorkerRegistration | undefined;
+    // 4. Inspect all existing Service Worker registrations for diagnostics
     const existingRegistrations = await navigator.serviceWorker.getRegistrations();
-    
+    console.log(`[FCM] Total ServiceWorker registrations found: ${existingRegistrations.length}`);
+
+    existingRegistrations.forEach((reg, index) => {
+      console.log(`[FCM] Registration #${index + 1}:`, {
+        scope: reg.scope,
+        active: reg.active ? reg.active.scriptURL : null,
+        waiting: reg.waiting ? reg.waiting.scriptURL : null,
+        installing: reg.installing ? reg.installing.scriptURL : null,
+      });
+    });
+
+    // 5. Obtain or reuse the root-scope ServiceWorkerRegistration
+    let targetRegistration: ServiceWorkerRegistration | undefined;
+
+    // Prefer the active registration controlling scope '/'
     for (const reg of existingRegistrations) {
-      if (
-        reg.active?.scriptURL.includes('firebase-messaging-sw.js') ||
-        reg.installing?.scriptURL.includes('firebase-messaging-sw.js') ||
-        reg.waiting?.scriptURL.includes('firebase-messaging-sw.js')
-      ) {
-        registration = reg;
+      if (reg.scope.endsWith('/') || reg.scope === window.location.origin + '/') {
+        targetRegistration = reg;
         break;
       }
     }
 
-    if (!registration) {
-      registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js', {
-        scope: '/',
-      });
+    if (!targetRegistration) {
+      console.log('[FCM] No existing root registration found. Registering /sw.js');
+      targetRegistration = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
     }
 
-    // Wait until the service worker is active / ready
-    await navigator.serviceWorker.ready;
-    console.log('[FCM] Service worker registered', registration);
+    // Wait until the service worker is active and ready
+    const readyRegistration = await navigator.serviceWorker.ready;
+    const registrationToUse = targetRegistration || readyRegistration;
 
-    // 5. Initialize Firebase Messaging from EXISTING Firebase app
+    console.log('[FCM] Service worker registered & ready');
+    console.log('[FCM] Passing ServiceWorkerRegistration to Firebase:', {
+      scope: registrationToUse.scope,
+      activeScript: registrationToUse.active?.scriptURL,
+      state: registrationToUse.active?.state,
+    });
+
+    // 6. Initialize Firebase Messaging from EXISTING Firebase app
     const messaging = getMessaging(firebaseApp);
     console.log('[FCM] Firebase Messaging initialized');
 
-    // 6. Request FCM Registration Token
+    // 7. Request FCM Registration Token using unified ServiceWorkerRegistration & VAPID key
     console.log('[FCM] Requesting FCM token');
     const token = await getToken(messaging, {
       vapidKey: FCM_VAPID_PUBLIC_KEY,
-      serviceWorkerRegistration: registration,
+      serviceWorkerRegistration: registrationToUse,
     });
 
     if (!token) {
@@ -167,7 +180,7 @@ export async function enableNotifications(): Promise<NotificationSetupResult> {
       };
     }
 
-    // 7. Success log
+    // 8. Success log
     console.log('[FCM] TOKEN:', token);
 
     return {

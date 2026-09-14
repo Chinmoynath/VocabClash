@@ -37,14 +37,7 @@ if (typeof window !== 'undefined') {
   });
 }
 
-// Register Service Worker for PWA / Google Play TWA
-if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch((err) => {
-      console.warn('Service worker registration non-blocking notice:', err);
-    });
-  });
-}
+// PWA service worker is initialized in index.html with root scope '/'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
