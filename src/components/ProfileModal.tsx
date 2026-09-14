@@ -24,12 +24,21 @@ import {
   Scale,
   BarChart3,
   BookOpen,
-  Pencil
+  Pencil,
+  Bell,
+  BellRing,
+  BellOff,
+  Loader2
 } from 'lucide-react';
 import { SupportModal } from './SupportModal';
 import { LegalAccountModal } from './LegalAccountModal';
 import { parseTargetExam } from './CadreRankCard';
 import { getCadreConfigForTarget, getCategoryTierTitle } from '../utils/cadreCategoryService';
+import { 
+  enableNotifications, 
+  getCurrentNotificationPermission,
+  NotificationSetupResult
+} from '../services/fcmNotificationService';
 
 export const TARGET_EXAM_GROUPS = [
   {
@@ -139,6 +148,41 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   const [showResetConfirm, setShowResetConfirm] = useState<boolean>(false);
   const [showSupportModal, setShowSupportModal] = useState<boolean>(false);
   const [showLegalModal, setShowLegalModal] = useState<boolean>(false);
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | 'unsupported'>(() => getCurrentNotificationPermission());
+  const [isEnablingNotifications, setIsEnablingNotifications] = useState<boolean>(false);
+  const [notificationFeedback, setNotificationFeedback] = useState<{ type: 'success' | 'error'; message: string; token?: string } | null>(null);
+
+  const handleEnableNotifications = async () => {
+    soundManager.playTap();
+    setIsEnablingNotifications(true);
+    setNotificationFeedback(null);
+    try {
+      const result: NotificationSetupResult = await enableNotifications();
+      setNotificationPermission(result.permission);
+      if (result.success && result.token) {
+        soundManager.playCorrect();
+        setNotificationFeedback({
+          type: 'success',
+          message: 'Notifications enabled successfully! FCM Registration Token logged to browser console.',
+          token: result.token,
+        });
+      } else {
+        soundManager.playWrong();
+        setNotificationFeedback({
+          type: 'error',
+          message: result.error || 'Failed to enable push notifications.',
+        });
+      }
+    } catch (err: any) {
+      soundManager.playWrong();
+      setNotificationFeedback({
+        type: 'error',
+        message: err?.message || 'Unexpected error enabling notifications.',
+      });
+    } finally {
+      setIsEnablingNotifications(false);
+    }
+  };
   const cleanInitialName = resolvePlayerName({
     cloudName: player.name,
     authDisplayName: currentUser?.displayName,
@@ -599,6 +643,95 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
             </div>
             <ChevronRight className="w-4 h-4 text-sky-400" />
           </button>
+        )}
+
+        {/* 🔔 Web Push Notifications Control */}
+        {!isEditing && (
+          <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-2.5 space-y-2 shadow-sm">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border ${
+                  notificationPermission === 'granted'
+                    ? 'bg-emerald-950/80 border-emerald-600/50 text-emerald-400'
+                    : notificationPermission === 'denied'
+                    ? 'bg-rose-950/80 border-rose-600/50 text-rose-400'
+                    : 'bg-indigo-950/80 border-indigo-600/50 text-indigo-400'
+                }`}>
+                  {notificationPermission === 'granted' ? (
+                    <BellRing className="w-4 h-4" />
+                  ) : notificationPermission === 'denied' ? (
+                    <BellOff className="w-4 h-4" />
+                  ) : (
+                    <Bell className="w-4 h-4" />
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-bold text-slate-100">Push Notifications</span>
+                    {notificationPermission === 'granted' ? (
+                      <span className="text-[9px] bg-emerald-950/90 text-emerald-300 border border-emerald-600/60 px-1.5 py-0.2 rounded font-bold font-mono">
+                        Active ✓
+                      </span>
+                    ) : notificationPermission === 'denied' ? (
+                      <span className="text-[9px] bg-rose-950/90 text-rose-300 border border-rose-600/60 px-1.5 py-0.2 rounded font-bold font-mono">
+                        Blocked
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="text-[10px] text-slate-400 truncate">
+                    {notificationPermission === 'granted'
+                      ? 'Enabled on this device'
+                      : notificationPermission === 'denied'
+                      ? 'Blocked in browser site settings'
+                      : 'Revision & duel alert pushes'}
+                  </div>
+                </div>
+              </div>
+
+              {notificationPermission !== 'granted' && (
+                <button
+                  type="button"
+                  onClick={handleEnableNotifications}
+                  disabled={isEnablingNotifications || notificationPermission === 'denied'}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold shrink-0 flex items-center gap-1.5 transition-all shadow-sm active:scale-95 disabled:opacity-60 disabled:pointer-events-none cursor-pointer ${
+                    notificationPermission === 'denied'
+                      ? 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
+                      : 'bg-indigo-600 hover:bg-indigo-500 text-white'
+                  }`}
+                >
+                  {isEnablingNotifications ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Enabling...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Bell className="w-3.5 h-3.5" />
+                      <span>Enable Notifications</span>
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+
+            {notificationFeedback && (
+              <div className={`p-2 rounded-lg text-[10px] border flex items-start gap-1.5 ${
+                notificationFeedback.type === 'success'
+                  ? 'bg-emerald-950/60 border-emerald-600/40 text-emerald-200'
+                  : 'bg-rose-950/60 border-rose-600/40 text-rose-200'
+              }`}>
+                <span className="font-bold">{notificationFeedback.type === 'success' ? '✓' : '⚠️'}</span>
+                <div className="min-w-0 flex-1">
+                  <div>{notificationFeedback.message}</div>
+                  {notificationFeedback.token && (
+                    <div className="mt-1 font-mono text-[9px] bg-black/40 p-1 rounded border border-emerald-800/40 truncate text-emerald-300 select-all">
+                      FCM Token: {notificationFeedback.token}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         )}
 
         {/* 24/7 Help & Support Button */}
