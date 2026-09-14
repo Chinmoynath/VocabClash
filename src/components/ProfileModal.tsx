@@ -193,6 +193,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
         <GoogleAuthCard
           currentUser={currentUser}
           isSyncing={isSyncing}
+          player={player}
           onUserChange={onUserChange}
           onUpdatePlayer={onUpdatePlayer}
           onManualSync={onManualSync}
@@ -200,7 +201,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
         />
 
         {/* Admin PYQ Ingestion Pipeline Button (Prominent for Admin) */}
-        {(currentUser?.email?.toLowerCase() === 'nathchinmoy777@gmail.com' || (currentUser?.email && currentUser.email.toLowerCase().includes('admin'))) && (
+        {(currentUser?.email?.toLowerCase() === 'nathchinmoy777@gmail.com' || player?.email?.toLowerCase() === 'nathchinmoy777@gmail.com' || player?.name === 'Chinmoy Nath' || (currentUser?.email && currentUser.email.toLowerCase().includes('admin'))) && (
           <button
             onClick={() => {
               soundManager.playTap();
