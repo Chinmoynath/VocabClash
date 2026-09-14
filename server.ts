@@ -1415,6 +1415,13 @@ const serveServiceWorker = (req: express.Request, res: express.Response) => {
 
 app.get('/sw.js', serveServiceWorker);
 app.get('/service-worker.js', serveServiceWorker);
+app.get('/firebase-messaging-sw.js', (req: express.Request, res: express.Response) => {
+  const fcmSwPath = path.join(process.cwd(), 'public', 'firebase-messaging-sw.js');
+  res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+  res.setHeader('Service-Worker-Allowed', '/');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.sendFile(fcmSwPath);
+});
 
 // Digital Asset Links Endpoint for Android TWA APK (Removes Chrome URL bar)
 app.get('/.well-known/assetlinks.json', (req, res) => {
