@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { User as FirebaseUser } from 'firebase/auth';
 import { 
-  auth,
   signInWithGoogle, 
   signInWithGoogleRedirect,
   logOut, 
@@ -28,15 +27,12 @@ import {
   ShieldCheck,
   AlertCircle,
   ExternalLink,
-  UserPlus,
-  Sparkles
+  UserPlus
 } from 'lucide-react';
-import { PlayerProfile } from '../types';
 
 interface AuthCardProps {
   currentUser: FirebaseUser | null;
   isSyncing?: boolean;
-  player?: PlayerProfile | any;
   onUserChange?: (user: FirebaseUser | null) => void;
   onUpdatePlayer?: (updated: { name?: string }) => void;
   onManualSync?: () => void;
@@ -49,7 +45,6 @@ type AuthMode = 'signin' | 'signup' | 'forgot_password';
 export const AuthCard: React.FC<AuthCardProps> = ({
   currentUser,
   isSyncing = false,
-  player,
   onUserChange,
   onUpdatePlayer,
   onManualSync,
@@ -59,12 +54,9 @@ export const AuthCard: React.FC<AuthCardProps> = ({
   // Mode: Sign In (Email+Password) vs Sign Up (Email+Password) vs Forgot Password
   const [authMode, setAuthMode] = useState<AuthMode>('signin');
 
-  // Fallback to active memory auth user if available
-  const effectiveUser = currentUser || (auth.currentUser && !auth.currentUser.isAnonymous ? auth.currentUser : null);
-
   // Form Fields
-  const [name, setName] = useState<string>(() => player?.name && player.name !== 'Govt Aspirant' ? player.name : '');
-  const [email, setEmail] = useState<string>(() => player?.email || '');
+  const [name, setName] = useState<string>('');
+  const [email, setEmail] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [showPassword, setShowPassword] = useState<boolean>(false);
 
@@ -249,7 +241,7 @@ export const AuthCard: React.FC<AuthCardProps> = ({
           <div>
             <div className="flex items-center gap-1.5">
               <span className="text-xs font-black text-slate-100">Aspirant Cloud Sync</span>
-              {effectiveUser ? (
+              {currentUser ? (
                 <span className="text-[9px] bg-emerald-950/90 text-emerald-300 border border-emerald-600/60 px-1.5 py-0.2 rounded font-bold flex items-center gap-0.5">
                   <ShieldCheck className="w-2.5 h-2.5" />
                   Synced
@@ -261,35 +253,13 @@ export const AuthCard: React.FC<AuthCardProps> = ({
               )}
             </div>
             <p className="text-[10px] text-slate-400">
-              {effectiveUser
-                ? `Logged in as ${extractCleanUserName(effectiveUser.displayName, effectiveUser.email)}`
-                : (player?.name && player.name !== 'Govt Aspirant')
-                  ? `Device profile saved locally as ${player.name} (${player.rankPoints || 100} LP).`
-                  : 'Sign in or register directly to protect your rank & streak.'}
+              {currentUser
+                ? `Logged in as ${extractCleanUserName(currentUser.displayName, currentUser.email)}`
+                : 'Sign in or register directly to protect your rank & streak.'}
             </p>
           </div>
         </div>
       </div>
-
-      {/* Local Profile Context Box when in Guest Mode */}
-      {!effectiveUser && player?.name && (player.name !== 'Govt Aspirant' || player.rankPoints > 100) && (
-        <div className="bg-slate-900/90 border border-amber-500/30 rounded-xl p-2.5 flex items-center justify-between gap-2 text-xs">
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="w-7 h-7 rounded-full bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-sm shrink-0">
-              {player.avatar || '👨‍💼'}
-            </div>
-            <div className="min-w-0">
-              <div className="text-slate-200 font-bold text-[11px] truncate flex items-center gap-1">
-                <span>{player.name}</span>
-                <span className="text-amber-400 font-mono text-[10px]">({player.rankPoints} LP • Lv.{player.level})</span>
-              </div>
-              <div className="text-[10px] text-slate-400 leading-tight">
-                Connect your account below to back up this rank to the cloud.
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Alert Banners */}
       {errorMsg && (
@@ -329,33 +299,33 @@ export const AuthCard: React.FC<AuthCardProps> = ({
       )}
 
       {/* Authenticated View */}
-      {effectiveUser ? (
+      {currentUser ? (
         <div className="space-y-2 pt-1 border-t border-slate-800/80">
           <div className="flex items-center justify-between text-xs bg-slate-900/90 p-2.5 rounded-xl border border-slate-800">
             <div className="flex items-center gap-2 overflow-hidden">
-              {effectiveUser.photoURL ? (
+              {currentUser.photoURL ? (
                 <img
-                  src={effectiveUser.photoURL}
+                  src={currentUser.photoURL}
                   alt="avatar"
                   className="w-8 h-8 rounded-full border border-indigo-400 shrink-0 object-cover"
                   referrerPolicy="no-referrer"
                 />
               ) : (
                 <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-indigo-600 to-purple-600 text-white flex items-center justify-center text-xs font-black shrink-0 shadow-sm">
-                  {extractCleanUserName(effectiveUser.displayName, effectiveUser.email).charAt(0).toUpperCase()}
+                  {extractCleanUserName(currentUser.displayName, currentUser.email).charAt(0).toUpperCase()}
                 </div>
               )}
               <div className="truncate">
                 <div className="text-xs text-slate-100 font-bold truncate flex items-center gap-1">
-                  <span>{extractCleanUserName(effectiveUser.displayName, effectiveUser.email)}</span>
-                  {effectiveUser.emailVerified && (
+                  <span>{extractCleanUserName(currentUser.displayName, currentUser.email)}</span>
+                  {currentUser.emailVerified && (
                     <span title="Email Verified">
                       <ShieldCheck className="w-3 h-3 text-emerald-400" />
                     </span>
                   )}
                 </div>
                 <div className="text-[10px] text-slate-400 font-mono truncate">
-                  {effectiveUser.email || 'Cloud Account Active'}
+                  {currentUser.email || 'Cloud Account Active'}
                 </div>
               </div>
             </div>

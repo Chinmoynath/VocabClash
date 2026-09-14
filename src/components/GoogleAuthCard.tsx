@@ -5,7 +5,6 @@ import { AuthCard } from './AuthCard';
 interface GoogleAuthCardProps {
   currentUser: FirebaseUser | null;
   isSyncing: boolean;
-  player?: any;
   onUserChange?: (user: FirebaseUser | null) => void;
   onUpdatePlayer?: (updated: { name?: string }) => void;
   onManualSync?: () => void;

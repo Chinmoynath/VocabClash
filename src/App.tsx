@@ -416,13 +416,7 @@ function getVirtualRouteDetails(params: {
 
 export default function App() {
   // Firebase Auth state
-  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(() => {
-    try {
-      return (auth?.currentUser && !auth.currentUser.isAnonymous) ? auth.currentUser : null;
-    } catch {
-      return null;
-    }
-  });
+  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const isInitialCloudLoad = useRef<boolean>(true);
   const previousUserUidRef = useRef<string | null>(null);
