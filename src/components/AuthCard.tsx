@@ -11,6 +11,7 @@ import {
 } from '../services/firebaseService';
 import { soundManager } from '../utils/audio';
 import { extractCleanUserName } from '../utils/nameHelper';
+import { validateProperEmail, validateAspirantName, COMMON_AUTOCOMPLETE_DOMAINS } from '../utils/emailValidator';
 import { 
   Cloud, 
   CheckCircle2, 
@@ -138,12 +139,14 @@ export const AuthCard: React.FC<AuthCardProps> = ({
     e.preventDefault();
     const cleanEmail = email.trim().toLowerCase();
     
-    if (!name.trim()) {
-      setErrorMsg('Please enter your aspirant name.');
+    const nameValidation = validateAspirantName(name);
+    if (!nameValidation.isValid) {
+      setErrorMsg(nameValidation.error || 'Please enter a valid aspirant name.');
       return;
     }
-    if (!cleanEmail || !cleanEmail.includes('@') || !cleanEmail.includes('.')) {
-      setErrorMsg('Please enter a valid email address.');
+    const emailValidation = validateProperEmail(cleanEmail);
+    if (!emailValidation.isValid) {
+      setErrorMsg(emailValidation.error || 'Please enter a valid email address.');
       return;
     }
     if (password.length < 6) {
@@ -182,8 +185,10 @@ export const AuthCard: React.FC<AuthCardProps> = ({
   // Handle Forgot Password Reset Email
   const handlePasswordReset = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email.trim() || !email.includes('@')) {
-      setErrorMsg('Please enter a valid email address to receive the password reset link.');
+    const cleanEmail = email.trim().toLowerCase();
+    const emailValidation = validateProperEmail(cleanEmail);
+    if (!emailValidation.isValid) {
+      setErrorMsg(emailValidation.error || 'Please enter a valid email address to receive the password reset link.');
       return;
     }
 
@@ -191,9 +196,9 @@ export const AuthCard: React.FC<AuthCardProps> = ({
       soundManager.playTap();
       setLoading(true);
       setErrorMsg(null);
-      await sendPasswordReset(email.trim());
+      await sendPasswordReset(cleanEmail);
       soundManager.playCorrect();
-      setSuccessMsg(`Password reset link sent to ${email.trim()}! Please check your Inbox and Spam/Junk folder, then click the link to reset your password.`);
+      setSuccessMsg(`Password reset link sent to ${cleanEmail}! Please check your Inbox and Spam/Junk folder, then click the link to reset your password.`);
     } catch (err: any) {
       console.error('Password reset error:', err);
       setErrorMsg(getFriendlyAuthErrorMessage(err));
@@ -485,18 +490,36 @@ export const AuthCard: React.FC<AuthCardProps> = ({
                 </div>
 
                 {/* Email */}
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-500">
-                    <Mail className="w-3.5 h-3.5" />
+                <div className="space-y-1">
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-500">
+                      <Mail className="w-3.5 h-3.5" />
+                    </div>
+                    <input
+                      type="email"
+                      required
+                      value={email}
+                      onChange={e => setEmail(e.target.value)}
+                      placeholder="yourname@gmail.com"
+                      className="w-full bg-slate-900/90 border border-slate-700/90 rounded-xl pl-8 pr-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all font-mono"
+                    />
                   </div>
-                  <input
-                    type="email"
-                    required
-                    value={email}
-                    onChange={e => setEmail(e.target.value)}
-                    placeholder="Email address"
-                    className="w-full bg-slate-900/90 border border-slate-700/90 rounded-xl pl-8 pr-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all font-mono"
-                  />
+
+                  {/* Domain Quick Chips if typing prefix */}
+                  {email && !email.includes('@') && (
+                    <div className="flex flex-wrap gap-1 pt-0.5">
+                      {COMMON_AUTOCOMPLETE_DOMAINS.slice(0, 3).map(dom => (
+                        <button
+                          key={dom}
+                          type="button"
+                          onClick={() => setEmail(`${email.trim()}@${dom}`)}
+                          className="px-1.5 py-0.5 rounded bg-slate-800/80 hover:bg-indigo-900/60 border border-slate-700 text-[10px] text-indigo-300 font-mono transition-colors"
+                        >
+                          @{dom}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* Password */}

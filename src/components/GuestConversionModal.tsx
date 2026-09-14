@@ -25,6 +25,7 @@ import {
   getFriendlyAuthErrorMessage 
 } from '../services/firebaseService';
 import { soundManager } from '../utils/audio';
+import { validateProperEmail, validateAspirantName, COMMON_AUTOCOMPLETE_DOMAINS } from '../utils/emailValidator';
 import { 
   recordBattleSignupPromptView, 
   recordBattleSignupCompleted 
@@ -118,8 +119,9 @@ export const GuestConversionModal: React.FC<GuestConversionModalProps> = ({
     const cleanEmail = emailInput.trim().toLowerCase();
 
     if (emailAuthMode === 'forgot') {
-      if (!cleanEmail || !cleanEmail.includes('@') || !cleanEmail.includes('.')) {
-        setErrorMessage('Please enter a valid email address.');
+      const emailValidation = validateProperEmail(cleanEmail);
+      if (!emailValidation.isValid) {
+        setErrorMessage(emailValidation.error || 'Please enter a valid email address.');
         return;
       }
       try {
@@ -139,13 +141,17 @@ export const GuestConversionModal: React.FC<GuestConversionModalProps> = ({
       return;
     }
 
-    if (emailAuthMode === 'signup' && !nameInput.trim()) {
-      setErrorMessage('Please enter your name.');
-      return;
+    if (emailAuthMode === 'signup') {
+      const nameValidation = validateAspirantName(nameInput);
+      if (!nameValidation.isValid) {
+        setErrorMessage(nameValidation.error || 'Please enter a valid aspirant name.');
+        return;
+      }
     }
 
-    if (!cleanEmail || !cleanEmail.includes('@') || !cleanEmail.includes('.')) {
-      setErrorMessage('Please enter a valid email address.');
+    const emailValidation = validateProperEmail(cleanEmail);
+    if (!emailValidation.isValid) {
+      setErrorMessage(emailValidation.error || 'Please enter a valid email address.');
       return;
     }
 
@@ -473,10 +479,24 @@ export const GuestConversionModal: React.FC<GuestConversionModalProps> = ({
                     value={emailInput}
                     onChange={(e) => setEmailInput(e.target.value)}
                     placeholder="aspirant@gmail.com"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-sky-500 transition-colors"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-sky-500 transition-colors font-mono"
                     required
                   />
                 </div>
+                {emailInput && !emailInput.includes('@') && (
+                  <div className="flex flex-wrap gap-1 pt-0.5">
+                    {COMMON_AUTOCOMPLETE_DOMAINS.slice(0, 3).map(dom => (
+                      <button
+                        key={dom}
+                        type="button"
+                        onClick={() => setEmailInput(`${emailInput.trim()}@${dom}`)}
+                        className="px-1.5 py-0.5 rounded bg-slate-900 hover:bg-sky-950 border border-slate-800 text-[10px] text-sky-400 font-mono transition-colors"
+                      >
+                        @{dom}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Password field (Not in forgot mode) */}

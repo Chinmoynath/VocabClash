@@ -37,6 +37,7 @@ import {
 import firebaseConfig from '../../firebase-applet-config.json';
 import { PlayerProfile, UserSubscription, DailyStreakState, SavedWord, QuestionCategory, ExamType } from '../types';
 import { DailyTargetState } from '../utils/dailyTargetManager';
+import { validateProperEmail } from '../utils/emailValidator';
 
 // Suppress internal Firestore connection retry & offline warnings
 try {
@@ -511,12 +512,18 @@ export async function registerWithEmailPassword(
   password: string, 
   displayName?: string
 ): Promise<FirebaseUser> {
+  const cleanEmail = email.trim().toLowerCase();
+  const validation = validateProperEmail(cleanEmail);
+  if (!validation.isValid) {
+    throw new Error(validation.error || 'Please enter a valid, non-disposable email address.');
+  }
+
   const trimmedName = displayName?.trim();
   if (trimmedName) {
     setPendingRegistrationDisplayName(trimmedName);
   }
   try {
-    const userCredential = await createUserWithEmailAndPassword(auth, email.trim(), password);
+    const userCredential = await createUserWithEmailAndPassword(auth, cleanEmail, password);
     if (trimmedName) {
       await updateProfile(userCredential.user, {
         displayName: trimmedName,

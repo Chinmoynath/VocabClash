@@ -37,6 +37,7 @@ import {
   FriendLobby 
 } from '../types';
 import { soundManager } from '../utils/audio';
+import { validateProperEmail } from '../utils/emailValidator';
 import { 
   createFriendLobby, 
   joinFriendLobby, 
@@ -204,10 +205,14 @@ export const FriendLobbyModal: React.FC<FriendLobbyModalProps> = ({
   // Handle Email / Password Sign-In & Sign-Up
   const handleEmailAuthSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!emailInput.trim()) {
-      setAuthError('Please enter your email address.');
+    const cleanEmail = emailInput.trim().toLowerCase();
+    
+    const emailValidation = validateProperEmail(cleanEmail);
+    if (!emailValidation.isValid) {
+      setAuthError(emailValidation.error || 'Please enter a valid email address.');
       return;
     }
+
     if (emailAuthMode !== 'forgot' && !passwordInput) {
       setAuthError('Please enter your password.');
       return;
@@ -224,14 +229,14 @@ export const FriendLobbyModal: React.FC<FriendLobbyModalProps> = ({
       setAuthSuccessMessage(null);
 
       if (emailAuthMode === 'signin') {
-        const user = await signInWithEmailPassword(emailInput.trim(), passwordInput);
+        const user = await signInWithEmailPassword(cleanEmail, passwordInput);
         soundManager.playCorrect();
         if (onUserChange) {
           onUserChange(user);
         }
       } else if (emailAuthMode === 'signup') {
         const user = await registerWithEmailPassword(
-          emailInput.trim(), 
+          cleanEmail, 
           passwordInput, 
           nameInput.trim() || undefined
         );
@@ -240,9 +245,9 @@ export const FriendLobbyModal: React.FC<FriendLobbyModalProps> = ({
           onUserChange(user);
         }
       } else if (emailAuthMode === 'forgot') {
-        await sendPasswordReset(emailInput.trim());
+        await sendPasswordReset(cleanEmail);
         soundManager.playCorrect();
-        setAuthSuccessMessage(`Password reset link sent to ${emailInput.trim()}! Check your inbox.`);
+        setAuthSuccessMessage(`Password reset link sent to ${cleanEmail}! Check your inbox.`);
         setEmailAuthMode('signin');
       }
     } catch (err: any) {
