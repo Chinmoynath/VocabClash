@@ -155,18 +155,52 @@ export async function purchaseWithGooglePlay(
   userId?: string,
   userEmail?: string
 ): Promise<UserSubscription> {
-  const service = await getPlayDigitalGoodsService();
-  if (!service) {
-    throw new Error('Google Play Billing is not supported in this environment.');
-  }
-
   const playMapping = mapPlanToGooglePlay(plan.id);
-  console.log(`[Payments] Product: ${playMapping.productId}`);
-  if (playMapping.basePlanId) {
-    console.log(`[Payments] Base plan: ${playMapping.basePlanId}`);
+
+  console.log('[Play Billing] Checking Digital Goods API');
+
+  let service: DigitalGoodsService | null = null;
+  try {
+    service = await getPlayDigitalGoodsService();
+  } catch (serviceErr: any) {
+    console.error('[Play Billing] Error getting Digital Goods service:', serviceErr?.name, serviceErr?.message);
   }
 
-  if (typeof window.PaymentRequest === 'undefined') {
+  if (!service) {
+    console.error('[Play Billing] Digital Goods service NOT obtained (service is null/undefined)');
+    throw new Error('Google Play Digital Goods service is not available on this device/environment.');
+  }
+
+  console.log('[Play Billing] Digital Goods service obtained');
+
+  // Fetch item details
+  console.log('[Play Billing] Fetching item details');
+  let itemDetailsResult: DigitalGoodsItemDetails[] = [];
+  const skusToQuery = Array.from(new Set([playMapping.sku, playMapping.productId]));
+
+  try {
+    itemDetailsResult = await service.getDetails(skusToQuery);
+    console.log('[Play Billing] Item details result:', JSON.stringify(itemDetailsResult, null, 2));
+  } catch (detailsErr: any) {
+    console.warn('[Play Billing] getDetails error:', detailsErr?.name, detailsErr?.message);
+  }
+
+  // Determine SKU for PaymentRequest
+  let skuToUse = playMapping.sku;
+  if (itemDetailsResult && itemDetailsResult.length > 0) {
+    const exactMatch = itemDetailsResult.find(item => item.itemId === playMapping.sku);
+    const baseMatch = itemDetailsResult.find(item => item.itemId === playMapping.productId);
+    if (exactMatch) {
+      skuToUse = exactMatch.itemId;
+    } else if (baseMatch && playMapping.itemType === 'one_time') {
+      skuToUse = baseMatch.itemId;
+    }
+  }
+
+  console.log('[Play Billing] Creating PaymentRequest');
+
+  if (typeof window === 'undefined' || typeof window.PaymentRequest === 'undefined') {
+    console.error('[Play Billing] PaymentRequest API is undefined on window');
     throw new Error('Payment Request API is not available on this browser.');
   }
 
@@ -174,7 +208,7 @@ export async function purchaseWithGooglePlay(
     {
       supportedMethods: PLAY_BILLING_METHOD,
       data: {
-        sku: playMapping.sku,
+        sku: skuToUse,
       },
     },
   ];
@@ -189,16 +223,35 @@ export async function purchaseWithGooglePlay(
     },
   };
 
-  const request = new window.PaymentRequest(paymentMethodData, paymentDetails);
+  let request: any = null;
+  try {
+    request = new window.PaymentRequest(paymentMethodData, paymentDetails);
+    console.log('[Play Billing] PaymentRequest created');
+  } catch (createErr: any) {
+    console.error('[Play Billing] PaymentRequest creation FAILED');
+    console.error('error.name:', createErr?.name);
+    console.error('error.message:', createErr?.message);
+    throw createErr;
+  }
+
+  console.log('[Play Billing] Calling paymentRequest.show()');
 
   let paymentResponse: any = null;
   try {
     paymentResponse = await request.show();
+    console.log('[Play Billing] Payment sheet opened');
   } catch (err: any) {
+    console.error('[Play Billing] paymentRequest.show() FAILED');
+    console.error('error.name:', err?.name);
+    console.error('error.message:', err?.message);
+    if (err?.stack) {
+      console.error('error.stack:', err.stack);
+    }
+
     if (err.name === 'AbortError' || err.message?.includes('AbortError') || err.message?.includes('cancel')) {
       throw new Error('Payment was cancelled.');
     }
-    throw new Error(`Google Play Billing error: ${err.message || 'Payment initiation failed'}`);
+    throw new Error(`Google Play Billing error (${err.name || 'Error'}): ${err.message || 'Payment initiation failed'}`);
   }
 
   if (!paymentResponse) {
@@ -208,6 +261,8 @@ export async function purchaseWithGooglePlay(
   const details = paymentResponse.details || {};
   const purchaseToken = details.token || details.purchaseToken || details.orderId;
 
+  console.log('[Play Billing] Purchase token received, proceeding with verification');
+
   if (!purchaseToken) {
     await paymentResponse.complete('fail').catch(() => {});
     throw new Error('No purchase token was returned from Google Play.');
@@ -216,7 +271,7 @@ export async function purchaseWithGooglePlay(
   // Verify purchase on secure backend
   const verifyResult = await verifyGooglePlayPurchaseOnBackend({
     purchaseToken,
-    sku: playMapping.sku,
+    sku: skuToUse,
     productId: playMapping.productId,
     basePlanId: playMapping.basePlanId,
     planId: plan.id,
@@ -236,8 +291,9 @@ export async function purchaseWithGooglePlay(
   try {
     const ackType = playMapping.itemType === 'one_time' ? 'onetime' : 'repeatable';
     await service.acknowledge(purchaseToken, ackType);
-  } catch (ackErr) {
-    console.warn('[Payments] Purchase acknowledge notice (may already be acknowledged):', ackErr);
+    console.log('[Play Billing] Purchase acknowledged successfully');
+  } catch (ackErr: any) {
+    console.warn('[Play Billing] Purchase acknowledge notice (may already be acknowledged):', ackErr?.message);
   }
 
   // Construct verified UserSubscription

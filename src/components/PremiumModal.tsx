@@ -13,6 +13,7 @@ import {
   PaymentProvider 
 } from '../services/paymentProviderService';
 import { restoreGooglePlayPurchases } from '../services/googlePlayBillingService';
+import { mapPlanToGooglePlay } from '../config/playProducts';
 import { GoogleAuthCard } from './GoogleAuthCard';
 import { VocabClashLogo } from './VocabClashLogo';
 import { extractCleanUserName } from '../utils/nameHelper';
@@ -155,6 +156,12 @@ export const PremiumModal: React.FC<PremiumModalProps> = ({
   ];
 
   const executePurchaseFlow = async () => {
+    const playMapping = mapPlanToGooglePlay(selectedPlan.id);
+    console.log('[Play Billing] Purchase clicked');
+    console.log(`[Play Billing] Selected plan: ${selectedPlan.id}`);
+    console.log(`[Play Billing] Product ID: ${playMapping.productId}`);
+    console.log(`[Play Billing] Base plan: ${playMapping.basePlanId || 'none'}`);
+
     if (isProcessing) return;
 
     setIsProcessing(true);
