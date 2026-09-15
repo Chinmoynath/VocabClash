@@ -174,15 +174,19 @@ export async function purchaseWithGooglePlay(
   console.log('[Play Billing] Digital Goods service obtained');
 
   // Fetch item details
-  console.log('[Play Billing] Fetching item details');
-  let itemDetailsResult: DigitalGoodsItemDetails[] = [];
   const skusToQuery = Array.from(new Set([playMapping.sku, playMapping.productId]));
+  console.log(`[Play Billing] Requesting details:\n${skusToQuery.join('\n')}`);
+  let itemDetailsResult: DigitalGoodsItemDetails[] = [];
 
   try {
     itemDetailsResult = await service.getDetails(skusToQuery);
-    console.log('[Play Billing] Item details result:', JSON.stringify(itemDetailsResult, null, 2));
+    console.log('[Play Billing] Details returned:\n', JSON.stringify(itemDetailsResult, null, 2));
   } catch (detailsErr: any) {
-    console.warn('[Play Billing] getDetails error:', detailsErr?.name, detailsErr?.message);
+    console.error('[Play Billing] getDetails error:');
+    console.error('[Play Billing] FULL ERROR:', detailsErr);
+    console.error('[Play Billing] name:', detailsErr?.name);
+    console.error('[Play Billing] message:', detailsErr?.message);
+    console.error('[Play Billing] stack:', detailsErr?.stack);
   }
 
   // Determine SKU for PaymentRequest
@@ -201,7 +205,9 @@ export async function purchaseWithGooglePlay(
 
   if (typeof window === 'undefined' || typeof window.PaymentRequest === 'undefined') {
     console.error('[Play Billing] PaymentRequest API is undefined on window');
-    throw new Error('Payment Request API is not available on this browser.');
+    const err = new Error('Payment Request API is not available on this browser.');
+    (err as any).name = 'NotSupportedError';
+    throw err;
   }
 
   const paymentMethodData = [
@@ -229,8 +235,10 @@ export async function purchaseWithGooglePlay(
     console.log('[Play Billing] PaymentRequest created');
   } catch (createErr: any) {
     console.error('[Play Billing] PaymentRequest creation FAILED');
-    console.error('error.name:', createErr?.name);
-    console.error('error.message:', createErr?.message);
+    console.error('[Play Billing] FULL ERROR:', createErr);
+    console.error('[Play Billing] name:', createErr?.name);
+    console.error('[Play Billing] message:', createErr?.message);
+    console.error('[Play Billing] stack:', createErr?.stack);
     throw createErr;
   }
 
@@ -242,16 +250,14 @@ export async function purchaseWithGooglePlay(
     console.log('[Play Billing] Payment sheet opened');
   } catch (err: any) {
     console.error('[Play Billing] paymentRequest.show() FAILED');
-    console.error('error.name:', err?.name);
-    console.error('error.message:', err?.message);
-    if (err?.stack) {
-      console.error('error.stack:', err.stack);
-    }
+    console.error('[Play Billing] FULL ERROR:', err);
+    console.error('[Play Billing] name:', err?.name);
+    console.error('[Play Billing] message:', err?.message);
+    console.error('[Play Billing] stack:', err?.stack);
 
-    if (err.name === 'AbortError' || err.message?.includes('AbortError') || err.message?.includes('cancel')) {
-      throw new Error('Payment was cancelled.');
-    }
-    throw new Error(`Google Play Billing error (${err.name || 'Error'}): ${err.message || 'Payment initiation failed'}`);
+    const errorToThrow = new Error(`[${err?.name || 'Error'}]: ${err?.message || 'Payment initiation failed'}`);
+    (errorToThrow as any).name = err?.name || 'PlayBillingError';
+    throw errorToThrow;
   }
 
   if (!paymentResponse) {

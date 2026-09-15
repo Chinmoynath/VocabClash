@@ -188,14 +188,17 @@ export const PremiumModal: React.FC<PremiumModalProps> = ({
           setStatusMessage(null);
         }, 3500);
       },
-      onError: (err) => {
+      onError: (err: any) => {
         setIsProcessing(false);
+        const errorName = err?.name || 'Error';
         const errorMsg = err?.message || 'Payment was not completed.';
+        const displayText = errorMsg.startsWith('[') ? errorMsg : `[${errorName}]: ${errorMsg}`;
+
         setStatusMessage({
-          text: errorMsg,
+          text: displayText,
           type: 'error',
         });
-        setTimeout(() => setStatusMessage(null), 4500);
+        setTimeout(() => setStatusMessage(null), 10000);
       },
     });
   };
