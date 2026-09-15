@@ -1,4 +1,5 @@
 import { Question, QuestionCategory, QuestionOptionDetail, ExamAppearance } from './index';
+import { QualityIssueDetail, QualityStatus } from './pyqQuality';
 
 export type ReviewStatus = 'approved' | 'needs_review' | 'answer_required' | 'duplicate' | 'rejected';
 
@@ -56,6 +57,8 @@ export interface ExtractedQuestion {
   duplicateConfidence?: 'exact' | 'high' | 'none';
   duplicateOfId?: string;
   duplicateOfQuestion?: string;
+  qualityAuditIssues?: QualityIssueDetail[];
+  qualityStatus?: QualityStatus;
   sourceType: 'pdf_import' | 'manual_text' | 'json_import' | 'verified_pyq' | 'generated_practice';
   sourceFileName?: string;
   pageNumber?: number;
@@ -84,6 +87,7 @@ export interface ImportBatch {
   mergedAppearancesCount?: number;
   conflictsCount?: number;
   newQuestionsCount?: number;
+  qualityFlaggedCount?: number;
   status: 'pending_review' | 'completed' | 'discarded';
 }
 

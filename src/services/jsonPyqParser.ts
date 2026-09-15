@@ -2,6 +2,7 @@ import { Question, QuestionCategory } from '../types';
 import { ExtractedQuestion, ImportBatch, ReviewStatus } from '../types/pyqImport';
 import { questionBankEngine } from './questionBankEngine';
 import { normalizeTier } from '../config/examMetadataConfig';
+import { validateQuestionQuality } from './pyqQualityValidator';
 import { 
   computeQuestionFingerprint, 
   computeQuestionIdentityKey,
@@ -773,6 +774,24 @@ export function parseAndValidatePyqJSON(
       };
     }
 
+    // Validate question quality using deterministic rules
+    const qualityAudit = validateQuestionQuality({
+      id: canonicalQuestionId,
+      category,
+      wordOrPhrase: targetWord,
+      options: finalOptions,
+      correctIndex: correctIdx,
+      instruction: item.instruction ? String(item.instruction).trim() : undefined,
+    });
+
+    const qualityStatus = qualityAudit.status;
+    const qualityAuditIssues = qualityAudit.issues.length > 0 ? qualityAudit.issues : undefined;
+
+    if (qualityStatus === 'critical' && reviewStatus === 'approved') {
+      reviewStatus = 'needs_review';
+      approvedCount = Math.max(0, approvedCount - 1);
+    }
+
     const extractedItem: ExtractedQuestion = {
       tempId,
       canonicalQuestionId,
@@ -810,6 +829,8 @@ export function parseAndValidatePyqJSON(
       duplicateConfidence,
       duplicateOfId,
       duplicateOfQuestion,
+      qualityAuditIssues,
+      qualityStatus,
       sourceType: itemSourceType,
       isPYQ: itemIsPYQ,
       verified: itemVerified,

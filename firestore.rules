@@ -280,6 +280,12 @@ service cloud.firestore {
       allow create, update, delete: if isPyqAdmin();
     }
 
+    // 8b. Question Reports (Audit / Discrepancies): Authenticated/Public create, Admin manage
+    match /question_reports/{reportId} {
+      allow read, update, delete: if isPyqAdmin();
+      allow create: if true;
+    }
+
     // 9. PYQ Import Batches & Conflicts: Admin-only read/write
     match /pyq_import_batches/{batchId} {
       allow read, write: if isPyqAdmin();

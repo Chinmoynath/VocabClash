@@ -7,12 +7,14 @@ import {
   Send, 
   Check, 
   Mail, 
-  Copy,
-  BookOpen,
-  HelpCircle,
-  Sparkles
+  Copy, 
+  BookOpen, 
+  HelpCircle, 
+  Sparkles,
+  CheckCircle2
 } from 'lucide-react';
 import { Question } from '../types';
+import { submitQuestionReport } from '../services/pyqQualityAuditService';
 
 interface ReportQuestionModalProps {
   question: Question;
@@ -23,11 +25,13 @@ interface ReportQuestionModalProps {
 
 const REPORT_REASONS = [
   { id: 'wrong_answer', label: 'Wrong Correct Answer Key Marked' },
+  { id: 'wrong_options', label: 'Wrong / Mismatched Options' },
+  { id: 'target_in_option', label: 'Target Word/Phrase appears as Option' },
   { id: 'incorrect_meaning', label: 'Hindi / English Meaning is Incorrect' },
   { id: 'typo', label: 'Spelling Mistake / Typo in Question or Options' },
   { id: 'exam_tag', label: 'Incorrect Exam or Year Tag' },
-  { id: 'ambiguous', label: 'Multiple Options Seem Correct' },
-  { id: 'other', label: 'Other Query / Clarification' },
+  { id: 'duplicate', label: 'Duplicate Question' },
+  { id: 'other', label: 'Other Discrepancy / Query' },
 ];
 
 export const ReportQuestionModal: React.FC<ReportQuestionModalProps> = ({
@@ -39,6 +43,7 @@ export const ReportQuestionModal: React.FC<ReportQuestionModalProps> = ({
   const [selectedReason, setSelectedReason] = useState<string>('wrong_answer');
   const [notes, setNotes] = useState<string>('');
   const [copied, setCopied] = useState<boolean>(false);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [submitted, setSubmitted] = useState<boolean>(false);
 
   const SUPPORT_EMAIL = 'support@vocabclash.in';
@@ -76,13 +81,35 @@ Timestamp: ${new Date().toISOString()}
     `.trim();
   };
 
+  const handleSubmitReport = async () => {
+    soundManager.playTap();
+    setIsSubmitting(true);
+    try {
+      const reasonLabel = REPORT_REASONS.find(r => r.id === selectedReason)?.label || selectedReason;
+      await submitQuestionReport({
+        questionId: question.id,
+        category: question.category,
+        wordOrPhrase: question.wordOrPhrase,
+        reason: reasonLabel,
+        notes: notes.trim() || undefined,
+        userEmail: userEmail || undefined,
+        userName: userName || undefined,
+      });
+      setSubmitted(true);
+    } catch (e) {
+      console.warn('Report submission error:', e);
+      setSubmitted(true);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const handleSendEmail = () => {
     soundManager.playTap();
     const subject = encodeURIComponent(`[Question Error Report] ID: ${question.id} - Word: "${question.wordOrPhrase}"`);
     const body = encodeURIComponent(getReportBody());
     const mailtoUrl = `mailto:${SUPPORT_EMAIL}?subject=${subject}&body=${body}`;
     window.open(mailtoUrl, '_blank');
-    setSubmitted(true);
   };
 
   const handleCopy = () => {
@@ -191,35 +218,67 @@ Timestamp: ${new Date().toISOString()}
 
         {/* Action Buttons */}
         <div className="space-y-2">
-          <button
-            onClick={handleSendEmail}
-            className="w-full bg-rose-600 hover:bg-rose-500 active:scale-98 text-white font-extrabold p-3 rounded-2xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-rose-950 transition-all"
-          >
-            <Send className="w-4 h-4" />
-            <span>Send Report via Email ({SUPPORT_EMAIL})</span>
-          </button>
-
-          <button
-            onClick={handleCopy}
-            className="w-full bg-slate-800 hover:bg-slate-750 border border-slate-700 text-slate-200 font-bold p-2 rounded-xl text-xs flex items-center justify-center gap-1.5"
-          >
-            {copied ? (
-              <>
-                <Check className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="text-emerald-400">Report Copied to Clipboard!</span>
-              </>
-            ) : (
-              <>
-                <Copy className="w-3.5 h-3.5 text-slate-400" />
-                <span>Copy Question Details</span>
-              </>
-            )}
-          </button>
-
-          {submitted && (
-            <div className="p-2.5 bg-emerald-950/80 border border-emerald-700/60 rounded-xl text-center text-xs text-emerald-300 font-semibold animate-fadeIn">
-              ✓ Email client opened! Thank you for contributing to 100% error-free PYQ content.
+          {submitted ? (
+            <div className="space-y-2">
+              <div className="p-3 bg-emerald-950/80 border border-emerald-700/60 rounded-2xl text-center text-xs text-emerald-200 font-semibold flex items-center justify-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>Report logged successfully for Admin Review!</span>
+              </div>
+              <button
+                onClick={onClose}
+                className="w-full bg-slate-800 hover:bg-slate-750 text-slate-200 font-bold p-2.5 rounded-xl text-xs transition-colors"
+              >
+                Close
+              </button>
             </div>
+          ) : (
+            <>
+              <button
+                onClick={handleSubmitReport}
+                disabled={isSubmitting}
+                className="w-full bg-rose-600 hover:bg-rose-500 active:scale-98 disabled:opacity-50 text-white font-extrabold p-3 rounded-2xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-rose-950 transition-all"
+              >
+                {isSubmitting ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <span>Submitting Report...</span>
+                  </>
+                ) : (
+                  <>
+                    <Flag className="w-4 h-4" />
+                    <span>Submit Discrepancy Report</span>
+                  </>
+                )}
+              </button>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleSendEmail}
+                  className="flex-1 bg-slate-800/80 hover:bg-slate-750 border border-slate-700 text-slate-300 font-medium p-2 rounded-xl text-[11px] flex items-center justify-center gap-1.5 transition-colors"
+                >
+                  <Mail className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Email Support</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCopy}
+                  className="flex-1 bg-slate-800/80 hover:bg-slate-750 border border-slate-700 text-slate-300 font-medium p-2 rounded-xl text-[11px] flex items-center justify-center gap-1.5 transition-colors"
+                >
+                  {copied ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      <span className="text-emerald-400">Copied!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5 text-slate-400" />
+                      <span>Copy Info</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </>
           )}
         </div>
       </div>

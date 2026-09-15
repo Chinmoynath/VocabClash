@@ -472,7 +472,14 @@ export class QuestionBankEngine {
     try {
       const cloudQuestions = await fetchPublishedQuestionBank();
       if (cloudQuestions && cloudQuestions.length > 0) {
+        if (force) {
+          this.importedPool = [];
+        }
         this.registerApprovedQuestions(cloudQuestions, true);
+        this.lastCloudFetchTime = now;
+      } else if (cloudQuestions && cloudQuestions.length === 0 && force) {
+        this.importedPool = [];
+        this.rebuildConceptMap();
         this.lastCloudFetchTime = now;
       }
     } catch (e) {
@@ -1326,20 +1333,22 @@ export class QuestionBankEngine {
       };
     }
 
+    // Concept cooldown: ~25 questions
     const recentMemoryKeys = new Set([
-      ...questionReviewScheduler.getRecentMemoryKeys().slice(-40),
+      ...questionReviewScheduler.getRecentMemoryKeys().slice(-25),
       ...recentWordsHistory.slice(-25).map(w => buildMemoryKey(targetCategory, w))
     ]);
 
-    const recentQuestionIds = new Set(questionReviewScheduler.getRecentQuestionIds().slice(-100));
+    // Exact PYQ question ID cooldown: ~75 questions
+    const recentQuestionIds = new Set(questionReviewScheduler.getRecentQuestionIds().slice(-75));
     const now = Date.now();
 
-    // 1. Partition concepts
+    // 1. Partition concepts into adaptive buckets
     const dueConcepts: ConceptGroup[] = [];
     const mistakeConcepts: ConceptGroup[] = [];
     const savedConcepts: ConceptGroup[] = [];
     const freshConcepts: ConceptGroup[] = [];
-    const familiarConcepts: ConceptGroup[] = [];
+    const leastSeenConcepts: ConceptGroup[] = [];
 
     for (const group of poolOfConcepts) {
       const isRecentlyPlayed = recentMemoryKeys.has(group.memoryKey);
@@ -1354,62 +1363,95 @@ export class QuestionBankEngine {
           savedConcepts.push(group);
         }
 
+        // Due concept check: in-session ordinal check (20-30 gap) or calendar interval check
         if (questionReviewScheduler.isConceptDue(group.memoryKey, now)) {
           dueConcepts.push(group);
-        } else if (state.wrongCount > 0 && state.consecutiveCorrect < 2 && !isRecentlyPlayed) {
+        } else if ((state.wrongCount > 0 || state.lapseCount > 0) && state.consecutiveCorrect < 3 && !isRecentlyPlayed) {
           mistakeConcepts.push(group);
         } else if (!isRecentlyPlayed) {
-          familiarConcepts.push(group);
+          leastSeenConcepts.push(group);
         }
       }
     }
 
-    // 2. Select Concept Group based on target distribution:
-    // ~65-70% Fresh, ~15-20% Due, ~10% Mistakes/Weak, ~5% Saved
+    // Experienced user graceful scaling: if unseen questions are scarce, replenish from least-seen
+    if (freshConcepts.length === 0 && leastSeenConcepts.length > 0) {
+      leastSeenConcepts.sort((a, b) => {
+        const sa = questionReviewScheduler.getReviewState(a.memoryKey);
+        const sb = questionReviewScheduler.getReviewState(b.memoryKey);
+        const seenDiff = (sa?.seenCount || 0) - (sb?.seenCount || 0);
+        if (seenDiff !== 0) return seenDiff;
+        return (sa?.lastSeenAt || 0) - (sb?.lastSeenAt || 0);
+      });
+      freshConcepts.push(...leastSeenConcepts.slice(0, Math.max(10, Math.ceil(leastSeenConcepts.length * 0.4))));
+    }
+
+    // 2. Select Concept Group based on target distribution via weighted randomness:
+    // ~70% Fresh / Least-seen, ~15% Weak / Wrong, ~10% Due, ~5% Saved
+    interface BucketCandidate {
+      name: 'fresh' | 'mistake' | 'due' | 'saved';
+      weight: number;
+      groups: ConceptGroup[];
+      reason: Question['reviewReason'];
+    }
+
+    const activeBuckets: BucketCandidate[] = [];
+    if (freshConcepts.length > 0) {
+      activeBuckets.push({ name: 'fresh', weight: 0.70, groups: freshConcepts, reason: 'fresh' });
+    }
+    if (mistakeConcepts.length > 0) {
+      activeBuckets.push({ name: 'mistake', weight: 0.15, groups: mistakeConcepts, reason: 'mistake_review' });
+    }
+    if (dueConcepts.length > 0) {
+      activeBuckets.push({ name: 'due', weight: 0.10, groups: dueConcepts, reason: 'due_review' });
+    }
+    if (savedConcepts.length > 0) {
+      activeBuckets.push({ name: 'saved', weight: 0.05, groups: savedConcepts, reason: 'saved_review' });
+    }
+
     let selectedGroup: ConceptGroup | null = null;
     let reviewReason: Question['reviewReason'] = 'fresh';
 
-    const roll = Math.random();
-
-    if (dueConcepts.length > 0 && (roll < 0.22 || freshConcepts.length === 0)) {
-      selectedGroup = dueConcepts[Math.floor(Math.random() * dueConcepts.length)];
-      reviewReason = 'due_review';
-    } else if (mistakeConcepts.length > 0 && (roll < 0.32 || freshConcepts.length === 0)) {
-      selectedGroup = mistakeConcepts[Math.floor(Math.random() * mistakeConcepts.length)];
-      reviewReason = 'mistake_review';
-    } else if (savedConcepts.length > 0 && roll < 0.37 && Math.random() < 0.4) {
-      selectedGroup = savedConcepts[Math.floor(Math.random() * savedConcepts.length)];
-      reviewReason = 'saved_review';
-    } else if (freshConcepts.length > 0) {
-      // Prioritize fresh concepts with verified PYQs (20% boost)
-      const freshWithVerified = freshConcepts.filter(g => g.verifiedVariants.length > 0);
-      if (freshWithVerified.length > 0 && Math.random() < 0.65) {
-        selectedGroup = freshWithVerified[Math.floor(Math.random() * freshWithVerified.length)];
-      } else {
-        selectedGroup = freshConcepts[Math.floor(Math.random() * freshConcepts.length)];
+    if (activeBuckets.length > 0) {
+      const totalActiveWeight = activeBuckets.reduce((sum, b) => sum + b.weight, 0);
+      let roll = Math.random() * totalActiveWeight;
+      let chosenBucket = activeBuckets[0];
+      for (const b of activeBuckets) {
+        if (roll < b.weight) {
+          chosenBucket = b;
+          break;
+        }
+        roll -= b.weight;
       }
-      reviewReason = 'fresh';
-    } else if (familiarConcepts.length > 0) {
-      // Pick familiar concept with oldest last-seen
-      familiarConcepts.sort((a, b) => {
-        const sa = questionReviewScheduler.getReviewState(a.memoryKey);
-        const sb = questionReviewScheduler.getReviewState(b.memoryKey);
-        return (sa?.lastSeenAt || 0) - (sb?.lastSeenAt || 0);
-      });
-      selectedGroup = familiarConcepts[0];
-      reviewReason = 'pool_exhausted_review';
+
+      reviewReason = chosenBucket.reason;
+      if (chosenBucket.name === 'fresh') {
+        // Prioritize fresh concepts with verified authentic PYQs (65% preference)
+        const withVerified = chosenBucket.groups.filter(g => g.verifiedVariants.length > 0);
+        if (withVerified.length > 0 && Math.random() < 0.65) {
+          selectedGroup = withVerified[Math.floor(Math.random() * withVerified.length)];
+        } else {
+          selectedGroup = chosenBucket.groups[Math.floor(Math.random() * chosenBucket.groups.length)];
+        }
+      } else {
+        selectedGroup = chosenBucket.groups[Math.floor(Math.random() * chosenBucket.groups.length)];
+      }
     } else {
-      // Fallback to any non-empty group in the candidate pool
-      selectedGroup = poolOfConcepts[Math.floor(Math.random() * poolOfConcepts.length)];
+      // Graceful relaxation: pick least-recently-seen concept from poolOfConcepts
+      const poolWithHistory = poolOfConcepts.map(g => ({
+        group: g,
+        lastSeen: questionReviewScheduler.getReviewState(g.memoryKey)?.lastSeenAt || 0,
+      })).sort((a, b) => a.lastSeen - b.lastSeen);
+      selectedGroup = poolWithHistory[0]?.group || poolOfConcepts[Math.floor(Math.random() * poolOfConcepts.length)];
       reviewReason = 'pool_exhausted_review';
     }
 
     // 3. Select Question Variant within the chosen Concept matching target exam
+    // RULE #5: SAME CONCEPT, DIFFERENT PYQ (prefer different question variant before repeating exact PYQ)
     const matchingVariants = (targetFamily !== 'all')
       ? selectedGroup.variants.filter(v => this.matchesExam(v, exam))
       : selectedGroup.variants;
 
-    // CRITICAL BUG FIX: Never fall back to unmatching variants across exam families
     const candidateVariants = (targetFamily !== 'all')
       ? matchingVariants
       : (matchingVariants.length > 0 ? matchingVariants : selectedGroup.variants);
@@ -1417,18 +1459,31 @@ export class QuestionBankEngine {
     let chosenQuestion: Question | null = null;
 
     if (candidateVariants.length > 0) {
-      const unseenVerified = candidateVariants.filter(
-        v => !recentQuestionIds.has(v.id) && (v.verified || v.sourceType === 'verified_pyq' || v.isPYQ)
+      const conceptState = questionReviewScheduler.getReviewState(selectedGroup.memoryKey);
+      const conceptRecentIds = new Set(conceptState?.recentQuestionIds || []);
+
+      // Priority 1: Unseen in global ~75 cooldown AND DIFFERENT from the most recently seen question for this concept
+      const unseenDifferentVariants = candidateVariants.filter(
+        v => !recentQuestionIds.has(v.id) && !conceptRecentIds.has(v.id)
       );
-      const unseenCandidate = candidateVariants.filter(
+
+      // Priority 2: Unseen in global ~75 cooldown
+      const unseenVariants = candidateVariants.filter(
         v => !recentQuestionIds.has(v.id)
       );
 
-      if (unseenVerified.length > 0) {
-        chosenQuestion = unseenVerified[Math.floor(Math.random() * unseenVerified.length)];
-      } else if (unseenCandidate.length > 0) {
-        chosenQuestion = unseenCandidate[Math.floor(Math.random() * unseenCandidate.length)];
+      if (unseenDifferentVariants.length > 0) {
+        const verified = unseenDifferentVariants.filter(v => v.verified || v.sourceType === 'verified_pyq' || v.isPYQ);
+        chosenQuestion = verified.length > 0
+          ? verified[Math.floor(Math.random() * verified.length)]
+          : unseenDifferentVariants[Math.floor(Math.random() * unseenDifferentVariants.length)];
+      } else if (unseenVariants.length > 0) {
+        const verified = unseenVariants.filter(v => v.verified || v.sourceType === 'verified_pyq' || v.isPYQ);
+        chosenQuestion = verified.length > 0
+          ? verified[Math.floor(Math.random() * verified.length)]
+          : unseenVariants[Math.floor(Math.random() * unseenVariants.length)];
       } else {
+        // Priority 3: Fallback if all variants are in cooldown; pick randomly from candidate variants
         chosenQuestion = candidateVariants[Math.floor(Math.random() * candidateVariants.length)];
       }
     }

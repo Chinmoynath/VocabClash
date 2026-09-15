@@ -125,17 +125,17 @@ class QuestionReviewScheduler {
 
     this.sessionOrdinal += 1;
 
-    // Track recency
+    // Track recency (~25-30 concepts, ~75-80 question IDs)
     this.recentMemoryKeys = [
       ...this.recentMemoryKeys.filter(k => k !== memoryKey),
       memoryKey
-    ].slice(-100);
+    ].slice(-30);
 
     if (question.id) {
       this.recentQuestionIds = [
         ...this.recentQuestionIds.filter(id => id !== question.id),
         question.id
-      ].slice(-200);
+      ].slice(-80);
     }
 
     const existing = this.reviewStates.get(memoryKey) || {
@@ -188,65 +188,55 @@ class QuestionReviewScheduler {
       existing.consecutiveCorrect = 0;
       existing.lapseCount += 1;
 
-      // In-session repeat with randomized fuzz (8-15 concepts or 6-10 if repeated lapse)
-      const fuzzGap = existing.lapseCount > 1 
-        ? Math.floor(6 + Math.random() * 5)   // 6 to 10
-        : Math.floor(8 + Math.random() * 8);  // 8 to 15
+      // In-session repeat with natural, unpredictable spacing (randomly 20 to 30 questions later)
+      const fuzzGap = Math.floor(20 + Math.random() * 11); // 20 to 30
       existing.dueAfterOrdinal = this.sessionOrdinal + fuzzGap;
 
-      // Calendar due date (short ~12-24h retry)
-      const dueDays = applyFuzz(0.5, 0.2);
+      // High-priority next day calendar retry (~1 day ± 15% jitter)
+      const dueDays = applyFuzz(1.0, 0.15);
       existing.dueAt = now + Math.round(dueDays * 86400000);
       existing.level = 'learning';
     } else {
       // CORRECT ANSWER: good / easy / hard
       existing.correctCount += 1;
       existing.consecutiveCorrect += 1;
+      existing.dueAfterOrdinal = null;
 
-      // If previously due in-session and answered correctly, clear in-session ordinal
-      if (grade === 'hard') {
-        // Hard may return after a long in-session gap (25-45 concepts)
-        existing.dueAfterOrdinal = this.sessionOrdinal + Math.floor(25 + Math.random() * 21);
-      } else {
-        existing.dueAfterOrdinal = null;
-      }
-
-      // Spaced interval progression
-      let baseIntervalDays = 1;
+      // Spaced interval progression: 3d -> 7d -> 14d -> 30d -> 60d
+      let baseIntervalDays = 3;
       if (existing.consecutiveCorrect === 1) {
-        baseIntervalDays = 1;
-      } else if (existing.consecutiveCorrect === 2) {
         baseIntervalDays = 3;
-      } else if (existing.consecutiveCorrect === 3) {
+      } else if (existing.consecutiveCorrect === 2) {
         baseIntervalDays = 7;
-      } else if (existing.consecutiveCorrect === 4) {
+      } else if (existing.consecutiveCorrect === 3) {
         baseIntervalDays = 14;
-      } else if (existing.consecutiveCorrect === 5) {
+      } else if (existing.consecutiveCorrect === 4) {
         baseIntervalDays = 30;
       } else {
         baseIntervalDays = 60;
       }
 
+      // Small speed modifier (max ~10-15%, only applied when correct)
       if (grade === 'easy') {
-        baseIntervalDays *= 1.35;
+        baseIntervalDays *= 1.12; // +12% slight boost for confident fast recall
       } else if (grade === 'hard') {
-        baseIntervalDays *= 0.65;
+        baseIntervalDays *= 0.88; // -12% slight reduction for slow recall
       }
 
-      const fuzzedDays = applyFuzz(baseIntervalDays, 0.18);
+      // Light jitter (12%) so items don't clump on the exact same second
+      const fuzzedDays = applyFuzz(baseIntervalDays, 0.12);
       existing.dueAt = now + Math.round(fuzzedDays * 86400000);
 
-      // Evaluate Level (NO 10-correct hardcode)
+      // Mastery: ~4 successful reviews across separate sessions/days with no active lapses
       if (
-        existing.consecutiveCorrect >= 3 &&
+        existing.consecutiveCorrect >= 4 &&
         existing.distinctDaysCount >= 2 &&
-        existing.lapseCount === 0 &&
-        fuzzedDays >= 6
+        existing.lapseCount === 0
       ) {
         existing.level = 'mastered';
-      } else if (existing.consecutiveCorrect >= 3 || fuzzedDays >= 6) {
+      } else if (existing.consecutiveCorrect >= 3) {
         existing.level = 'strong';
-      } else if (existing.consecutiveCorrect >= 2 || fuzzedDays >= 2.5) {
+      } else if (existing.consecutiveCorrect >= 2) {
         existing.level = 'familiar';
       } else {
         existing.level = 'learning';

@@ -741,7 +741,8 @@ export async function deleteQuestionFromFirestore(questionId: string): Promise<b
     const docRef = doc(db, 'question_bank', questionId);
     await deleteDoc(docRef);
     return true;
-  } catch (err) {
+  } catch (err: any) {
+    console.error('[PYQ Admin Delete]', err);
     handleFirestoreError(err, OperationType.DELETE, path);
     return false;
   }

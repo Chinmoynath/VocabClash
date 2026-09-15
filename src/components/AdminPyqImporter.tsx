@@ -10,6 +10,7 @@ import {
   Layers, 
   Database,
   Shield,
+  ShieldAlert,
   RefreshCw,
   EyeOff,
   CloudUpload,
@@ -40,6 +41,7 @@ import { ADS_ENABLED, ADSENSE_CLIENT_ID, ADSENSE_BANNER_SLOT, ADSENSE_INTERSTITI
 import { ExtractedQuestion, ImportBatch, ReviewStatus } from '../types/pyqImport';
 import { parseAndValidatePyqJSON, SkippedQuestionItem, extractJsonMetadata, formatExamTag, normalizeExamDate } from '../services/jsonPyqParser';
 import { questionBankEngine } from '../services/questionBankEngine';
+import { AdminPyqQualityReview } from './AdminPyqQualityReview';
 import { 
   publishApprovedQuestionsToFirestore, 
   deduplicateAndMigrateQuestionBank, 
@@ -84,7 +86,7 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
   const isAdmin = isUserAdmin(userEmail) || (typeof window !== 'undefined' && window.location.hostname === 'localhost');
 
   // Navigation mode
-  const [adminView, setAdminView] = useState<'importer' | 'health' | 'explorer' | 'simulation'>('health');
+  const [adminView, setAdminView] = useState<'importer' | 'health' | 'explorer' | 'simulation' | 'quality_review'>('health');
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [jsonText, setJsonText] = useState<string>('');
@@ -725,7 +727,10 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
     if (!confirm(`Are you sure you want to delete "${word}" from Firestore and runtime?`)) return;
     setDeletingQuestionId(qId);
     try {
-      await deleteQuestionFromFirestore(qId);
+      const ok = await deleteQuestionFromFirestore(qId);
+      if (!ok) {
+        throw new Error('Failed to delete question from Firestore. Please ensure you are logged in as admin (nathchinmoy777@gmail.com).');
+      }
       questionBankEngine.deleteQuestionById(qId);
       setHealthData(questionBankEngine.getCloudVsRuntimeCounts());
       setExplorerQuestions(questionBankEngine.getImportedQuestions());
@@ -915,6 +920,18 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
             >
               <BookOpen className="w-3.5 h-3.5" />
               Exam & Year Explorer ({explorerQuestions.length})
+            </button>
+
+            <button
+              onClick={() => setAdminView('quality_review')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 whitespace-nowrap ${
+                adminView === 'quality_review'
+                  ? 'bg-rose-600 text-white shadow-md'
+                  : 'bg-slate-800 text-slate-300 hover:text-white'
+              }`}
+            >
+              <ShieldAlert className="w-3.5 h-3.5 text-rose-400" />
+              PYQ Quality Review
             </button>
 
             <button
@@ -1533,7 +1550,30 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
                                       <AlertTriangle className="w-3 h-3" /> {q.enrichment?.warnings || q.enrichmentWarning}
                                     </span>
                                   )}
+
+                                  {q.qualityAuditIssues && q.qualityAuditIssues.length > 0 && (
+                                    <span className="text-[10px] bg-rose-500/20 text-rose-300 px-2 py-0.5 rounded font-bold border border-rose-500/40 flex items-center gap-1">
+                                      <ShieldAlert className="w-3 h-3 text-rose-400" />
+                                      Quality Flag ({q.qualityAuditIssues[0].title || q.qualityAuditIssues[0].code})
+                                    </span>
+                                  )}
                                 </div>
+
+                                {q.qualityAuditIssues && q.qualityAuditIssues.length > 0 && (
+                                  <div className="bg-rose-950/40 border border-rose-500/30 rounded-lg p-2.5 text-xs text-rose-200 space-y-1">
+                                    <div className="font-bold flex items-center gap-1.5 text-rose-300">
+                                      <ShieldAlert className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                                      <span>Data Discrepancy Detected in Source JSON</span>
+                                    </div>
+                                    <ul className="text-[11px] text-rose-300/90 list-disc list-inside space-y-0.5">
+                                      {q.qualityAuditIssues.map((iss, iIdx) => (
+                                        <li key={iIdx}>
+                                          <b className="font-semibold text-white">{iss.title || iss.code}:</b> {iss.description}
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                )}
 
                                 {q.conflictDetails && (
                                   <div className="bg-rose-950/40 border border-rose-500/30 rounded-lg p-2.5 text-xs text-rose-200 space-y-1">
@@ -2875,6 +2915,16 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
               )}
             </div>
           </div>
+        )}
+
+        {/* VIEW 4: PYQ QUALITY SCANNER & DISCREPANCY AUDIT */}
+        {adminView === 'quality_review' && (
+          <AdminPyqQualityReview
+            cloudQuestions={explorerQuestions}
+            onRefreshCloud={async () => {
+              await handleForceSyncCloud();
+            }}
+          />
         )}
       </div>
 
