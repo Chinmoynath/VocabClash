@@ -419,11 +419,21 @@ app.post('/api/payments/google/verify', async (req, res) => {
       });
     }
 
-    const isLifetime = productId === 'vocabclash_lifetime' || planId === 'lifetime';
+    let effectivePlanId = planId;
+    if (!effectivePlanId) {
+      if (productId === 'vocabclash_monthly') effectivePlanId = 'monthly';
+      else if (productId === 'vocabclash_quarterly') effectivePlanId = 'quarterly';
+      else if (productId === 'vocabclash_half_yearly') effectivePlanId = 'six_months';
+      else if (productId === 'vocabclash_yearly') effectivePlanId = 'annual';
+      else if (productId === 'vocabclash_lifetime') effectivePlanId = 'lifetime';
+      else effectivePlanId = 'quarterly';
+    }
+
+    const isLifetime = productId === 'vocabclash_lifetime' || effectivePlanId === 'lifetime';
     const packageName = process.env.GOOGLE_PLAY_PACKAGE_NAME || 'in.vocabclash.twa';
 
     // Log verification attempt (safe non-sensitive metadata)
-    console.log(`[Google Play Verification] Verifying token for package: ${packageName}, product: ${productId}, plan: ${planId || 'subscription'}`);
+    console.log(`[Google Play Verification] Verifying token for package: ${packageName}, product: ${productId}, plan: ${effectivePlanId}`);
 
     // Duration mapping
     const durationDaysMap: Record<string, number> = {
@@ -434,16 +444,16 @@ app.post('/api/payments/google/verify', async (req, res) => {
       lifetime: 36500, // 100 years
     };
 
-    const days = durationDaysMap[planId || 'quarterly'] || 30;
+    const days = durationDaysMap[effectivePlanId] || 30;
     const now = Date.now();
     const expiresAt = isLifetime ? undefined : now + days * 86400000;
     const planName = isLifetime
       ? 'Life Time'
-      : planId === 'monthly'
+      : effectivePlanId === 'monthly'
       ? 'Monthly'
-      : planId === 'six_months'
+      : effectivePlanId === 'six_months'
       ? '6 Months'
-      : planId === 'annual'
+      : effectivePlanId === 'annual'
       ? 'Annual'
       : 'Quarterly';
 
@@ -461,7 +471,7 @@ app.post('/api/payments/google/verify', async (req, res) => {
       message: 'Google Play purchase verified successfully',
       subscription: {
         isPremium: true,
-        planId: planId || (isLifetime ? 'lifetime' : 'quarterly'),
+        planId: effectivePlanId,
         planName,
         subscribedAt: now,
         renewalDate: renewDate,
