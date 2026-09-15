@@ -159,8 +159,7 @@ export const PremiumModal: React.FC<PremiumModalProps> = ({
     const playMapping = mapPlanToGooglePlay(selectedPlan.id);
     console.log('[Play Billing] Purchase clicked');
     console.log(`[Play Billing] Selected plan: ${selectedPlan.id}`);
-    console.log(`[Play Billing] Product ID: ${playMapping.productId}`);
-    console.log(`[Play Billing] Base plan: ${playMapping.basePlanId || 'none'}`);
+    console.log(`[Play Billing] Product ID / SKU: ${playMapping.sku}`);
 
     if (isProcessing) return;
 

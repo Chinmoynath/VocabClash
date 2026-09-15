@@ -1501,6 +1501,54 @@ app.get('/robots.txt', (req, res) => {
   res.send('User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /admin/\nDisallow: /api/\nDisallow: /.well-known/\n\nSitemap: https://vocabclash.in/sitemap.xml\n');
 });
 
+// Daily Challenge In-Memory / Server Store (Keyed by User ID or device)
+interface ServerDailyChallengeAttempt {
+  userId: string;
+  date: string;
+  timestamp: number;
+  totalQuestions: number;
+  answeredCount: number;
+  correctCount: number;
+  wrongCount: number;
+  score: number;
+  maxMarks: number;
+  percentage: number;
+  timeTakenSeconds: number;
+  rankPointsAwarded: number;
+}
+
+const serverDailyChallengeStore = new Map<string, ServerDailyChallengeAttempt[]>();
+
+app.get('/api/daily-challenge/history', (req, res) => {
+  const userId = (req.query.userId as string) || 'default_user';
+  const history = serverDailyChallengeStore.get(userId) || [];
+  res.json({ success: true, history });
+});
+
+app.post('/api/daily-challenge/attempt', (req, res) => {
+  try {
+    const { userId = 'default_user', attempt } = req.body;
+    if (!attempt || !attempt.date) {
+      return res.status(400).json({ success: false, error: 'Valid attempt data required' });
+    }
+
+    const current = serverDailyChallengeStore.get(userId) || [];
+    // Keep only genuine attempts, replacing existing record for the same day
+    const updated = current.filter(a => a.date !== attempt.date);
+    updated.push({
+      ...attempt,
+      userId,
+    });
+    updated.sort((a, b) => a.date.localeCompare(b.date));
+    serverDailyChallengeStore.set(userId, updated);
+
+    res.json({ success: true, history: updated });
+  } catch (error: any) {
+    console.error('Error saving daily challenge attempt:', error);
+    res.status(500).json({ success: false, error: error.message || 'Failed to save attempt' });
+  }
+});
+
 // ads.txt & app-ads.txt Endpoints for Google AdSense & Google AdMob verification
 const serveAdsTxt = (req: express.Request, res: express.Response) => {
   const adsContent = 'google.com, pub-6402582146558440, DIRECT, f08c47fec0942fa0\n';
