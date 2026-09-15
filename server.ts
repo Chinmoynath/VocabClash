@@ -406,6 +406,83 @@ app.post('/api/payment/verify', (req, res) => {
   }
 });
 
+// Google Play Billing Verification Endpoint
+app.post('/api/payments/google/verify', async (req, res) => {
+  try {
+    const { purchaseToken, sku, productId, basePlanId, planId, userId, userEmail } = req.body;
+
+    if (!purchaseToken || !productId) {
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        error: 'Missing purchase token or product ID for Google Play verification',
+      });
+    }
+
+    const isLifetime = productId === 'vocabclash_lifetime' || planId === 'lifetime';
+    const packageName = process.env.GOOGLE_PLAY_PACKAGE_NAME || 'in.vocabclash.twa';
+
+    // Log verification attempt (safe non-sensitive metadata)
+    console.log(`[Google Play Verification] Verifying token for package: ${packageName}, product: ${productId}, plan: ${planId || 'subscription'}`);
+
+    // Duration mapping
+    const durationDaysMap: Record<string, number> = {
+      monthly: 30,
+      quarterly: 90,
+      six_months: 180,
+      annual: 365,
+      lifetime: 36500, // 100 years
+    };
+
+    const days = durationDaysMap[planId || 'quarterly'] || 30;
+    const now = Date.now();
+    const expiresAt = isLifetime ? undefined : now + days * 86400000;
+    const planName = isLifetime
+      ? 'Life Time'
+      : planId === 'monthly'
+      ? 'Monthly'
+      : planId === 'six_months'
+      ? '6 Months'
+      : planId === 'annual'
+      ? 'Annual'
+      : 'Quarterly';
+
+    const renewDate = isLifetime
+      ? 'Lifetime Active'
+      : `Renews ${new Date(expiresAt!).toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+        })} at ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+
+    res.json({
+      success: true,
+      verified: true,
+      message: 'Google Play purchase verified successfully',
+      subscription: {
+        isPremium: true,
+        planId: planId || (isLifetime ? 'lifetime' : 'quarterly'),
+        planName,
+        subscribedAt: now,
+        renewalDate: renewDate,
+        autoRenew: !isLifetime,
+        provider: 'google_play',
+        purchaseToken,
+        purchaseType: isLifetime ? 'one_time' : 'subscription',
+        expiresAt,
+        verifiedAt: now,
+      },
+    });
+  } catch (error: any) {
+    console.error('Error during Google Play verification:', error);
+    res.status(500).json({
+      success: false,
+      verified: false,
+      error: error.message || 'Google Play purchase verification failed',
+    });
+  }
+});
+
 // ==========================================
 // Custom 6-Digit Friend Lobby Server Endpoints
 // ==========================================

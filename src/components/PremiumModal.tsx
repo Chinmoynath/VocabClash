@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { User as FirebaseUser } from 'firebase/auth';
 import { 
   SubscriptionPlanId, 
@@ -7,7 +7,12 @@ import {
   PlayerProfile
 } from '../types';
 import { soundManager } from '../utils/audio';
-import { createRazorpayOrder, openRazorpayCheckout } from '../services/razorpayService';
+import { 
+  detectPaymentProvider, 
+  purchasePlan, 
+  PaymentProvider 
+} from '../services/paymentProviderService';
+import { restoreGooglePlayPurchases } from '../services/googlePlayBillingService';
 import { GoogleAuthCard } from './GoogleAuthCard';
 import { VocabClashLogo } from './VocabClashLogo';
 import { extractCleanUserName } from '../utils/nameHelper';
@@ -27,7 +32,8 @@ import {
   Lock,
   UserCheck,
   AlertCircle,
-  LogIn
+  LogIn,
+  RotateCcw
 } from 'lucide-react';
 
 interface PremiumModalProps {
@@ -108,7 +114,31 @@ export const PremiumModal: React.FC<PremiumModalProps> = ({
   const [showManageSheet, setShowManageSheet] = useState<boolean>(false);
   const [showAuthGate, setShowAuthGate] = useState<boolean>(false);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [isRestoring, setIsRestoring] = useState<boolean>(false);
+  const [paymentProvider, setPaymentProvider] = useState<PaymentProvider>('razorpay');
+  const [isDetectingProvider, setIsDetectingProvider] = useState<boolean>(true);
   const [statusMessage, setStatusMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    detectPaymentProvider()
+      .then((provider) => {
+        if (isMounted) {
+          setPaymentProvider(provider);
+          setIsDetectingProvider(false);
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setPaymentProvider('razorpay');
+          setIsDetectingProvider(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const effectiveEmail = currentUser?.email || currentUserEmail || player?.email;
   const effectiveName = extractCleanUserName(currentUser?.displayName || player?.name, effectiveEmail);
@@ -124,76 +154,46 @@ export const PremiumModal: React.FC<PremiumModalProps> = ({
     { label: 'Practise session works offline' },
   ];
 
-  const proceedWithPayment = async () => {
+  const executePurchaseFlow = async () => {
+    if (isProcessing) return;
+
     setIsProcessing(true);
     setStatusMessage(null);
 
-    try {
-      // Step 1: Create Order on backend
-      const order = await createRazorpayOrder(
-        selectedPlan,
-        effectiveEmail,
-        effectiveName
-      );
+    await purchasePlan({
+      plan: selectedPlan,
+      userEmail: effectiveEmail,
+      userName: effectiveName,
+      userId: currentUser?.uid,
+      onSuccess: (updatedSub) => {
+        soundManager.playCorrect();
+        setIsProcessing(false);
+        setShowAuthGate(false);
 
-      // Step 2: Open Razorpay Popup
-      await openRazorpayCheckout({
-        plan: selectedPlan,
-        order,
-        userEmail: effectiveEmail,
-        userName: effectiveName,
-        onSuccess: (paymentRes) => {
-          soundManager.playCorrect();
-          setIsProcessing(false);
-          setShowAuthGate(false);
+        onUpdateSubscription(updatedSub);
 
-          const renewDate = selectedPlan.id === 'lifetime' 
-            ? 'Lifetime Active' 
-            : `Renews ${new Date(Date.now() + (selectedPlan.periodDurationDays || 30) * 86400000).toLocaleDateString('en-US', {
-                month: 'short',
-                day: 'numeric',
-                year: 'numeric'
-              })} at ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+        setStatusMessage({
+          text: `Payment Successful! VIP Pass activated for ${selectedPlan.name}.`,
+          type: 'success',
+        });
 
-          onUpdateSubscription({
-            isPremium: true,
-            planId: selectedPlan.id,
-            planName: selectedPlan.name,
-            subscribedAt: Date.now(),
-            renewalDate: renewDate,
-            autoRenew: selectedPlan.id !== 'lifetime',
-          });
-
-          setStatusMessage({
-            text: `Payment Successful! VIP Pass activated for ${selectedPlan.name}.`,
-            type: 'success',
-          });
-
-          setTimeout(() => {
-            setStatusMessage(null);
-          }, 3500);
-        },
-        onError: (err) => {
-          setIsProcessing(false);
-          const errorMsg = err?.reason || err?.description || err?.message || 'Payment was not completed.';
-          setStatusMessage({
-            text: errorMsg,
-            type: 'error',
-          });
-          setTimeout(() => setStatusMessage(null), 4000);
-        },
-      });
-    } catch (err: any) {
-      setIsProcessing(false);
-      setStatusMessage({
-        text: err?.message || 'Could not connect to Razorpay payment gateway',
-        type: 'error',
-      });
-      setTimeout(() => setStatusMessage(null), 4000);
-    }
+        setTimeout(() => {
+          setStatusMessage(null);
+        }, 3500);
+      },
+      onError: (err) => {
+        setIsProcessing(false);
+        const errorMsg = err?.message || 'Payment was not completed.';
+        setStatusMessage({
+          text: errorMsg,
+          type: 'error',
+        });
+        setTimeout(() => setStatusMessage(null), 4500);
+      },
+    });
   };
 
-  const handleSubscribeWithRazorpay = async () => {
+  const handlePurchase = async () => {
     soundManager.playTap();
 
     // Payment Guard: Check if user is logged in
@@ -206,7 +206,44 @@ export const PremiumModal: React.FC<PremiumModalProps> = ({
       return;
     }
 
-    await proceedWithPayment();
+    await executePurchaseFlow();
+  };
+
+  const handleRestorePurchases = async () => {
+    soundManager.playTap();
+    if (isRestoring) return;
+
+    setIsRestoring(true);
+    setStatusMessage({
+      text: 'Checking Google Play for previous purchases...',
+      type: 'info',
+    });
+
+    try {
+      const restored = await restoreGooglePlayPurchases(currentUser?.uid, effectiveEmail);
+      setIsRestoring(false);
+      if (restored) {
+        soundManager.playCorrect();
+        onUpdateSubscription(restored);
+        setStatusMessage({
+          text: 'Google Play purchases restored successfully! VIP activated.',
+          type: 'success',
+        });
+      } else {
+        setStatusMessage({
+          text: 'No active Google Play purchases found for this account.',
+          type: 'info',
+        });
+      }
+      setTimeout(() => setStatusMessage(null), 3500);
+    } catch (err: any) {
+      setIsRestoring(false);
+      setStatusMessage({
+        text: err?.message || 'Could not restore Google Play purchases.',
+        type: 'error',
+      });
+      setTimeout(() => setStatusMessage(null), 3500);
+    }
   };
 
   const handleCancelSubscription = () => {
@@ -248,7 +285,9 @@ export const PremiumModal: React.FC<PremiumModalProps> = ({
 
           <div className="text-[10px] uppercase font-mono tracking-widest text-purple-400 font-bold bg-purple-950/60 border border-purple-800/50 px-2.5 py-0.5 rounded-full flex items-center gap-1.5">
             <Lock className="w-2.5 h-2.5" />
-            <span>RAZORPAY SECURE VIP</span>
+            <span>
+              {paymentProvider === 'google_play' ? 'GOOGLE PLAY VIP' : 'RAZORPAY SECURE VIP'}
+            </span>
           </div>
 
           <button
@@ -334,7 +373,7 @@ export const PremiumModal: React.FC<PremiumModalProps> = ({
                 onClick={() => {
                   soundManager.playTap();
                   setShowAuthGate(false);
-                  proceedWithPayment();
+                  executePurchaseFlow();
                 }}
                 className="text-[10px] text-slate-500 hover:text-slate-400 underline transition-colors"
               >
@@ -503,7 +542,7 @@ export const PremiumModal: React.FC<PremiumModalProps> = ({
                 </div>
                 <div className="grid grid-cols-2 gap-2 pt-1">
                   <button
-                    onClick={handleSubscribeWithRazorpay}
+                    onClick={handlePurchase}
                     className="bg-purple-700 hover:bg-purple-600 text-white font-bold py-2 rounded-xl text-xs"
                   >
                     Switch to {selectedPlan.name}
@@ -515,6 +554,17 @@ export const PremiumModal: React.FC<PremiumModalProps> = ({
                     Cancel Subscription
                   </button>
                 </div>
+
+                {paymentProvider === 'google_play' && (
+                  <button
+                    disabled={isRestoring}
+                    onClick={handleRestorePurchases}
+                    className="w-full text-center text-[11px] text-slate-400 hover:text-purple-300 pt-1 flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                  >
+                    <RotateCcw className={`w-3 h-3 ${isRestoring ? 'animate-spin text-purple-400' : ''}`} />
+                    <span>{isRestoring ? 'Restoring...' : 'Restore Google Play Purchases'}</span>
+                  </button>
+                )}
               </div>
             )}
 
@@ -526,37 +576,58 @@ export const PremiumModal: React.FC<PremiumModalProps> = ({
                     soundManager.playTap();
                     setShowManageSheet(!showManageSheet);
                   }}
-                  className="w-full bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-600 hover:from-purple-500 hover:to-indigo-500 active:scale-[0.98] text-white font-extrabold py-3.5 px-6 rounded-full shadow-[0_0_25px_rgba(147,51,234,0.4)] text-sm flex items-center justify-center gap-2 border border-purple-400/30 transition-all"
+                  className="w-full bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-600 hover:from-purple-500 hover:to-indigo-500 active:scale-[0.98] text-white font-extrabold py-3.5 px-6 rounded-full shadow-[0_0_25px_rgba(147,51,234,0.4)] text-sm flex items-center justify-center gap-2 border border-purple-400/30 transition-all cursor-pointer"
                 >
                   <ShieldCheck className="w-4 h-4" />
-                  <span>Manage Subscription</span>
+                  <span>Manage VIP Subscription</span>
                 </button>
               ) : (
                 <button
-                  disabled={isProcessing}
-                  onClick={handleSubscribeWithRazorpay}
-                  className="w-full bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-600 hover:from-purple-500 hover:to-indigo-500 active:scale-[0.98] text-white font-extrabold py-3.5 px-6 rounded-full shadow-[0_0_25px_rgba(147,51,234,0.4)] text-sm flex items-center justify-center gap-2 border border-purple-400/30 transition-all disabled:opacity-50"
+                  disabled={isProcessing || isDetectingProvider}
+                  onClick={handlePurchase}
+                  className="w-full bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-600 hover:from-purple-500 hover:to-indigo-500 active:scale-[0.98] text-white font-extrabold py-3.5 px-6 rounded-full shadow-[0_0_25px_rgba(147,51,234,0.4)] text-sm flex items-center justify-center gap-2 border border-purple-400/30 transition-all disabled:opacity-50 cursor-pointer"
                 >
                   {isProcessing ? (
                     <>
                       <RefreshCw className="w-4 h-4 animate-spin" />
-                      <span>Connecting to Razorpay...</span>
+                      <span>
+                        {paymentProvider === 'google_play' ? 'Connecting to Google Play...' : 'Connecting to Razorpay...'}
+                      </span>
                     </>
                   ) : (
                     <>
                       <CreditCard className="w-4 h-4" />
-                      <span>Pay via Razorpay • {selectedPlan.displayPrice}</span>
+                      <span>
+                        {paymentProvider === 'google_play' 
+                          ? `Upgrade with Google Play • ${selectedPlan.displayPrice}` 
+                          : `Pay via Razorpay • ${selectedPlan.displayPrice}`}
+                      </span>
                     </>
                   )}
                 </button>
               )}
 
-              <div className="flex items-center justify-center gap-2 text-[10px] text-slate-500">
-                <span className="flex items-center gap-1">
-                  <Lock className="w-3 h-3 text-emerald-500" /> UPI / Cards / NetBanking
-                </span>
-                <span>•</span>
-                <span>Instant VIP Unlock</span>
+              {/* Provider Security Subtext */}
+              <div className="flex flex-col items-center justify-center gap-1 text-[10px] text-slate-500">
+                <div className="flex items-center justify-center gap-2">
+                  <span className="flex items-center gap-1">
+                    <Lock className="w-3 h-3 text-emerald-500" />
+                    {paymentProvider === 'google_play' ? 'Secure payment via Google Play' : 'Secure payment via Razorpay'}
+                  </span>
+                  <span>•</span>
+                  <span>Instant VIP Unlock</span>
+                </div>
+
+                {paymentProvider === 'google_play' && !subscription.isPremium && (
+                  <button
+                    disabled={isRestoring}
+                    onClick={handleRestorePurchases}
+                    className="text-[10px] text-slate-400 hover:text-purple-300 flex items-center gap-1 mt-0.5 cursor-pointer transition-colors"
+                  >
+                    <RotateCcw className={`w-2.5 h-2.5 ${isRestoring ? 'animate-spin text-purple-400' : ''}`} />
+                    <span>Restore Purchases</span>
+                  </button>
+                )}
               </div>
             </div>
           </>

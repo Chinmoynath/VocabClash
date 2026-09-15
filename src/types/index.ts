@@ -242,6 +242,12 @@ export interface UserSubscription {
   subscribedAt?: number;
   renewalDate?: string;
   autoRenew: boolean;
+  provider?: 'google_play' | 'razorpay';
+  purchaseToken?: string;
+  orderId?: string;
+  purchaseType?: 'subscription' | 'one_time';
+  expiresAt?: number;
+  verifiedAt?: number;
 }
 
 export interface DailyStreakState {
