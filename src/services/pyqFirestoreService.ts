@@ -733,7 +733,7 @@ export async function fetchRecentBatches(limitCount: number = 20): Promise<Impor
 }
 
 /**
- * Delete a question from Firestore question_bank (Admin only)
+ * Delete a single question from Firestore question_bank (Admin only)
  */
 export async function deleteQuestionFromFirestore(questionId: string): Promise<boolean> {
   const path = `question_bank/${questionId}`;
@@ -746,4 +746,240 @@ export async function deleteQuestionFromFirestore(questionId: string): Promise<b
     return false;
   }
 }
+
+/**
+ * Delete a batch of question IDs from Firestore question_bank
+ */
+export async function deleteQuestionsBatch(
+  questionIds: string[],
+  onProgress?: (progress: { current: number; total: number; stage: string }) => void
+): Promise<{ deletedCount: number; failedCount: number }> {
+  let deletedCount = 0;
+  let failedCount = 0;
+  const CHUNK_SIZE = 25;
+
+  for (let i = 0; i < questionIds.length; i += CHUNK_SIZE) {
+    const chunk = questionIds.slice(i, i + CHUNK_SIZE);
+    const batchInstance = writeBatch(db);
+
+    for (const qId of chunk) {
+      const docRef = doc(db, 'question_bank', qId);
+      batchInstance.delete(docRef);
+    }
+
+    try {
+      await batchInstance.commit();
+      deletedCount += chunk.length;
+      onProgress?.({
+        current: deletedCount,
+        total: questionIds.length,
+        stage: `Deleted ${deletedCount}/${questionIds.length} questions...`
+      });
+      if (i + CHUNK_SIZE < questionIds.length) {
+        await new Promise(r => setTimeout(r, 200));
+      }
+    } catch (e) {
+      console.error('Batch deletion error:', e);
+      failedCount += chunk.length;
+    }
+  }
+
+  return { deletedCount, failedCount };
+}
+
+export interface PurgeExamResult {
+  success: boolean;
+  examTarget: string;
+  totalScanned: number;
+  deletedDocCount: number;
+  updatedDocCount: number;
+  deletedBatchesCount: number;
+  error?: string;
+}
+
+/**
+ * Permanently purge all questions associated with a specific exam (e.g. "SSC CPO") from Firestore question_bank.
+ * Also cleans up corresponding pyq_import_batches.
+ */
+export async function purgeQuestionsByExam(
+  examName: string = 'SSC CPO',
+  onProgress?: (progress: { current: number; total: number; stage: string }) => void
+): Promise<PurgeExamResult> {
+  const targetNorm = examName.trim().toLowerCase();
+  onProgress?.({ current: 0, total: 100, stage: `Scanning Firestore question_bank for ${examName} questions...` });
+
+  try {
+    const qCol = collection(db, 'question_bank');
+    const snapshot = await getDocs(qCol);
+    const docsToDelete: string[] = [];
+    const docsToUpdate: { id: string; appearances: ExamAppearance[]; examHistory: string[]; repeatCount: number; importanceLevel: any; primaryApp: ExamAppearance }[] = [];
+
+    onProgress?.({ current: 20, total: 100, stage: `Analyzing ${snapshot.size} total questions...` });
+
+    snapshot.forEach(docSnap => {
+      const data = docSnap.data();
+      if (!data) return;
+
+      const primaryExam = String(data.exam || '').toLowerCase();
+      const rawApps: ExamAppearance[] = Array.isArray(data.appearances) ? data.appearances : [];
+      const examHistory: string[] = Array.isArray(data.examHistory) ? data.examHistory : [];
+      const wordOrPhrase = String(data.wordOrPhrase || '');
+
+      // Check if primary exam matches target
+      const isPrimaryMatch = primaryExam.includes(targetNorm);
+
+      // Check if any appearance matches target
+      const hasTargetApp = rawApps.some(a => String(a.exam || '').toLowerCase().includes(targetNorm));
+      const hasTargetHistory = examHistory.some(tag => tag.toLowerCase().includes(targetNorm));
+
+      // Check if question has the instruction text embedded into wordOrPhrase (corrupted instruction artifact)
+      const isCorruptedInstruction = 
+        wordOrPhrase.toLowerCase().includes('select the most appropriate') ||
+        wordOrPhrase.toLowerCase().includes('underlined word') ||
+        wordOrPhrase.toLowerCase().includes('given word');
+
+      if (isPrimaryMatch || (rawApps.length === 1 && hasTargetApp) || isCorruptedInstruction) {
+        // Solely an SSC CPO question or corrupted instruction doc -> Full Delete
+        docsToDelete.push(docSnap.id);
+      } else if (rawApps.length > 1 && hasTargetApp) {
+        // Multi-exam question -> Strip SSC CPO from appearances and preserve other exams
+        const remainingApps = rawApps.filter(a => !String(a.exam || '').toLowerCase().includes(targetNorm));
+        if (remainingApps.length === 0) {
+          docsToDelete.push(docSnap.id);
+        } else {
+          const sorted = sortAppearances(remainingApps);
+          const primaryApp = sorted[0];
+          const newTags = sorted.map(a => formatExamTag(a.exam, a.year, a.tier));
+          const repeatCount = computeRepeatCount(sorted);
+          const importanceLevel = computeImportanceLevel(repeatCount);
+          docsToUpdate.push({
+            id: docSnap.id,
+            appearances: sorted,
+            examHistory: newTags,
+            repeatCount,
+            importanceLevel,
+            primaryApp,
+          });
+        }
+      }
+    });
+
+    onProgress?.({
+      current: 40,
+      total: 100,
+      stage: `Found ${docsToDelete.length} documents to delete and ${docsToUpdate.length} to update. Processing deletions...`
+    });
+
+    // 1. Process deletions in chunks
+    let deletedDocCount = 0;
+    const CHUNK_SIZE = 25;
+    for (let i = 0; i < docsToDelete.length; i += CHUNK_SIZE) {
+      const chunk = docsToDelete.slice(i, i + CHUNK_SIZE);
+      const writeBatchInstance = writeBatch(db);
+      for (const docId of chunk) {
+        writeBatchInstance.delete(doc(db, 'question_bank', docId));
+      }
+      await writeBatchInstance.commit();
+      deletedDocCount += chunk.length;
+      onProgress?.({
+        current: 40 + Math.floor((deletedDocCount / Math.max(docsToDelete.length, 1)) * 30),
+        total: 100,
+        stage: `Deleted ${deletedDocCount}/${docsToDelete.length} ${examName} questions from Firestore...`
+      });
+      if (i + CHUNK_SIZE < docsToDelete.length) {
+        await new Promise(r => setTimeout(r, 150));
+      }
+    }
+
+    // 2. Process updates in chunks
+    let updatedDocCount = 0;
+    for (let i = 0; i < docsToUpdate.length; i += CHUNK_SIZE) {
+      const chunk = docsToUpdate.slice(i, i + CHUNK_SIZE);
+      const writeBatchInstance = writeBatch(db);
+      for (const item of chunk) {
+        const docRef = doc(db, 'question_bank', item.id);
+        writeBatchInstance.set(docRef, sanitizeForFirestore({
+          appearances: item.appearances,
+          examHistory: item.examHistory,
+          repeatCount: item.repeatCount,
+          importanceLevel: item.importanceLevel,
+          exam: item.primaryApp.exam,
+          examFamily: item.primaryApp.examFamily || 'SSC',
+          year: item.primaryApp.year || 2024,
+          tier: item.primaryApp.tier || '',
+          shift: item.primaryApp.shift || null,
+          examDate: item.primaryApp.examDate || null,
+          updatedAt: Date.now(),
+        }), { merge: true });
+      }
+      await writeBatchInstance.commit();
+      updatedDocCount += chunk.length;
+      if (i + CHUNK_SIZE < docsToUpdate.length) {
+        await new Promise(r => setTimeout(r, 150));
+      }
+    }
+
+    // 3. Clean up pyq_import_batches matching examName
+    onProgress?.({ current: 85, total: 100, stage: `Cleaning up import batch records for ${examName}...` });
+    let deletedBatchesCount = 0;
+    try {
+      const batchCol = collection(db, 'pyq_import_batches');
+      const batchSnap = await getDocs(batchCol);
+      const batchDeletes: string[] = [];
+      batchSnap.forEach(bSnap => {
+        const bData = bSnap.data();
+        if (bData && String(bData.exam || '').toLowerCase().includes(targetNorm)) {
+          batchDeletes.push(bSnap.id);
+        }
+      });
+
+      if (batchDeletes.length > 0) {
+        const batchWrite = writeBatch(db);
+        for (const bId of batchDeletes) {
+          batchWrite.delete(doc(db, 'pyq_import_batches', bId));
+        }
+        await batchWrite.commit();
+        deletedBatchesCount = batchDeletes.length;
+      }
+    } catch (bErr) {
+      console.warn('Could not clean import batches:', bErr);
+    }
+
+    onProgress?.({
+      current: 100,
+      total: 100,
+      stage: `Completed! Deleted ${deletedDocCount} questions, updated ${updatedDocCount}, and deleted ${deletedBatchesCount} batches.`
+    });
+
+    return {
+      success: true,
+      examTarget: examName,
+      totalScanned: snapshot.size,
+      deletedDocCount,
+      updatedDocCount,
+      deletedBatchesCount,
+    };
+  } catch (err: any) {
+    console.error(`Error purging ${examName} questions:`, err);
+    return {
+      success: false,
+      examTarget: examName,
+      totalScanned: 0,
+      deletedDocCount: 0,
+      updatedDocCount: 0,
+      deletedBatchesCount: 0,
+      error: err?.message || 'Failed to purge exam questions.',
+    };
+  }
+}
+
+/**
+ * Convenience helper to purge all uploaded SSC CPO questions specifically
+ */
+export async function purgeAllSscCpoQuestions(
+  onProgress?: (progress: { current: number; total: number; stage: string }) => void
+): Promise<PurgeExamResult> {
+  return purgeQuestionsByExam('SSC CPO', onProgress);
+}
+
 

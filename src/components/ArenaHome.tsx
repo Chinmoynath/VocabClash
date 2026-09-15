@@ -26,6 +26,7 @@ import { ADSENSE_BANNER_SLOT } from '../services/adSenseService';
 import { DailyTargetCard } from './DailyTargetCard';
 import { CadreRankCard } from './CadreRankCard';
 import { DailyCommandCenterCard } from './DailyCommandCenterCard';
+import { OneVsOneArenaCard } from './OneVsOneArenaCard';
 // import { SscTop100Section } from './SscTop100Section'; // Temporarily hidden; will bring back later
 import { SscTop100Category } from '../data/sscTop100';
 import { 
@@ -96,36 +97,6 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
     }, 1000);
     return () => clearInterval(interval);
   }, [subscription.isPremium]);
-
-  const categories: { id: QuestionCategory | 'mixed'; label: string; hindi: string; icon: string; countBadge: string }[] = [
-    { id: 'mixed', label: 'All Mixed', hindi: 'सभी 24,000+ प्रश्न', icon: '⚡', countBadge: '24k+ Pool' },
-    { id: 'antonyms', label: 'Antonyms', hindi: 'विलोम शब्द', icon: '🔀', countBadge: '6,000+ PYQs' },
-    { id: 'synonyms', label: 'Synonyms', hindi: 'पर्यायवाची', icon: '🔁', countBadge: '6,000+ PYQs' },
-    { id: 'ows', label: 'One Word', hindi: 'अनेक शब्दों के लिए एक शब्द', icon: '🎯', countBadge: '6,000+ PYQs' },
-    { id: 'idioms', label: 'Idioms & Phrases', hindi: 'मुहावरे एवं लोकोक्तियां', icon: '📜', countBadge: '6,000+ PYQs' },
-  ];
-
-  // Track last selected category for instant 2nd-tap play online trigger (works across rapid double-taps and normal 2nd tap)
-  const lastSelectedCatRef = useRef<QuestionCategory | 'mixed'>(selectedCategory);
-  useEffect(() => {
-    lastSelectedCatRef.current = selectedCategory;
-  }, [selectedCategory]);
-
-  const handleCategoryCardClick = (catId: QuestionCategory | 'mixed') => {
-    const isAlreadySelected = selectedCategory === catId || lastSelectedCatRef.current === catId;
-
-    if (isAlreadySelected) {
-      // 2nd tap: Directly trigger and start 1v1 play online from here!
-      soundManager.playTap();
-      const mode = player.matchesPlayed === 0 ? 'quick_duel' : '1v1_ranked';
-      onStartMatchmaking(mode);
-    } else {
-      // 1st tap: Select this category
-      soundManager.playTap();
-      lastSelectedCatRef.current = catId;
-      onSelectCategory(catId);
-    }
-  };
 
   // Current selected exam family
   const activeFamily = normalizeFilterToFamily(selectedExam);
@@ -232,76 +203,14 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
             )}
           </div>
 
-          {/* Category Selection Grid */}
-          <div className="space-y-1.5 bg-slate-900/60 border border-slate-800/80 rounded-2xl p-3 sm:p-3.5">
-            <div className="flex items-center justify-between text-xs text-slate-300 font-semibold px-1">
-              <span>Topic / Section:</span>
-              <span className="text-[11px] text-amber-400 font-medium">Prioritizes 10+ Repeat PYQs</span>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3 gap-2 pt-1">
-              {categories.map(cat => {
-                const isSelected = selectedCategory === cat.id;
-                return (
-                  <button
-                    key={cat.id}
-                    id={`arena-category-card-${cat.id}`}
-                    onClick={() => handleCategoryCardClick(cat.id)}
-                    className={`p-2.5 sm:p-3 rounded-xl border text-left transition-all relative group cursor-pointer active:scale-[0.98] ${
-                      isSelected
-                        ? 'bg-amber-950/50 border-amber-500/80 shadow-md text-slate-100 ring-1 ring-amber-400'
-                        : 'bg-slate-800/60 border-slate-700/60 hover:bg-slate-800 text-slate-300'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-base group-hover:scale-110 transition-transform">{cat.icon}</span>
-                      <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded font-bold ${
-                        isSelected ? 'bg-amber-500/30 text-amber-200 border border-amber-400/40' : 'bg-slate-900/80 text-slate-400'
-                      }`}>
-                        {cat.countBadge}
-                      </span>
-                    </div>
-                    <div className="font-bold text-xs mt-1 text-slate-100">{cat.label}</div>
-                    <div className="text-[10px] text-slate-400 truncate">{cat.hindi}</div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Hero Action: Primary Ranked 1v1 Battle Button */}
+          {/* Hero Action: 1v1 Live Arena Card with 30-Day Stats */}
           <div className="space-y-2.5 pt-1">
-            <button
-              onClick={() => {
-                soundManager.playTap();
-                onOpenPlayModeSelector();
-              }}
-              className="w-full bg-gradient-to-r from-amber-500 via-orange-500 to-amber-500 hover:from-amber-400 hover:to-orange-400 active:scale-[0.98] text-slate-950 p-4 sm:p-5 rounded-2xl shadow-xl shadow-orange-950/70 flex items-center justify-between gap-3 border-2 border-amber-300/60 transition-all group relative overflow-hidden cursor-pointer"
-            >
-              {/* Subtle light shimmer sweep */}
-              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 pointer-events-none" />
-
-              <div className="flex items-center gap-3.5 min-w-0 flex-1 relative z-10">
-                <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-slate-950/25 border border-slate-950/20 flex items-center justify-center text-2xl sm:text-3xl shadow-inner group-hover:scale-110 group-hover:rotate-6 transition-transform shrink-0">
-                  ⚔️
-                </div>
-                <div className="text-left min-w-0 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm sm:text-base lg:text-lg font-black tracking-wide uppercase text-slate-950 leading-tight">
-                      {player.matchesPlayed === 0 ? 'START 1V1 DUEL' : 'START 1V1 VOCAB BATTLE'}
-                    </span>
-                    <span className="text-[10px] bg-slate-950/35 text-amber-100 font-extrabold px-2 py-0.5 rounded-md border border-slate-950/20 whitespace-nowrap shadow-sm">
-                      Play Online / Friend
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Aesthetic High-Contrast START Button */}
-              <div className="relative z-10 flex items-center gap-1.5 bg-gradient-to-b from-slate-950 to-slate-900 text-amber-300 hover:text-amber-200 border border-amber-400/40 hover:border-amber-300 px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl font-black text-xs sm:text-sm tracking-wider uppercase shrink-0 shadow-lg shadow-slate-950/60 group-hover:scale-105 transition-all">
-                <span>START</span>
-                <ChevronRight className="w-4 h-4 text-amber-400 group-hover:translate-x-1 transition-transform" />
-              </div>
-            </button>
+            <OneVsOneArenaCard
+              player={player}
+              onStartMatchmaking={onStartMatchmaking}
+              onOpenPlayModeSelector={onOpenPlayModeSelector}
+              onOpenFriendLobby={onOpenFriendLobby}
+            />
 
             {/* Secondary Quick Modes Grid */}
             <div className="grid grid-cols-3 gap-2 sm:gap-2.5">

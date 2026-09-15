@@ -161,19 +161,11 @@ export const CadreRankCard: React.FC<CadreRankCardProps> = ({
         </div>
       </div>
 
-      {/* Stats & Progress Section */}
-      <div className="space-y-2 pt-1 border-t border-slate-800/60">
+      {/* Cadre Tier Progress Section */}
+      <div className="space-y-1.5 pt-1 border-t border-slate-800/60">
         <div className="flex items-center justify-between text-xs text-slate-400">
-          <div className="flex items-center gap-3">
-            <span>
-              Win Rate: <strong className="text-emerald-400 font-mono font-bold">{player.accuracyRate}%</strong>
-            </span>
-            <span className="text-slate-700">•</span>
-            <span>
-              Record: <strong className="text-slate-200 font-mono">{player.matchesWon} Won</strong> <span className="text-slate-500">/</span> <span className="font-mono">{player.matchesPlayed} Matches</span>
-            </span>
-          </div>
-          <span className="font-mono text-[11px] text-slate-400">{progressPercent}%</span>
+          <span className="text-[11px] font-medium text-slate-400">Cadre Progress</span>
+          <span className="font-mono text-[11px] font-bold text-slate-300">{progressPercent}%</span>
         </div>
 
         {/* Minimal Progress Bar */}

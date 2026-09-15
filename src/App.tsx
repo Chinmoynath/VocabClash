@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { 
   PlayerProfile, 
   QuestionCategory, 
@@ -109,6 +110,7 @@ import {
   recordBattleAbandoned, 
   recordBattleSignupCompleted 
 } from './services/battleAnalyticsService';
+import { battleHistoryService } from './services/battleHistoryService';
 import { 
   trackPageView, 
   trackPracticeStart, 
@@ -1580,6 +1582,22 @@ export default function App() {
           opponentScore: finalOpponentScore,
           userId: currentUser?.uid,
         });
+
+        // Record to local 30-day battle history
+        battleHistoryService.recordMatch({
+          id: matchState.matchId,
+          timestamp: Date.now(),
+          mode: (matchState.mode as any) || '1v1_ranked',
+          category: matchState.categoryFilter,
+          exam: matchState.examFilter,
+          playerScore: finalPlayerScore,
+          opponentScore: finalOpponentScore,
+          opponentName: matchState.opponent?.name || 'Opponent',
+          opponentAvatar: matchState.opponent?.avatar,
+          isWin: isWinner,
+          isDraw: isDraw,
+          lpDelta,
+        });
       } catch {}
 
       const totalAns = matchState.playerAnswers.length;
@@ -1704,6 +1722,22 @@ export default function App() {
           questionsAnswered: matchState.playerAnswers.length,
           reason: 'forfeit',
           userId: currentUser?.uid,
+        });
+
+        // Record to local 30-day battle history as loss
+        battleHistoryService.recordMatch({
+          id: matchState.matchId,
+          timestamp: Date.now(),
+          mode: (matchState.mode as any) || '1v1_ranked',
+          category: matchState.categoryFilter,
+          exam: matchState.examFilter,
+          playerScore: matchState.playerScore,
+          opponentScore: matchState.opponentScore,
+          opponentName: matchState.opponent?.name || 'Opponent',
+          opponentAvatar: matchState.opponent?.avatar,
+          isWin: false,
+          isDraw: false,
+          lpDelta: -15,
         });
       } catch {}
 
@@ -2153,12 +2187,20 @@ export default function App() {
           }}
         />
 
-        {/* Forfeit Penalty Notification Banner */}
-        {forfeitNotice && (
-          <div className="w-full bg-gradient-to-r from-rose-900/90 via-rose-800/90 to-rose-900/90 border-b border-rose-600/60 px-4 py-2 text-center text-xs font-black text-rose-100 flex items-center justify-center gap-2 shadow-lg backdrop-blur-md animate-fadeIn z-20 shrink-0">
-            <span>{forfeitNotice}</span>
-          </div>
-        )}
+        {/* Forfeit Penalty Notification Banner with Smooth Fade In & Fade Out */}
+        <AnimatePresence>
+          {forfeitNotice && (
+            <motion.div
+              initial={{ opacity: 0, y: -16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -16 }}
+              transition={{ duration: 0.35, ease: 'easeInOut' }}
+              className="w-full bg-gradient-to-r from-rose-900/90 via-rose-800/90 to-rose-900/90 border-b border-rose-600/60 px-4 py-2 text-center text-xs font-black text-rose-100 flex items-center justify-center gap-2 shadow-lg backdrop-blur-md z-20 shrink-0"
+            >
+              <span>{forfeitNotice}</span>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Main Dynamic View Content */}
         <main id="app-main-content" className="flex-1 min-h-0 relative overflow-y-auto flex flex-col no-scrollbar">

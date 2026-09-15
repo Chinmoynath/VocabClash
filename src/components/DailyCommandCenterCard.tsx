@@ -102,107 +102,86 @@ export const DailyCommandCenterCard: React.FC<DailyCommandCenterCardProps> = ({
       <div className="flex flex-col gap-2 sm:gap-2.5">
         {/* Row 1: Greeting & Next Step Badge */}
         <div className="flex items-center justify-between gap-2">
-          <h2 className="text-xs sm:text-sm font-semibold text-slate-300 truncate">
-            {summary.greeting}, <span className="text-cyan-400 font-bold">{summary.userName}</span>
+          <h2 className="text-sm sm:text-base font-extrabold text-slate-200 truncate">
+            {summary.greeting}, <span className="text-cyan-400 font-black">{summary.userName}</span>
           </h2>
           <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-400 bg-cyan-950/60 border border-cyan-800/60 px-2 py-0.5 rounded-md shrink-0">
             {action.badge || 'YOUR NEXT STEP'}
           </span>
         </div>
 
-        {/* Row 2: Action Details & Main Action CTA */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pt-0.5">
+        {/* Row 2: Action Details & Main Action CTA (Side-by-Side on phone and desktop) */}
+        <div className="flex flex-row items-center justify-between gap-2 sm:gap-3 pt-0.5">
           {/* Action Details */}
-          <div className="flex items-center gap-2.5 min-w-0">
+          <div className="flex items-center gap-2 sm:gap-2.5 min-w-0 flex-1">
             <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-slate-800/90 border border-slate-700/80 flex items-center justify-center text-lg sm:text-xl shrink-0 shadow-xs text-sky-400">
               {action.icon}
             </div>
             <div className="min-w-0 flex-1">
-              <h3 className="font-extrabold text-xs sm:text-sm text-slate-100 tracking-tight leading-snug truncate">
+              <h3 className="font-black text-xs sm:text-sm text-slate-100 tracking-tight leading-snug truncate">
                 {action.title}
               </h3>
-              <p className="text-[11px] text-slate-400 truncate mt-0.5">
+              <p className="text-[10px] sm:text-[11px] text-slate-400 truncate mt-0.5">
                 {action.subtitle}
               </p>
             </div>
           </div>
 
-          {/* Primary CTA Button (Cyan matching All Exams pill with animated nudge arrow) */}
+          {/* Primary CTA Button (Only 'Start' as requested for clean mobile layout) */}
           <button
             onClick={handleActionClick}
-            className="w-full sm:w-auto sm:min-w-[190px] shrink-0 bg-cyan-500 hover:bg-cyan-400 active:bg-cyan-600 text-slate-950 px-4 py-2 sm:py-2.5 rounded-xl font-black text-xs sm:text-sm uppercase tracking-wider border border-cyan-300 shadow-md shadow-cyan-950/50 hover:shadow-cyan-500/20 active:scale-[0.98] transition-all cursor-pointer group flex items-center justify-center gap-1.5"
+            className="shrink-0 bg-cyan-500 hover:bg-cyan-400 active:bg-cyan-600 text-slate-950 px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-xl font-black text-xs sm:text-sm tracking-wider border border-cyan-300 shadow-md shadow-cyan-950/50 hover:shadow-cyan-500/20 active:scale-[0.98] transition-all cursor-pointer group flex items-center justify-center gap-1 sm:gap-1.5 whitespace-nowrap"
           >
-            <span className="truncate">{action.actionLabel}</span>
-            <ChevronRight className="w-4 h-4 text-slate-950 shrink-0 transition-transform animate-arrow-nudge group-hover:translate-x-1" />
+            <span>Start</span>
+            <ChevronRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-950 shrink-0 transition-transform animate-arrow-nudge group-hover:translate-x-1" />
           </button>
         </div>
 
-        {/* Row 3: Compact Daily Summary Strip */}
-        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 pt-2 border-t border-slate-800/80 text-[11px]">
-          {/* Daily Target status */}
-          {summary.isDailyGoalCompleted ? (
+        {/* Row 3: Strongest & Weakest Category Strip (Clean, subtle white typography) */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-2 border-t border-slate-800/80 text-[11px]">
+          {/* Strongest Area */}
+          {summary.strongestCategory && summary.strongestCategoryLabel && (
             <button
-              onClick={() => onNavigateTab && onNavigateTab('practice')}
-              className="inline-flex items-center gap-1 text-emerald-400 font-semibold hover:text-emerald-300 transition-colors cursor-pointer"
-              title="Daily Goal Completed! Click to practice more"
+              onClick={() => {
+                if (summary.strongestCategory && onSelectCategory) {
+                  onSelectCategory(summary.strongestCategory);
+                }
+                if (onNavigateTab) onNavigateTab('practice');
+              }}
+              className="inline-flex items-center gap-1 text-slate-300 hover:text-white transition-colors cursor-pointer"
+              title="Practice strongest category"
             >
-              <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-              <span>Goal complete ✓</span>
-              <span className="text-slate-400 font-mono text-[10px]">
-                {target.questionsSolvedToday > target.targetQuestions
-                  ? `(${target.questionsSolvedToday} solved)`
-                  : `(${target.questionsSolvedToday}/${target.targetQuestions})`}
-              </span>
-            </button>
-          ) : (
-            <button
-              onClick={() => onNavigateTab && onNavigateTab('practice')}
-              className="inline-flex items-center gap-1 text-slate-300 font-semibold hover:text-white transition-colors cursor-pointer"
-              title="Click to continue daily goal"
-            >
-              <span className="text-cyan-400 font-mono font-bold">{target.questionsSolvedToday}/{target.targetQuestions}</span>
-              <span className="text-slate-400">Today</span>
+              <span className="text-slate-400 font-medium">Strongest:</span>
+              <span className="font-bold text-white">{summary.strongestCategoryLabel}</span>
+              {typeof summary.strongestAccuracy === 'number' && summary.strongestAccuracy > 0 && (
+                <span className="text-slate-400 font-mono text-[10px]">({summary.strongestAccuracy}%)</span>
+              )}
             </button>
           )}
 
-          {/* Top 100 active progress (if present) */}
-          {summary.activeTop100 && (
-            <>
-              <span className="text-slate-700 select-none">•</span>
-              <button
-                onClick={() => {
-                  if (onStartSscTop100Drill && summary.activeTop100) {
-                    onStartSscTop100Drill(summary.activeTop100.category, summary.activeTop100.currentQuestionNumber - 1);
-                  } else if (onNavigateTab) {
-                    onNavigateTab('practice');
-                  }
-                }}
-                className="inline-flex items-center gap-1 text-cyan-400 font-semibold hover:text-cyan-300 transition-colors cursor-pointer"
-                title="Resume Top 100 drill"
-              >
-                <span>Top 100 Q{summary.activeTop100.currentQuestionNumber}</span>
-              </button>
-            </>
+          {/* Divider */}
+          {summary.strongestCategory && summary.weakestCategory && (
+            <span className="text-slate-700 select-none">•</span>
           )}
 
-          {/* Weakest Area (if present) */}
+          {/* Weakest Area */}
           {summary.weakestCategory && summary.weakestCategoryLabel && (
-            <>
-              <span className="text-slate-700 select-none">•</span>
-              <button
-                onClick={() => {
-                  if (summary.weakestCategory && onSelectCategory) {
-                    onSelectCategory(summary.weakestCategory);
-                  }
-                  if (onNavigateTab) onNavigateTab('practice');
-                }}
-                className="inline-flex items-center gap-1 text-rose-300 font-semibold hover:text-rose-200 transition-colors cursor-pointer"
-                title="Train weakest area"
-              >
-                <span className="text-slate-400">Weakest:</span>
-                <span>{summary.weakestCategoryLabel}</span>
-              </button>
-            </>
+            <button
+              onClick={() => {
+                if (summary.weakestCategory && onSelectCategory) {
+                  onSelectCategory(summary.weakestCategory);
+                }
+                if (onNavigateTab) onNavigateTab('practice');
+              }}
+              className="inline-flex items-center gap-1 text-slate-300 hover:text-white transition-colors cursor-pointer"
+              title="Train weakest category"
+            >
+              <span className="text-slate-400 font-medium">Weakest:</span>
+              <span className="font-bold text-white">{summary.weakestCategoryLabel}</span>
+              {typeof summary.weakestAccuracy === 'number' && summary.weakestAccuracy > 0 && (
+                <span className="text-slate-400 font-mono text-[10px]">({summary.weakestAccuracy}%)</span>
+              )}
+            </button>
           )}
 
           {/* Spaced repetition mastery queue (compact) */}

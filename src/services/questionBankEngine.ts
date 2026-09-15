@@ -389,6 +389,17 @@ export class QuestionBankEngine {
     ];
 
     for (const q of allQuestions) {
+      // Safety guard against corrupted instruction questions
+      const lower = String(q.wordOrPhrase || '').toLowerCase();
+      if (
+        lower.includes('select the most appropriate') ||
+        lower.includes('underlined word') ||
+        lower.includes('given word') ||
+        String(q.wordOrPhrase || '').split(/\s+/).length > 8
+      ) {
+        continue;
+      }
+
       const cat = q.category;
       const catMap = this.playableConcepts.get(cat);
       if (!catMap) continue;
@@ -486,6 +497,18 @@ export class QuestionBankEngine {
                s.startsWith('both 1') || s.startsWith('neither 1') ||
                /^\d\s*,\s*\d\s*,\s*\d/.test(s);
       })) {
+        continue;
+      }
+
+      // Guard: Reject questions with malformed instruction text inside wordOrPhrase or prompt sentences
+      const cleanWord = String(raw.wordOrPhrase || '').trim();
+      const lowerWord = cleanWord.toLowerCase();
+      if (
+        lowerWord.includes('select the most appropriate') ||
+        lowerWord.includes('underlined word') ||
+        lowerWord.includes('given word') ||
+        cleanWord.split(/\s+/).length > 8
+      ) {
         continue;
       }
 
@@ -647,6 +670,86 @@ export class QuestionBankEngine {
   public getImportedPool(): Question[] {
     this.init();
     return [...this.importedPool];
+  }
+
+  /**
+   * Delete a single question by ID from the runtime pool and rebuild concepts
+   */
+  public deleteQuestionById(questionId: string): boolean {
+    this.init();
+    const prevLen = this.importedPool.length;
+    this.importedPool = this.importedPool.filter(q => q.id !== questionId && q.canonicalQuestionId !== questionId);
+    if (this.importedPool.length !== prevLen) {
+      this.rebuildConceptMap();
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Purge all questions matching an exam (e.g. "SSC CPO") from runtime memory & concept map
+   */
+  public purgeExamQuestions(examName: string = 'SSC CPO'): { removedCount: number; updatedCount: number } {
+    this.init();
+    const targetNorm = examName.trim().toLowerCase();
+    let removedCount = 0;
+    let updatedCount = 0;
+
+    const remainingPool: Question[] = [];
+
+    for (const q of this.importedPool) {
+      const primaryExam = String(q.exam || '').toLowerCase();
+      const rawApps = Array.isArray(q.appearances) ? q.appearances : [];
+      const examHistory = Array.isArray(q.examHistory) ? q.examHistory : [];
+      const wordOrPhrase = String(q.wordOrPhrase || '');
+
+      const isPrimaryMatch = primaryExam.includes(targetNorm);
+      const hasTargetApp = rawApps.some(a => String(a.exam || '').toLowerCase().includes(targetNorm));
+      const hasTargetHistory = examHistory.some(tag => tag.toLowerCase().includes(targetNorm));
+      const isCorruptedInstruction = 
+        wordOrPhrase.toLowerCase().includes('select the most appropriate') ||
+        wordOrPhrase.toLowerCase().includes('underlined word') ||
+        wordOrPhrase.toLowerCase().includes('given word');
+
+      if (isPrimaryMatch || (rawApps.length === 1 && hasTargetApp) || isCorruptedInstruction) {
+        // Full removal
+        removedCount++;
+      } else if (rawApps.length > 1 && hasTargetApp) {
+        // Strip the target exam appearance but keep other exam appearances
+        const remainingApps = rawApps.filter(a => !String(a.exam || '').toLowerCase().includes(targetNorm));
+        if (remainingApps.length === 0) {
+          removedCount++;
+        } else {
+          q.appearances = sortAppearances(remainingApps);
+          q.repeatCount = computeRepeatCount(q.appearances);
+          q.importanceLevel = computeImportanceLevel(q.repeatCount);
+          q.examHistory = q.appearances.map(a => formatExamTag(a.exam, a.year, a.tier));
+          if (q.appearances[0]) {
+            q.exam = q.appearances[0].exam;
+            q.examFamily = q.appearances[0].examFamily || 'SSC';
+            q.year = q.appearances[0].year || 2024;
+            q.tier = q.appearances[0].tier || '';
+            q.shift = q.appearances[0].shift || null;
+            q.examDate = q.appearances[0].examDate || null;
+          }
+          remainingPool.push(q);
+          updatedCount++;
+        }
+      } else {
+        remainingPool.push(q);
+      }
+    }
+
+    this.importedPool = remainingPool;
+    this.rebuildConceptMap();
+    return { removedCount, updatedCount };
+  }
+
+  /**
+   * Specifically purge all uploaded SSC CPO questions from the runtime pool
+   */
+  public purgeUploadedSscCpoQuestions(): { removedCount: number; updatedCount: number } {
+    return this.purgeExamQuestions('SSC CPO');
   }
 
   /**

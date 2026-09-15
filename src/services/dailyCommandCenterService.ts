@@ -66,10 +66,13 @@ export interface DailyStudySummary {
     mastered: number;
   };
 
-  // Weakest category detection
+  // Weakest and Strongest category detection
   weakestCategory: QuestionCategory | null;
   weakestCategoryLabel: string | null;
   weakestAccuracy: number | null;
+  strongestCategory: QuestionCategory | null;
+  strongestCategoryLabel: string | null;
+  strongestAccuracy: number | null;
 
   // Single Determined Next Action
   nextBestAction: NextBestAction;
@@ -213,11 +216,15 @@ export function getDailyStudySummary(
   const targetRemaining = Math.max(0, dailyTarget.targetQuestions - dailyTarget.questionsSolvedToday);
   const isGoalCompleted = dailyTarget.questionsSolvedToday >= dailyTarget.targetQuestions;
 
-  // 4. Weakest Category from Mentor Analytics
+  // 4. Weakest & Strongest Category from Mentor Analytics
   const mentorAnalytics = calculateMentorAnalytics('all_time', player, dailyStreak, savedWords);
   const weakestCategory = mentorAnalytics.weakestCategory;
   const weakestCategoryLabel = weakestCategory ? (CATEGORY_DISPLAY_NAMES[weakestCategory] || weakestCategory) : null;
   const weakestAccuracy = weakestCategory ? mentorAnalytics.categoryStats[weakestCategory]?.accuracy ?? null : null;
+
+  const strongestCategory = mentorAnalytics.strongestCategory || (player.bestCategory as QuestionCategory) || 'synonyms';
+  const strongestCategoryLabel = strongestCategory ? (CATEGORY_DISPLAY_NAMES[strongestCategory] || strongestCategory) : 'Synonyms';
+  const strongestAccuracy = strongestCategory ? mentorAnalytics.categoryStats[strongestCategory]?.accuracy ?? null : null;
 
   // 5. Active Top 100 Progress
   const activeTop100 = getActiveTop100Progress();
@@ -341,6 +348,9 @@ export function getDailyStudySummary(
     weakestCategory,
     weakestCategoryLabel,
     weakestAccuracy,
+    strongestCategory,
+    strongestCategoryLabel,
+    strongestAccuracy,
     nextBestAction,
     hasActivity,
   };

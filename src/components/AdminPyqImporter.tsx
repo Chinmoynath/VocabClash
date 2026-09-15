@@ -33,13 +33,23 @@ import {
   Tag,
   Tv,
   FileText,
-  Swords
+  Swords,
+  Trash2,
 } from 'lucide-react';
 import { ADS_ENABLED, ADSENSE_CLIENT_ID, ADSENSE_BANNER_SLOT, ADSENSE_INTERSTITIAL_SLOT } from '../services/adSenseService';
 import { ExtractedQuestion, ImportBatch, ReviewStatus } from '../types/pyqImport';
 import { parseAndValidatePyqJSON, SkippedQuestionItem, extractJsonMetadata, formatExamTag, normalizeExamDate } from '../services/jsonPyqParser';
 import { questionBankEngine } from '../services/questionBankEngine';
-import { publishApprovedQuestionsToFirestore, deduplicateAndMigrateQuestionBank, isUserAdmin, ADMIN_EMAIL } from '../services/pyqFirestoreService';
+import { 
+  publishApprovedQuestionsToFirestore, 
+  deduplicateAndMigrateQuestionBank, 
+  isUserAdmin, 
+  ADMIN_EMAIL,
+  purgeQuestionsByExam,
+  purgeAllSscCpoQuestions,
+  deleteQuestionFromFirestore,
+  PurgeExamResult,
+} from '../services/pyqFirestoreService';
 import { 
   enrichQuestionBatch, 
   enrichSingleQuestion, 
@@ -158,6 +168,13 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
   const [explorerCategory, setExplorerCategory] = useState<string>('ALL');
   const [explorerSearch, setExplorerSearch] = useState<string>('');
   const [expandedQuestionId, setExpandedQuestionId] = useState<string | null>(null);
+
+  // Question Purge / Maintenance State
+  const [isPurging, setIsPurging] = useState<boolean>(false);
+  const [purgeProgress, setPurgeProgress] = useState<{ current: number; total: number; stage: string } | null>(null);
+  const [purgeConfirmTarget, setPurgeConfirmTarget] = useState<string | null>(null);
+  const [purgeToast, setPurgeToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [deletingQuestionId, setDeletingQuestionId] = useState<string | null>(null);
 
   // Simulation State
   const [simulationResult, setSimulationResult] = useState<ReturnType<typeof questionBankEngine.runRepetitionSimulation> | null>(null);
@@ -664,6 +681,68 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
     }
   };
 
+  const handleExecutePurge = async (targetExam: string = 'SSC CPO') => {
+    setIsPurging(true);
+    setPurgeProgress({ current: 0, total: 100, stage: `Initiating cleanup for ${targetExam}...` });
+    setPurgeConfirmTarget(null);
+
+    try {
+      // 1. Purge from Firestore question_bank and pyq_import_batches
+      const res: PurgeExamResult = await purgeQuestionsByExam(targetExam, (prog) => {
+        setPurgeProgress(prog);
+      });
+
+      // 2. Purge from runtime QuestionBankEngine
+      const runtimeRes = questionBankEngine.purgeExamQuestions(targetExam);
+
+      // 3. Refresh health and explorer state
+      setHealthData(questionBankEngine.getCloudVsRuntimeCounts());
+      setExplorerQuestions(questionBankEngine.getImportedQuestions());
+
+      if (res.success) {
+        setPurgeToast({
+          type: 'success',
+          message: `Successfully purged ${res.deletedDocCount} ${targetExam} questions and ${res.deletedBatchesCount} import batches from Firestore! Runtime pool updated (${runtimeRes.removedCount} items cleared).`,
+        });
+      } else {
+        setPurgeToast({
+          type: 'error',
+          message: `Purge warning: ${res.error || 'Check console for details'}`,
+        });
+      }
+    } catch (err: any) {
+      setPurgeToast({
+        type: 'error',
+        message: err?.message || 'Purge operation failed.',
+      });
+    } finally {
+      setIsPurging(false);
+      setPurgeProgress(null);
+    }
+  };
+
+  const handleDeleteSingleQuestion = async (qId: string, word: string) => {
+    if (!confirm(`Are you sure you want to delete "${word}" from Firestore and runtime?`)) return;
+    setDeletingQuestionId(qId);
+    try {
+      await deleteQuestionFromFirestore(qId);
+      questionBankEngine.deleteQuestionById(qId);
+      setHealthData(questionBankEngine.getCloudVsRuntimeCounts());
+      setExplorerQuestions(questionBankEngine.getImportedQuestions());
+      setPurgeToast({
+        type: 'success',
+        message: `Deleted "${word}" from database successfully.`,
+      });
+    } catch (e: any) {
+      setPurgeToast({
+        type: 'error',
+        message: e?.message || 'Failed to delete question.',
+      });
+    } finally {
+      setDeletingQuestionId(null);
+    }
+  };
+
   const handleRunSimulation = () => {
     setIsSimulating(true);
     try {
@@ -887,11 +966,115 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
 
       {/* Main Content Area */}
       <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 max-w-7xl w-full mx-auto">
+        {/* Purge / Notification Toast */}
+        {purgeToast && (
+          <div className={`p-4 rounded-xl text-sm flex items-center justify-between gap-3 animate-fadeIn ${
+            purgeToast.type === 'success' 
+              ? 'bg-emerald-950/80 border border-emerald-500/50 text-emerald-200' 
+              : 'bg-rose-950/80 border border-rose-500/50 text-rose-200'
+          }`}>
+            <div className="flex items-center gap-2.5">
+              {purgeToast.type === 'success' ? (
+                <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+              ) : (
+                <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0" />
+              )}
+              <span>{purgeToast.message}</span>
+            </div>
+            <button 
+              onClick={() => setPurgeToast(null)} 
+              className="text-xs font-mono opacity-70 hover:opacity-100 hover:bg-slate-800/50 px-2 py-1 rounded transition"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
         {/* Error Alert */}
         {errorMessage && (
           <div className="bg-rose-500/10 border border-rose-500/40 p-4 rounded-xl text-rose-200 text-sm flex items-center gap-2">
             <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0" />
             <span>{errorMessage}</span>
+          </div>
+        )}
+
+        {/* Confirmation Modal for Bulk Exam Purge */}
+        {purgeConfirmTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 p-4 backdrop-blur-md">
+            <div className="bg-slate-900 border border-rose-500/60 rounded-2xl p-6 max-w-lg w-full text-left space-y-4 shadow-2xl animate-scaleIn">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-rose-500/20 text-rose-400 rounded-2xl border border-rose-500/30 shrink-0">
+                  <Trash2 className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-white">
+                    Purge All "{purgeConfirmTarget}" Questions?
+                  </h3>
+                  <p className="text-xs text-rose-300 font-medium">
+                    Permanent Cleanup Operation
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-slate-300 space-y-2 leading-relaxed">
+                <p>
+                  This operation will:
+                </p>
+                <ul className="list-disc pl-5 space-y-1 text-slate-400">
+                  <li>Scan Firestore <code className="text-rose-300">question_bank</code> for all documents tagged with <b>{purgeConfirmTarget}</b>.</li>
+                  <li>Permanently delete single-appearance <b>{purgeConfirmTarget}</b> questions.</li>
+                  <li>Clean up and strip the <b>{purgeConfirmTarget}</b> appearance tag from multi-exam questions (preserving their other exam history).</li>
+                  <li>Remove corresponding uploaded <b>{purgeConfirmTarget}</b> batches from <code className="text-rose-300">pyq_import_batches</code>.</li>
+                  <li>Purge all <b>{purgeConfirmTarget}</b> items from the live runtime Question Bank Engine and reload fresh state.</li>
+                </ul>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  onClick={() => setPurgeConfirmTarget(null)}
+                  disabled={isPurging}
+                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => handleExecutePurge(purgeConfirmTarget)}
+                  disabled={isPurging}
+                  className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-extrabold rounded-xl transition flex items-center gap-2 shadow-lg shadow-rose-900/40"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Yes, Purge All {purgeConfirmTarget} Questions
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Purge Progress Modal */}
+        {isPurging && purgeProgress && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 p-4 backdrop-blur-md">
+            <div className="bg-slate-900 border border-rose-500/50 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl text-center">
+              <div className="w-12 h-12 bg-rose-500/20 text-rose-400 rounded-full flex items-center justify-center mx-auto border border-rose-500/30">
+                <RefreshCw className="w-6 h-6 animate-spin" />
+              </div>
+              <h3 className="text-base font-extrabold text-white">
+                Purging Questions from Database
+              </h3>
+              <p className="text-xs text-slate-400">
+                {purgeProgress.stage}
+              </p>
+
+              <div className="w-full bg-slate-950 rounded-full h-2.5 overflow-hidden border border-rose-500/30">
+                <div 
+                  className="bg-gradient-to-r from-rose-600 to-amber-500 h-full transition-all duration-300 rounded-full"
+                  style={{ width: `${Math.min(100, Math.max(10, Math.round((purgeProgress.current / (purgeProgress.total || 1)) * 100)))}%` }}
+                />
+              </div>
+
+              <div className="text-[11px] font-mono text-slate-400">
+                {purgeProgress.current} / {purgeProgress.total} items processed
+              </div>
+            </div>
           </div>
         )}
 
@@ -1840,6 +2023,66 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
               )}
             </div>
 
+            {/* Question Bank Maintenance & Bulk Exam Question Purge */}
+            <div className="bg-slate-900 border border-rose-500/30 rounded-2xl p-6 shadow-xl space-y-4">
+              <div className="flex items-center justify-between flex-wrap gap-4">
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <Trash2 className="w-4 h-4 text-rose-400" />
+                    Question Bank Maintenance & Bulk Exam Purge
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Permanently delete erroneous or flawed question uploads from Firestore <code className="text-rose-300">question_bank</code> and <code className="text-rose-300">pyq_import_batches</code>, and update live runtime state.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    onClick={() => setPurgeConfirmTarget('SSC CPO')}
+                    disabled={isPurging}
+                    className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-black text-xs rounded-xl flex items-center gap-2 transition shadow-lg shadow-rose-950/50"
+                    title="Purge all questions uploaded under SSC CPO"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Purge All SSC CPO Questions
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-4 flex items-center justify-between flex-wrap gap-3 text-xs">
+                <span className="text-slate-300">
+                  Target Specific Exam to Purge:
+                </span>
+                <div className="flex items-center gap-2">
+                  <select
+                    id="custom-exam-purge-select"
+                    defaultValue="SSC CPO"
+                    className="bg-slate-900 border border-slate-700 text-slate-200 text-xs rounded-lg px-3 py-1.5 focus:outline-none focus:border-rose-500"
+                  >
+                    {availableExams.length > 0 ? (
+                      availableExams.map(ex => (
+                        <option key={ex} value={ex}>{ex}</option>
+                      ))
+                    ) : (
+                      <option value="SSC CPO">SSC CPO</option>
+                    )}
+                  </select>
+                  <button
+                    onClick={() => {
+                      const selectEl = document.getElementById('custom-exam-purge-select') as HTMLSelectElement;
+                      if (selectEl && selectEl.value) {
+                        setPurgeConfirmTarget(selectEl.value);
+                      }
+                    }}
+                    disabled={isPurging}
+                    className="px-3 py-1.5 bg-rose-950/60 hover:bg-rose-900 text-rose-300 hover:text-white border border-rose-800/60 text-xs font-bold rounded-lg transition"
+                  >
+                    Purge Selected Exam
+                  </button>
+                </div>
+              </div>
+            </div>
+
             {/* Admin-Only Monetization & Ad System Diagnostics */}
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
               <div className="flex items-center justify-between flex-wrap gap-3">
@@ -2217,6 +2460,36 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
                 </div>
               )}
 
+              {/* SSC CPO Erroneous Upload Quick-Purge Banner */}
+              {explorerQuestions.some(q => (q.exam || '').toLowerCase().includes('cpo') || (q.appearances || []).some(a => (a.exam || '').toLowerCase().includes('cpo'))) && (
+                <div className="bg-rose-950/40 border border-rose-500/50 rounded-2xl p-4 flex items-center justify-between flex-wrap gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 rounded-xl bg-rose-500/20 text-rose-400 border border-rose-500/30 shrink-0">
+                      <Trash2 className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-white flex items-center gap-2">
+                        Uploaded SSC CPO Questions Detected
+                        <span className="text-[10px] bg-rose-500/20 text-rose-300 font-mono px-2 py-0.5 rounded-full border border-rose-500/30">
+                          Action Required
+                        </span>
+                      </h4>
+                      <p className="text-[11px] text-rose-200/80 mt-0.5">
+                        Remove all problematic SSC CPO question uploads from Firestore and the live question pool with one click.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setPurgeConfirmTarget('SSC CPO')}
+                    disabled={isPurging}
+                    className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-black transition flex items-center gap-1.5 shadow-lg shadow-rose-950/60 shrink-0"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Purge All SSC CPO Questions
+                  </button>
+                </div>
+              )}
+
               {/* Questions List or Initial Search Prompt */}
               {!hasActiveExplorerFilter ? (
                 <div className="py-16 px-4 text-center rounded-2xl bg-slate-950/50 border border-dashed border-slate-800 space-y-4">
@@ -2312,6 +2585,18 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
                               title={isExpanded ? 'Collapse' : 'Expand full details'}
                             >
                               {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                            </button>
+                            <button
+                              onClick={() => handleDeleteSingleQuestion(q.id, q.wordOrPhrase)}
+                              disabled={deletingQuestionId === q.id}
+                              className="text-xs text-rose-400 hover:text-rose-200 p-1 rounded hover:bg-rose-950/60 transition"
+                              title={`Delete "${q.wordOrPhrase}"`}
+                            >
+                              {deletingQuestionId === q.id ? (
+                                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <Trash2 className="w-3.5 h-3.5" />
+                              )}
                             </button>
                           </div>
                         </div>
