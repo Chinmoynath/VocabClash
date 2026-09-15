@@ -191,14 +191,22 @@ export const PremiumModal: React.FC<PremiumModalProps> = ({
       onError: (err: any) => {
         setIsProcessing(false);
         const errorName = err?.name || 'Error';
-        const errorMsg = err?.message || 'Payment was not completed.';
-        const displayText = errorMsg.startsWith('[') ? errorMsg : `[${errorName}]: ${errorMsg}`;
+        const errorMsg = err?.message || '';
+
+        console.error('[Play Billing] Purchase failure:', errorName, errorMsg, err);
+
+        let userFriendlyMsg = "Google Play couldn't start the purchase. Please try again.";
+        if (errorMsg.toLowerCase().includes('user_cancelled') || errorMsg === 'Payment was cancelled.') {
+          userFriendlyMsg = 'Payment was cancelled.';
+        } else if (errorMsg.includes('verification failed') || errorMsg.includes('Network connection')) {
+          userFriendlyMsg = errorMsg;
+        }
 
         setStatusMessage({
-          text: displayText,
+          text: userFriendlyMsg,
           type: 'error',
         });
-        setTimeout(() => setStatusMessage(null), 10000);
+        setTimeout(() => setStatusMessage(null), 5000);
       },
     });
   };

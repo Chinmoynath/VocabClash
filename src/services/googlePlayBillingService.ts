@@ -1,5 +1,5 @@
 import { SubscriptionPlan, UserSubscription } from '../types';
-import { mapPlanToGooglePlay, PLAY_PRODUCTS } from '../config/playProducts';
+import { mapPlanToGooglePlay, PLAY_PRODUCTS, PlayPlanMapping } from '../config/playProducts';
 
 const PLAY_BILLING_METHOD = 'https://play.google.com/billing';
 
@@ -148,63 +148,28 @@ export async function verifyGooglePlayPurchaseOnBackend(params: {
 }
 
 /**
- * Executes a purchase through Google Play Billing (TWA Payment Request API + Digital Goods)
+ * Executes a purchase for the one-time Lifetime product (Known-good reference)
  */
-export async function purchaseWithGooglePlay(
+async function purchaseLifetimeProduct(
   plan: SubscriptionPlan,
-  userId?: string,
-  userEmail?: string
+  userId: string | undefined,
+  userEmail: string | undefined,
+  service: DigitalGoodsService
 ): Promise<UserSubscription> {
-  const playMapping = mapPlanToGooglePlay(plan.id);
+  const productId = PLAY_PRODUCTS.lifetime.productId;
+  console.log('[Play Billing] Lifetime purchase clicked');
+  console.log(`[Play Billing] Product ID: ${productId}`);
 
-  console.log('[Play Billing] Checking Digital Goods API');
-
-  let service: DigitalGoodsService | null = null;
+  // 1. Fetch item details
   try {
-    service = await getPlayDigitalGoodsService();
-  } catch (serviceErr: any) {
-    console.error('[Play Billing] Error getting Digital Goods service:', serviceErr?.name, serviceErr?.message);
-  }
-
-  if (!service) {
-    console.error('[Play Billing] Digital Goods service NOT obtained (service is null/undefined)');
-    throw new Error('Google Play Digital Goods service is not available on this device/environment.');
-  }
-
-  console.log('[Play Billing] Digital Goods service obtained');
-
-  // Fetch item details
-  const skusToQuery = Array.from(new Set([playMapping.sku, playMapping.productId]));
-  console.log(`[Play Billing] Requesting details:\n${skusToQuery.join('\n')}`);
-  let itemDetailsResult: DigitalGoodsItemDetails[] = [];
-
-  try {
-    itemDetailsResult = await service.getDetails(skusToQuery);
-    console.log('[Play Billing] Details returned:\n', JSON.stringify(itemDetailsResult, null, 2));
+    const details = await service.getDetails([productId]);
+    console.log('[Play Billing] Lifetime details returned:\n', JSON.stringify(details, null, 2));
   } catch (detailsErr: any) {
-    console.error('[Play Billing] getDetails error:');
-    console.error('[Play Billing] FULL ERROR:', detailsErr);
-    console.error('[Play Billing] name:', detailsErr?.name);
-    console.error('[Play Billing] message:', detailsErr?.message);
-    console.error('[Play Billing] stack:', detailsErr?.stack);
+    console.warn('[Play Billing] Lifetime getDetails notice:', detailsErr?.message);
   }
 
-  // Determine SKU for PaymentRequest
-  let skuToUse = playMapping.sku;
-  if (itemDetailsResult && itemDetailsResult.length > 0) {
-    const exactMatch = itemDetailsResult.find(item => item.itemId === playMapping.sku);
-    const baseMatch = itemDetailsResult.find(item => item.itemId === playMapping.productId);
-    if (exactMatch) {
-      skuToUse = exactMatch.itemId;
-    } else if (baseMatch && playMapping.itemType === 'one_time') {
-      skuToUse = baseMatch.itemId;
-    }
-  }
-
-  console.log('[Play Billing] Creating PaymentRequest');
-
+  // 2. Create PaymentRequest
   if (typeof window === 'undefined' || typeof window.PaymentRequest === 'undefined') {
-    console.error('[Play Billing] PaymentRequest API is undefined on window');
     const err = new Error('Payment Request API is not available on this browser.');
     (err as any).name = 'NotSupportedError';
     throw err;
@@ -214,7 +179,175 @@ export async function purchaseWithGooglePlay(
     {
       supportedMethods: PLAY_BILLING_METHOD,
       data: {
-        sku: skuToUse,
+        sku: productId,
+      },
+    },
+  ];
+
+  const paymentDetails = {
+    total: {
+      label: `VocabClash • ${plan.name} (${plan.displayPrice})`,
+      amount: {
+        currency: 'INR',
+        value: String(plan.price),
+      },
+    },
+  };
+
+  const request = new window.PaymentRequest(paymentMethodData, paymentDetails);
+
+  // 3. Show PaymentRequest
+  let paymentResponse: any = null;
+  try {
+    paymentResponse = await request.show();
+    console.log('[Play Billing] Lifetime Google Play sheet opened');
+  } catch (err: any) {
+    console.error('[Play Billing] Lifetime paymentRequest.show() error:', err);
+    throw err;
+  }
+
+  if (!paymentResponse) {
+    throw new Error('Payment was not completed.');
+  }
+
+  const details = paymentResponse.details || {};
+  const purchaseToken = details.token || details.purchaseToken || details.orderId;
+
+  if (!purchaseToken) {
+    await paymentResponse.complete('fail').catch(() => {});
+    throw new Error('No purchase token was returned from Google Play.');
+  }
+
+  const verifyResult = await verifyGooglePlayPurchaseOnBackend({
+    purchaseToken,
+    sku: productId,
+    productId,
+    planId: plan.id,
+    userId,
+    userEmail,
+  });
+
+  if (!verifyResult.success || !verifyResult.verified) {
+    await paymentResponse.complete('fail').catch(() => {});
+    throw new Error(verifyResult.error || 'Google Play purchase verification failed on server.');
+  }
+
+  await paymentResponse.complete('success').catch(() => {});
+
+  try {
+    await service.acknowledge(purchaseToken, 'onetime');
+    console.log('[Play Billing] Lifetime purchase acknowledged successfully');
+  } catch (ackErr: any) {
+    console.warn('[Play Billing] Lifetime acknowledge notice:', ackErr?.message);
+  }
+
+  return {
+    isPremium: true,
+    planId: plan.id,
+    planName: plan.name,
+    subscribedAt: Date.now(),
+    renewalDate: 'Lifetime Active',
+    autoRenew: false,
+    provider: 'google_play',
+    purchaseToken,
+    orderId: details.orderId || undefined,
+    purchaseType: 'one_time',
+    verifiedAt: Date.now(),
+  };
+}
+
+/**
+ * Executes a purchase for active subscriptions (vocabclash_pro)
+ */
+async function purchaseSubscriptionProduct(
+  plan: SubscriptionPlan,
+  userId: string | undefined,
+  userEmail: string | undefined,
+  service: DigitalGoodsService,
+  playMapping: PlayPlanMapping
+): Promise<UserSubscription> {
+  const productId = PLAY_PRODUCTS.subscription.productId; // vocabclash_pro
+  const requestedBasePlan = playMapping.basePlanId || 'monthly';
+
+  console.log('[Play Billing][Subscription] Purchase clicked');
+  console.log(`[Play Billing][Subscription] Product ID: ${productId}`);
+  console.log(`[Play Billing][Subscription] Requested base plan: ${requestedBasePlan}`);
+
+  console.log('[Play Billing][Subscription] Getting Digital Goods service');
+  console.log(`[Play Billing][Subscription] Fetching details for:\n${productId}`);
+
+  let itemDetailsResult: DigitalGoodsItemDetails[] = [];
+  try {
+    itemDetailsResult = await service.getDetails([productId]);
+    console.log('[Play Billing][Subscription] Product details returned:\n', JSON.stringify(itemDetailsResult, null, 2));
+  } catch (detailsErr: any) {
+    console.error('[Play Billing][Subscription] ERROR fetching details:', detailsErr);
+    console.error('name:', detailsErr?.name);
+    console.error('message:', detailsErr?.message);
+  }
+
+  // Log available subscription offers/base plans safely
+  const offersSummary = itemDetailsResult.map((item: any, idx) => ({
+    index: idx,
+    itemId: item.itemId,
+    title: item.title,
+    price: item.price,
+    subscriptionPeriod: item.subscriptionPeriod,
+    basePlanId: item.basePlanId,
+    offerId: item.offerId,
+    offerToken: item.offerToken ? `${String(item.offerToken).slice(0, 10)}...` : undefined,
+  }));
+  console.log('[Play Billing][Subscription] Available subscription offers/base plans:\n', JSON.stringify(offersSummary, null, 2));
+
+  console.log(`[Play Billing][Subscription] Looking for base plan:\n${requestedBasePlan}`);
+
+  // Find matching offer by basePlanId, itemId, offerId, or period
+  let matchingOffer: any = null;
+  if (itemDetailsResult && itemDetailsResult.length > 0) {
+    matchingOffer = itemDetailsResult.find((item: any) => {
+      if (item.basePlanId && item.basePlanId.toLowerCase() === requestedBasePlan.toLowerCase()) return true;
+      if (item.itemId && (
+        item.itemId === `${productId}:${requestedBasePlan}` ||
+        item.itemId.endsWith(`:${requestedBasePlan}`) ||
+        item.itemId.toLowerCase() === requestedBasePlan.toLowerCase()
+      )) return true;
+      if (item.offerId && item.offerId.toLowerCase() === requestedBasePlan.toLowerCase()) return true;
+      if (playMapping.targetPeriod && item.subscriptionPeriod === playMapping.targetPeriod) return true;
+      return false;
+    });
+  }
+
+  if (matchingOffer) {
+    console.log('[Play Billing][Subscription] Matching offer found:\n', JSON.stringify({
+      itemId: matchingOffer.itemId,
+      title: matchingOffer.title,
+      price: matchingOffer.price,
+      basePlanId: matchingOffer.basePlanId,
+      subscriptionPeriod: matchingOffer.subscriptionPeriod,
+      offerToken: matchingOffer.offerToken ? `${String(matchingOffer.offerToken).slice(0, 10)}...` : undefined,
+    }, null, 2));
+  } else {
+    console.log(`[Play Billing][Subscription] No direct match from getDetails for ${requestedBasePlan}, constructing standard Digital Goods subscription payload`);
+  }
+
+  console.log('[Play Billing][Subscription] Creating PaymentRequest');
+
+  if (typeof window === 'undefined' || typeof window.PaymentRequest === 'undefined') {
+    const err = new Error('Payment Request API is not available on this browser.');
+    (err as any).name = 'NotSupportedError';
+    throw err;
+  }
+
+  const offerToken = matchingOffer?.offerToken || (matchingOffer as any)?.token;
+  const skuToPass = matchingOffer?.itemId || (offerToken ? productId : `${productId}:${requestedBasePlan}`);
+
+  const paymentMethodData = [
+    {
+      supportedMethods: PLAY_BILLING_METHOD,
+      data: {
+        sku: skuToPass,
+        ...(offerToken ? { offerToken } : {}),
+        basePlanId: requestedBasePlan,
       },
     },
   ];
@@ -232,32 +365,28 @@ export async function purchaseWithGooglePlay(
   let request: any = null;
   try {
     request = new window.PaymentRequest(paymentMethodData, paymentDetails);
-    console.log('[Play Billing] PaymentRequest created');
+    console.log('[Play Billing][Subscription] PaymentRequest created');
   } catch (createErr: any) {
-    console.error('[Play Billing] PaymentRequest creation FAILED');
-    console.error('[Play Billing] FULL ERROR:', createErr);
-    console.error('[Play Billing] name:', createErr?.name);
-    console.error('[Play Billing] message:', createErr?.message);
-    console.error('[Play Billing] stack:', createErr?.stack);
+    console.error('[Play Billing][Subscription] ERROR:', createErr);
+    console.error('name:', createErr?.name);
+    console.error('message:', createErr?.message);
     throw createErr;
   }
 
-  console.log('[Play Billing] Calling paymentRequest.show()');
+  console.log('[Play Billing][Subscription] Calling paymentRequest.show()');
 
   let paymentResponse: any = null;
   try {
     paymentResponse = await request.show();
-    console.log('[Play Billing] Payment sheet opened');
+    console.log('[Play Billing][Subscription] Google Play sheet opened');
   } catch (err: any) {
-    console.error('[Play Billing] paymentRequest.show() FAILED');
-    console.error('[Play Billing] FULL ERROR:', err);
-    console.error('[Play Billing] name:', err?.name);
-    console.error('[Play Billing] message:', err?.message);
-    console.error('[Play Billing] stack:', err?.stack);
-
-    const errorToThrow = new Error(`[${err?.name || 'Error'}]: ${err?.message || 'Payment initiation failed'}`);
-    (errorToThrow as any).name = err?.name || 'PlayBillingError';
-    throw errorToThrow;
+    console.error('[Play Billing][Subscription] ERROR:', err);
+    console.error('name:', err?.name);
+    console.error('message:', err?.message);
+    if (err?.stack) {
+      console.error('stack:', err.stack);
+    }
+    throw err;
   }
 
   if (!paymentResponse) {
@@ -267,19 +396,18 @@ export async function purchaseWithGooglePlay(
   const details = paymentResponse.details || {};
   const purchaseToken = details.token || details.purchaseToken || details.orderId;
 
-  console.log('[Play Billing] Purchase token received, proceeding with verification');
+  console.log('[Play Billing][Subscription] Purchase token received, proceeding with verification');
 
   if (!purchaseToken) {
     await paymentResponse.complete('fail').catch(() => {});
     throw new Error('No purchase token was returned from Google Play.');
   }
 
-  // Verify purchase on secure backend
   const verifyResult = await verifyGooglePlayPurchaseOnBackend({
     purchaseToken,
-    sku: skuToUse,
-    productId: playMapping.productId,
-    basePlanId: playMapping.basePlanId,
+    sku: skuToPass,
+    productId,
+    basePlanId: requestedBasePlan,
     planId: plan.id,
     userId,
     userEmail,
@@ -290,43 +418,57 @@ export async function purchaseWithGooglePlay(
     throw new Error(verifyResult.error || 'Google Play purchase verification failed on server.');
   }
 
-  // Complete Payment Request UI
   await paymentResponse.complete('success').catch(() => {});
 
-  // Acknowledge the purchase if not already acknowledged
   try {
-    const ackType = playMapping.itemType === 'one_time' ? 'onetime' : 'repeatable';
-    await service.acknowledge(purchaseToken, ackType);
-    console.log('[Play Billing] Purchase acknowledged successfully');
+    await service.acknowledge(purchaseToken, 'repeatable');
+    console.log('[Play Billing][Subscription] Purchase acknowledged successfully');
   } catch (ackErr: any) {
-    console.warn('[Play Billing] Purchase acknowledge notice (may already be acknowledged):', ackErr?.message);
+    console.warn('[Play Billing][Subscription] Purchase acknowledge notice:', ackErr?.message);
   }
 
-  // Construct verified UserSubscription
-  const renewDate = plan.id === 'lifetime'
-    ? 'Lifetime Active'
-    : `Renews ${new Date(Date.now() + (plan.periodDurationDays || 30) * 86400000).toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-      })} at ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+  const renewDate = `Renews ${new Date(Date.now() + (plan.periodDurationDays || 30) * 86400000).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  })} at ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
 
-  const subscriptionResult: UserSubscription = {
+  return {
     isPremium: true,
     planId: plan.id,
     planName: plan.name,
     subscribedAt: Date.now(),
     renewalDate: renewDate,
-    autoRenew: plan.id !== 'lifetime',
+    autoRenew: true,
     provider: 'google_play',
     purchaseToken,
     orderId: details.orderId || undefined,
-    purchaseType: playMapping.itemType,
+    purchaseType: 'subscription',
     verifiedAt: Date.now(),
-    expiresAt: plan.id === 'lifetime' ? undefined : Date.now() + (plan.periodDurationDays || 30) * 86400000,
+    expiresAt: Date.now() + (plan.periodDurationDays || 30) * 86400000,
   };
+}
 
-  return subscriptionResult;
+/**
+ * Executes a purchase through Google Play Billing (TWA Payment Request API + Digital Goods)
+ */
+export async function purchaseWithGooglePlay(
+  plan: SubscriptionPlan,
+  userId?: string,
+  userEmail?: string
+): Promise<UserSubscription> {
+  const service = await getPlayDigitalGoodsService();
+  if (!service) {
+    throw new Error('Google Play Digital Goods service is not available on this device/environment.');
+  }
+
+  const playMapping = mapPlanToGooglePlay(plan.id);
+
+  if (plan.id === 'lifetime') {
+    return await purchaseLifetimeProduct(plan, userId, userEmail, service);
+  }
+
+  return await purchaseSubscriptionProduct(plan, userId, userEmail, service, playMapping);
 }
 
 /**

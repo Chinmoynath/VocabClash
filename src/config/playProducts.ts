@@ -26,6 +26,7 @@ export interface PlayPlanMapping {
   sku: string;
   productId: string;
   basePlanId?: string;
+  targetPeriod?: string;
 }
 
 /**
@@ -39,6 +40,7 @@ export function mapPlanToGooglePlay(planId: SubscriptionPlanId): PlayPlanMapping
         sku: `${PLAY_PRODUCTS.subscription.productId}:${PLAY_PRODUCTS.subscription.basePlans.monthly}`,
         productId: PLAY_PRODUCTS.subscription.productId,
         basePlanId: PLAY_PRODUCTS.subscription.basePlans.monthly,
+        targetPeriod: 'P1M',
       };
     case 'quarterly':
       return {
@@ -46,6 +48,7 @@ export function mapPlanToGooglePlay(planId: SubscriptionPlanId): PlayPlanMapping
         sku: `${PLAY_PRODUCTS.subscription.productId}:${PLAY_PRODUCTS.subscription.basePlans.quarterly}`,
         productId: PLAY_PRODUCTS.subscription.productId,
         basePlanId: PLAY_PRODUCTS.subscription.basePlans.quarterly,
+        targetPeriod: 'P3M',
       };
     case 'six_months':
       return {
@@ -53,6 +56,7 @@ export function mapPlanToGooglePlay(planId: SubscriptionPlanId): PlayPlanMapping
         sku: `${PLAY_PRODUCTS.subscription.productId}:${PLAY_PRODUCTS.subscription.basePlans.halfYearly}`,
         productId: PLAY_PRODUCTS.subscription.productId,
         basePlanId: PLAY_PRODUCTS.subscription.basePlans.halfYearly,
+        targetPeriod: 'P6M',
       };
     case 'annual':
       return {
@@ -60,6 +64,7 @@ export function mapPlanToGooglePlay(planId: SubscriptionPlanId): PlayPlanMapping
         sku: `${PLAY_PRODUCTS.subscription.productId}:${PLAY_PRODUCTS.subscription.basePlans.yearly}`,
         productId: PLAY_PRODUCTS.subscription.productId,
         basePlanId: PLAY_PRODUCTS.subscription.basePlans.yearly,
+        targetPeriod: 'P1Y',
       };
     case 'lifetime':
       return {
@@ -73,6 +78,7 @@ export function mapPlanToGooglePlay(planId: SubscriptionPlanId): PlayPlanMapping
         sku: `${PLAY_PRODUCTS.subscription.productId}:${PLAY_PRODUCTS.subscription.basePlans.quarterly}`,
         productId: PLAY_PRODUCTS.subscription.productId,
         basePlanId: PLAY_PRODUCTS.subscription.basePlans.quarterly,
+        targetPeriod: 'P3M',
       };
   }
 }
