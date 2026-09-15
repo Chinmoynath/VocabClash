@@ -257,6 +257,122 @@ async function purchaseLifetimeProduct(
 }
 
 /**
+ * Executes a purchase for the dedicated Monthly subscription test product (vocabclash_monthly)
+ * Uses the simple SKU-based approach matching the working lifetime pattern without basePlanId or offerToken.
+ */
+async function purchaseMonthlyProduct(
+  plan: SubscriptionPlan,
+  userId: string | undefined,
+  userEmail: string | undefined,
+  service: DigitalGoodsService
+): Promise<UserSubscription> {
+  const productId = PLAY_PRODUCTS.monthlyTest.productId; // "vocabclash_monthly"
+  console.log('[Play Billing] Monthly SKU: vocabclash_monthly');
+
+  // 1. Fetch item details
+  try {
+    const details = await service.getDetails([productId]);
+    console.log('[Play Billing] Monthly details returned:\n', JSON.stringify(details, null, 2));
+  } catch (detailsErr: any) {
+    console.warn('[Play Billing] Monthly getDetails notice:', detailsErr?.message);
+  }
+
+  // 2. Create PaymentRequest with simple SKU only
+  if (typeof window === 'undefined' || typeof window.PaymentRequest === 'undefined') {
+    const err = new Error('Payment Request API is not available on this browser.');
+    (err as any).name = 'NotSupportedError';
+    throw err;
+  }
+
+  const paymentMethodData = [
+    {
+      supportedMethods: PLAY_BILLING_METHOD,
+      data: {
+        sku: productId,
+      },
+    },
+  ];
+
+  const paymentDetails = {
+    total: {
+      label: `VocabClash • ${plan.name} (${plan.displayPrice})`,
+      amount: {
+        currency: 'INR',
+        value: String(plan.price),
+      },
+    },
+  };
+
+  const request = new window.PaymentRequest(paymentMethodData, paymentDetails);
+
+  // 3. Show PaymentRequest
+  let paymentResponse: any = null;
+  try {
+    paymentResponse = await request.show();
+    console.log('[Play Billing] Monthly Google Play sheet opened');
+  } catch (err: any) {
+    console.error('[Play Billing] Monthly paymentRequest.show() error:', err);
+    throw err;
+  }
+
+  if (!paymentResponse) {
+    throw new Error('Payment was not completed.');
+  }
+
+  const details = paymentResponse.details || {};
+  const purchaseToken = details.token || details.purchaseToken || details.orderId;
+
+  if (!purchaseToken) {
+    await paymentResponse.complete('fail').catch(() => {});
+    throw new Error('No purchase token was returned from Google Play.');
+  }
+
+  const verifyResult = await verifyGooglePlayPurchaseOnBackend({
+    purchaseToken,
+    sku: productId,
+    productId,
+    planId: plan.id,
+    userId,
+    userEmail,
+  });
+
+  if (!verifyResult.success || !verifyResult.verified) {
+    await paymentResponse.complete('fail').catch(() => {});
+    throw new Error(verifyResult.error || 'Google Play purchase verification failed on server.');
+  }
+
+  await paymentResponse.complete('success').catch(() => {});
+
+  try {
+    await service.acknowledge(purchaseToken, 'repeatable');
+    console.log('[Play Billing] Monthly purchase acknowledged successfully');
+  } catch (ackErr: any) {
+    console.warn('[Play Billing] Monthly acknowledge notice:', ackErr?.message);
+  }
+
+  const renewDate = `Renews ${new Date(Date.now() + 30 * 86400000).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  })} at ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+
+  return {
+    isPremium: true,
+    planId: plan.id,
+    planName: plan.name,
+    subscribedAt: Date.now(),
+    renewalDate: renewDate,
+    autoRenew: true,
+    provider: 'google_play',
+    purchaseToken,
+    orderId: details.orderId || undefined,
+    purchaseType: 'subscription',
+    verifiedAt: Date.now(),
+    expiresAt: Date.now() + 30 * 86400000,
+  };
+}
+
+/**
  * Executes a purchase for active subscriptions (vocabclash_pro)
  */
 async function purchaseSubscriptionProduct(
@@ -466,6 +582,10 @@ export async function purchaseWithGooglePlay(
 
   if (plan.id === 'lifetime') {
     return await purchaseLifetimeProduct(plan, userId, userEmail, service);
+  }
+
+  if (plan.id === 'monthly') {
+    return await purchaseMonthlyProduct(plan, userId, userEmail, service);
   }
 
   return await purchaseSubscriptionProduct(plan, userId, userEmail, service, playMapping);

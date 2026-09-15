@@ -16,6 +16,9 @@ export const PLAY_PRODUCTS = {
       yearly: 'yearly01',
     },
   },
+  monthlyTest: {
+    productId: 'vocabclash_monthly',
+  },
   lifetime: {
     productId: 'vocabclash_lifetime',
   },
@@ -37,9 +40,8 @@ export function mapPlanToGooglePlay(planId: SubscriptionPlanId): PlayPlanMapping
     case 'monthly':
       return {
         itemType: 'subscription',
-        sku: `${PLAY_PRODUCTS.subscription.productId}:${PLAY_PRODUCTS.subscription.basePlans.monthly}`,
-        productId: PLAY_PRODUCTS.subscription.productId,
-        basePlanId: PLAY_PRODUCTS.subscription.basePlans.monthly,
+        sku: PLAY_PRODUCTS.monthlyTest.productId,
+        productId: PLAY_PRODUCTS.monthlyTest.productId,
         targetPeriod: 'P1M',
       };
     case 'quarterly':
