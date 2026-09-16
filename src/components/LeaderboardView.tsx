@@ -452,7 +452,7 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ player, isPrem
         <div className="space-y-3.5">
           {/* 4 Category Selector Tabs */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            {(['ssc', 'defence', 'banking', 'railways'] as ExamCategoryKey[]).map((catKey) => {
+            {(['ssc', 'banking', 'defence', 'dsssb'] as ExamCategoryKey[]).map((catKey) => {
               const isSelected = selectedCategoryKey === catKey;
               const isUserGoal = userCategoryKey === catKey;
               const cat = CATEGORY_CADRE_CONFIGS[catKey];

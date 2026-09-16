@@ -470,7 +470,7 @@ export const SeoPublicPage: React.FC<SeoPublicPageProps> = ({
               <span className="font-black text-white text-sm">VocabClash</span>
             </div>
             <p className="text-[11px] leading-relaxed">
-              India's premier real-time English vocabulary battle arena and PYQ practice app for SSC CGL, CHSL, CPO, MTS, and Railway exams.
+              India's premier real-time English vocabulary battle arena and PYQ practice app for SSC (CGL, CHSL, CPO, MTS), Banking, Defence, and DSSSB exams.
             </p>
           </div>
 
@@ -506,7 +506,7 @@ export const SeoPublicPage: React.FC<SeoPublicPageProps> = ({
         </div>
 
         <div className="max-w-6xl mx-auto text-center border-t border-slate-900 pt-4 text-[10px] text-slate-600">
-          © 2026 VocabClash.in. All rights reserved. Built for SSC, Railway & Govt Exam Aspirants across India.
+          © 2026 VocabClash.in. All rights reserved. Built for SSC, Banking, Defence & DSSSB Aspirants across India.
         </div>
       </footer>
     </div>

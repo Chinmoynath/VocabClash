@@ -98,6 +98,7 @@ import { PremiumModal } from './components/PremiumModal';
 import { InterstitialAdModal } from './components/InterstitialAdModal';
 import { StreakModal } from './components/StreakModal';
 import { OnboardingTourModal } from './components/OnboardingTourModal';
+import { AppGuideModal } from './components/AppGuideModal';
 import { DueRevisionSessionModal } from './components/DueRevisionSessionModal';
 import { PlayModeSelectorModal } from './components/PlayModeSelectorModal';
 import { FriendLobbyModal } from './components/FriendLobbyModal';
@@ -800,6 +801,7 @@ export default function App() {
   const [showAdModal, setShowAdModal] = useState<boolean>(false);
   const [showStreakModal, setShowStreakModal] = useState<boolean>(false);
   const [showStatsModal, setShowStatsModal] = useState<boolean>(false);
+  const [showAppGuideModal, setShowAppGuideModal] = useState<boolean>(false);
   const [showTourModal, setShowTourModal] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       try {
@@ -2440,6 +2442,10 @@ export default function App() {
             soundManager.playTap();
             setShowStatsModal(true);
           }}
+          onOpenAppGuide={() => {
+            soundManager.playTap();
+            setShowAppGuideModal(true);
+          }}
           onOpenTour={() => {
             soundManager.playTap();
             setShowTourModal(true);
@@ -2630,6 +2636,7 @@ export default function App() {
                   setShowEditProfileModal(true);
                 }}
                 onOpenTour={() => setShowTourModal(true)}
+                onOpenAppGuide={() => setShowAppGuideModal(true)}
                 onNavigateTab={setCurrentTab}
                 onRewardLP={handleRewardLP}
                 onTriggerTestAd={handleTriggerTestAd}
@@ -2915,6 +2922,10 @@ export default function App() {
             setShowProfileModal(false);
             setShowTourModal(true);
           }}
+          onOpenAppGuide={() => {
+            setShowProfileModal(false);
+            setShowAppGuideModal(true);
+          }}
           onOpenBattleAnalytics={() => {
             setShowProfileModal(false);
             setShowBattleAnalytics(true);
@@ -3035,6 +3046,33 @@ export default function App() {
         }}
         onExploreApp={() => {
           setShowTourModal(false);
+        }}
+      />
+
+      {/* Official App Guide & Rules Modal */}
+      <AppGuideModal
+        isOpen={showAppGuideModal}
+        onClose={() => setShowAppGuideModal(false)}
+        onNavigate={(tab) => {
+          setShowAppGuideModal(false);
+          setCurrentTab(tab);
+        }}
+        onStart1v1={() => {
+          setShowAppGuideModal(false);
+          handleStartMatchmaking('1v1_ranked');
+        }}
+        onStartFriendLobby={() => {
+          setShowAppGuideModal(false);
+          setFriendLobbyInitialCode('');
+          handleOpenFriendLobbyModal();
+        }}
+        onStartDailyChallenge={() => {
+          setShowAppGuideModal(false);
+          handleStartMatchmaking('daily_challenge');
+        }}
+        onStartSpeedBlitz={() => {
+          setShowAppGuideModal(false);
+          handleStartMatchmaking('quick_duel');
         }}
       />
 

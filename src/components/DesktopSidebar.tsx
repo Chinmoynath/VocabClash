@@ -34,6 +34,7 @@ interface DesktopSidebarProps {
   onOpenStreak: () => void;
   onOpenStats?: () => void;
   onOpenTour?: () => void;
+  onOpenAppGuide?: () => void;
   onOpenGuides?: () => void;
   onOpenArticles?: () => void;
   isAdmin?: boolean;
@@ -55,6 +56,7 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
   onOpenStreak,
   onOpenStats,
   onOpenTour,
+  onOpenAppGuide,
   onOpenGuides,
   onOpenArticles,
   isAdmin = false,
@@ -228,17 +230,21 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
                 <span className="text-amber-400 font-mono font-black">{player.pyqScore || 0}</span> Stats
               </div>
             </button>
-          ) : onOpenTour ? (
+          ) : (onOpenAppGuide || onOpenTour) ? (
             <button
               onClick={() => {
                 soundManager.playTap();
-                onOpenTour();
+                if (onOpenAppGuide) {
+                  onOpenAppGuide();
+                } else if (onOpenTour) {
+                  onOpenTour();
+                }
               }}
-              className="flex items-center gap-1.5 p-2 rounded-xl bg-slate-900/80 hover:bg-slate-850 border border-slate-800 hover:border-slate-700 text-xs font-bold text-slate-300 transition-all text-left"
-              title="Overview & How It Works"
+              className="flex items-center gap-1.5 p-2 rounded-xl bg-slate-900/80 hover:bg-slate-850 border border-slate-800 hover:border-slate-700 text-xs font-bold text-slate-300 transition-all text-left cursor-pointer"
+              title="Official Rules & App Guide"
             >
-              <HelpCircle className="w-4 h-4 text-sky-400 shrink-0" />
-              <span className="truncate">Guide</span>
+              <BookOpen className="w-4 h-4 text-sky-400 shrink-0" />
+              <span className="truncate">Rules & Guide</span>
             </button>
           ) : null}
         </div>

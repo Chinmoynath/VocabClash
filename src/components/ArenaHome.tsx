@@ -15,7 +15,8 @@ import {
   ShieldCheck,
   Play,
   Cloud,
-  LogIn
+  LogIn,
+  BookOpen
 } from 'lucide-react';
 import { PlayerProfile, QuestionCategory, ExamType, UserSubscription, DailyStreakState } from '../types';
 import { soundManager } from '../utils/audio';
@@ -56,6 +57,7 @@ interface ArenaHomeProps {
   onOpenProfile?: () => void;
   onOpenEditProfile?: () => void;
   onOpenTour?: () => void;
+  onOpenAppGuide?: () => void;
   onNavigateTab?: (tab: 'arena' | 'practice' | 'leaderboard' | 'mistakes' | 'ai_coach') => void;
   onRewardLP: (lpDelta: number, reason: string) => void;
   onTriggerTestAd: () => void;
@@ -82,6 +84,7 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
   onOpenProfile,
   onOpenEditProfile,
   onOpenTour,
+  onOpenAppGuide,
   onNavigateTab,
   onRewardLP,
   onTriggerTestAd,
@@ -306,6 +309,8 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
             onNavigateTab={onNavigateTab}
             onRewardLP={onRewardLP}
           />
+
+
 
           {/* Guest Sign-In Banner if not signed in */}
           {!currentUser && onOpenProfile ? (

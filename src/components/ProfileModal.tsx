@@ -62,15 +62,6 @@ export const TARGET_EXAM_GROUPS = [
     ],
   },
   {
-    group: '🚆 Railways (RRB)',
-    exams: [
-      'RRB NTPC - Station Master / Traffic Assistant',
-      'RRB NTPC - Goods Guard / Senior Clerk',
-      'RRB Senior Section Engineer / JE',
-      'RRB ALP & Technician / Group D',
-    ],
-  },
-  {
     group: '🏦 Banking & Insurance',
     exams: [
       'Bank PO (SBI / IBPS Probationary Officer)',
@@ -87,6 +78,15 @@ export const TARGET_EXAM_GROUPS = [
       'AFCAT Flying & Ground Duty Officer',
       'UPSC EPFO (EO / AO / APFC)',
       'UPSC CAPF (Assistant Commandant)',
+    ],
+  },
+  {
+    group: '🏢 DSSSB (Delhi Govt)',
+    exams: [
+      'DSSSB - Assistant Section Officer (ASO / 4600 GP)',
+      'DSSSB - DASS Grade II / Head Clerk',
+      'DSSSB - Statistical Assistant / Welfare Officer',
+      'DSSSB - Junior Secretariat Assistant / LDC',
     ],
   },
 ];
@@ -107,6 +107,7 @@ interface ProfileModalProps {
   onOpenStreak: () => void;
   onOpenStats?: () => void;
   onOpenTour?: () => void;
+  onOpenAppGuide?: () => void;
   onOpenEditProfile?: () => void;
   onOpenBattleAnalytics?: () => void;
   onUserChange?: (user: FirebaseUser | null) => void;
@@ -128,6 +129,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   onOpenStreak,
   onOpenStats,
   onOpenTour,
+  onOpenAppGuide,
   onOpenEditProfile,
   onOpenBattleAnalytics,
   onUserChange,
@@ -582,22 +584,26 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
         </div>
 
         {/* How VocabClash Works Guide Button */}
-        {onOpenTour && !isEditing && (
+        {(onOpenAppGuide || onOpenTour) && !isEditing && (
           <button
             onClick={() => {
               soundManager.playTap();
-              onOpenTour();
+              if (onOpenAppGuide) {
+                onOpenAppGuide();
+              } else if (onOpenTour) {
+                onOpenTour();
+              }
             }}
-            className="w-full bg-gradient-to-r from-sky-950/80 to-indigo-950/80 hover:from-sky-900/80 hover:to-indigo-900/80 border border-sky-600/50 text-sky-200 font-bold p-2.5 rounded-xl text-xs flex items-center justify-between shadow-sm"
+            className="w-full bg-slate-900 hover:bg-slate-850 border border-slate-800 text-slate-200 font-bold p-3 rounded-xl text-xs flex items-center justify-between shadow-sm transition-all"
           >
-            <div className="flex items-center gap-2">
-              <span className="text-sm">💡</span>
+            <div className="flex items-center gap-2.5">
+              <BookOpen className="w-4 h-4 text-sky-400 shrink-0" />
               <div className="text-left">
-                <div>App Guide & Rules</div>
-                <div className="text-[10px] text-sky-400 font-normal">How 1v1 duels, LP & Mistake Vault work</div>
+                <div className="text-slate-100 font-bold">App Guide & Rules</div>
+                <div className="text-[10px] text-slate-400 font-normal">How 1v1 duels, LP & Mistake Vault work</div>
               </div>
             </div>
-            <ChevronRight className="w-4 h-4 text-sky-400" />
+            <ChevronRight className="w-4 h-4 text-slate-400" />
           </button>
         )}
 

@@ -337,7 +337,7 @@ export const LegalAccountModal: React.FC<LegalAccountModalProps> = ({
               {/* Prominent Educational & Government Affiliation Disclaimer Card */}
               <div className="bg-amber-500/10 border border-amber-500/30 p-3 rounded-xl text-[11px] text-amber-200 leading-normal">
                 <strong className="text-amber-300 block mb-0.5 font-bold">Official Platform Disclaimer</strong>
-                VocabClash is an independent educational platform and is not affiliated with, endorsed by, or connected to SSC, IBPS, Banking boards, Defence recruitment authorities (CDS, AFCAT), Railways, DSSSB, or any government examination authority.
+                VocabClash is an independent educational platform and is not affiliated with, endorsed by, or connected to SSC, IBPS, Banking boards, Defence recruitment authorities (CDS, AFCAT), DSSSB, or any government examination authority.
               </div>
 
               {/* Section 1: Acceptance of Terms */}
@@ -573,7 +573,7 @@ export const LegalAccountModal: React.FC<LegalAccountModalProps> = ({
                 VocabClash turns vocabulary preparation into interactive 1v1 practice with authentic Previous Years' Questions (PYQs), Mistake Vault revision, LP rankings, and AI-assisted root-word insights for SSC CGL, CHSL, CPO, Banking (IBPS, SBI), CDS, AFCAT, and Defence exams.
               </p>
               <div className="p-2.5 bg-slate-950/60 border border-slate-800 rounded-xl text-[11px] text-slate-400">
-                VocabClash is an independent educational platform and is not affiliated with or endorsed by SSC, IBPS, Railway Recruitment Boards, Defence boards, or any government examination authority.
+                VocabClash is an independent educational platform and is not affiliated with or endorsed by SSC, IBPS, Defence boards, DSSSB, or any government examination authority.
               </div>
             </div>
           )}

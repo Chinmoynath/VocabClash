@@ -1,6 +1,6 @@
 import { RankTier } from '../types';
 
-export type ExamCategoryKey = 'ssc' | 'defence' | 'banking' | 'railways';
+export type ExamCategoryKey = 'ssc' | 'banking' | 'defence' | 'dsssb';
 
 export interface CadreTierDefinition {
   tier: RankTier;
@@ -239,75 +239,75 @@ export const CATEGORY_CADRE_CONFIGS: Record<ExamCategoryKey, CategoryCadreConfig
       }
     ]
   },
-  railways: {
-    key: 'railways',
-    displayName: 'Railways (RRB)',
-    shortName: 'Railways',
-    icon: '🚆',
+  dsssb: {
+    key: 'dsssb',
+    displayName: 'DSSSB (Delhi Govt)',
+    shortName: 'DSSSB',
+    icon: '🏢',
     cadres: [
       {
         tier: 'Apex_Officer',
-        title: '👑 General Manager (GM) / Member Railway Board',
+        title: '👑 Principal Secretary / Special Commissioner (Delhi Admin)',
         lpRange: '4,500+ LP',
         minLP: 4500,
         maxLP: 99999,
         perks: [
-          'Zonal Command & Exclusive Saloon Carriage on Trains',
-          'Luxury Railway Bungalow & Dedicated Staff'
+          'Delhi Secretariat Apex Admin Protocol',
+          'Official Staff Vehicle & Secretariat Staff'
         ]
       },
       {
         tier: 'Gazetted_Officer',
-        title: '🎖️ Senior Divisional Officer / Dy COM',
+        title: '🎖️ Admn Officer / Sub-Divisional Magistrate Cadre',
         lpRange: '3,000 - 4,499 LP',
         minLP: 3000,
         maxLP: 4499,
         perks: [
-          'Group A Railway Officer Privilege Duty Passes (1st AC)',
-          'Railway Colony Officer Bungalow & Staff Car'
+          'Gazetted Authority in Delhi Govt Departments',
+          'Delhi Govt Officer Quarters & LTC Entitlement'
         ]
       },
       {
         tier: 'GST_IT_Inspector',
-        title: '💎 Station Director / Senior Section Engineer',
+        title: '💎 Assistant Section Officer (ASO / DASS Gr-II)',
         lpRange: '2,000 - 2,999 LP',
         minLP: 2000,
         maxLP: 2999,
         perks: [
-          'Station Operations Authority & Running Allowance',
-          'Yearly Railway AC Free Passes for Family'
+          'Delhi Secretariat 4600 GP Cadre Position',
+          'Full DGEHS Delhi Healthcare Coverage'
         ]
       },
       {
         tier: 'Auditor_Accountant',
-        title: '🥇 Station Master / Traffic Inspector',
+        title: '🥇 Statistical Assistant / Head Clerk',
         lpRange: '1,200 - 1,999 LP',
         minLP: 1200,
         maxLP: 1999,
         perks: [
-          'Night Duty & Safety Stress Allowances',
-          'Central Railway Hospital Family Healthcare'
+          'Delhi Departmental Senior Desk Authority',
+          'Annual Grade Pay Increments & Allowances'
         ]
       },
       {
         tier: 'Clerk_Assistant',
-        title: '🥈 Goods Guard / Senior Commercial Clerk',
+        title: '🥈 Junior Secretariat Assistant / LDC',
         lpRange: '600 - 1,199 LP',
         minLP: 600,
         maxLP: 1199,
         perks: [
-          'Free Family Rail Passes across India',
-          'Railway Residential Quarters Allocation'
+          'Permanent Delhi Govt Subordinate Services Cadre',
+          'Standard Delhi Govt Quarters Priority'
         ]
       },
       {
         tier: 'Aspirant',
-        title: '🥉 Railway Aspirant',
+        title: '🥉 DSSSB Delhi Aspirant',
         lpRange: '0 - 599 LP',
         minLP: 0,
         maxLP: 599,
         perks: [
-          'NTPC & RRB Exam Vocabulary Drills'
+          'DSSSB Exam Vocabulary & Grammar Drills'
         ]
       }
     ]
@@ -318,7 +318,23 @@ export function resolveExamCategoryKey(targetExam?: string | null): ExamCategory
   if (!targetExam) return 'ssc';
   const text = targetExam.toLowerCase();
 
-  // 1. Defence
+  // 1. Banking
+  if (
+    text.includes('bank') ||
+    text.includes('ibps') ||
+    text.includes('sbi') ||
+    text.includes('rbi') ||
+    text.includes('nabard') ||
+    text.includes('sebi') ||
+    text.includes('lic') ||
+    text.includes('insurance') ||
+    text.includes('po') ||
+    text.includes('clerk')
+  ) {
+    return 'banking';
+  }
+
+  // 2. Defence
   if (
     text.includes('defence') ||
     text.includes('defense') ||
@@ -336,32 +352,13 @@ export function resolveExamCategoryKey(targetExam?: string | null): ExamCategory
     return 'defence';
   }
 
-  // 2. Banking
+  // 3. DSSSB (Delhi Govt)
   if (
-    text.includes('bank') ||
-    text.includes('ibps') ||
-    text.includes('sbi') ||
-    text.includes('rbi') ||
-    text.includes('nabard') ||
-    text.includes('sebi') ||
-    text.includes('lic') ||
-    text.includes('insurance') ||
-    text.includes('po') ||
-    text.includes('clerk')
+    text.includes('dsssb') ||
+    text.includes('dass') ||
+    text.includes('delhi')
   ) {
-    return 'banking';
-  }
-
-  // 3. Railways
-  if (
-    text.includes('railway') ||
-    text.includes('rrb') ||
-    text.includes('ntpc') ||
-    text.includes('group d') ||
-    text.includes('alp') ||
-    text.includes('station master')
-  ) {
-    return 'railways';
+    return 'dsssb';
   }
 
   // Default: SSC & Central Govt
