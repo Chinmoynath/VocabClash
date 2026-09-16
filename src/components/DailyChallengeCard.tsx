@@ -36,8 +36,8 @@ export const DailyChallengeCard: React.FC<DailyChallengeCardProps> = ({ player, 
   const [resetCountdown, setResetCountdown] = useState<string>('');
 
   const refreshChallengeState = () => {
-    const hist = getDailyChallengeHistory();
-    const today = getTodayChallengeAttempt();
+    const hist = getDailyChallengeHistory(player?.id);
+    const today = getTodayChallengeAttempt(player?.id);
     setHistory(hist);
     setTodayAttempt(today);
   };
@@ -45,18 +45,27 @@ export const DailyChallengeCard: React.FC<DailyChallengeCardProps> = ({ player, 
   useEffect(() => {
     refreshChallengeState();
 
-    // Sync genuine history with backend
-    syncDailyChallengeWithBackend(player?.id || player?.name).then(() => {
+    // Sync genuine history with backend and sanitize any cross-account leaks
+    syncDailyChallengeWithBackend(player?.id, player?.email).then(() => {
       refreshChallengeState();
     });
+
+    const handleChallengeUpdate = () => {
+      refreshChallengeState();
+    };
+
+    window.addEventListener('daily-challenge-updated', handleChallengeUpdate);
 
     const interval = setInterval(() => {
       const { hours, minutes } = getTimeUntilNextReset();
       setResetCountdown(`${hours}h ${minutes}m`);
     }, 1000);
 
-    return () => clearInterval(interval);
-  }, [player?.id, player?.name]);
+    return () => {
+      window.removeEventListener('daily-challenge-updated', handleChallengeUpdate);
+      clearInterval(interval);
+    };
+  }, [player?.id, player?.email]);
 
   const handleChallengeComplete = (attempt: DailyChallengeAttempt) => {
     refreshChallengeState();

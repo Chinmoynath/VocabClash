@@ -1520,16 +1520,22 @@ interface ServerDailyChallengeAttempt {
 const serverDailyChallengeStore = new Map<string, ServerDailyChallengeAttempt[]>();
 
 app.get('/api/daily-challenge/history', (req, res) => {
-  const userId = (req.query.userId as string) || 'default_user';
+  const userId = (req.query.userId as string) || '';
+  if (!userId || userId === 'default_user' || userId === 'guest_user') {
+    return res.json({ success: true, history: [] });
+  }
   const history = serverDailyChallengeStore.get(userId) || [];
   res.json({ success: true, history });
 });
 
 app.post('/api/daily-challenge/attempt', (req, res) => {
   try {
-    const { userId = 'default_user', attempt } = req.body;
+    const { userId = '', attempt } = req.body;
     if (!attempt || !attempt.date) {
       return res.status(400).json({ success: false, error: 'Valid attempt data required' });
+    }
+    if (!userId || userId === 'default_user' || userId === 'guest_user') {
+      return res.json({ success: true, history: [] });
     }
 
     const current = serverDailyChallengeStore.get(userId) || [];
@@ -1547,6 +1553,14 @@ app.post('/api/daily-challenge/attempt', (req, res) => {
     console.error('Error saving daily challenge attempt:', error);
     res.status(500).json({ success: false, error: error.message || 'Failed to save attempt' });
   }
+});
+
+app.delete('/api/daily-challenge/history', (req, res) => {
+  const userId = (req.query.userId as string) || '';
+  if (userId) {
+    serverDailyChallengeStore.delete(userId);
+  }
+  res.json({ success: true });
 });
 
 // ads.txt & app-ads.txt Endpoints for Google AdSense & Google AdMob verification

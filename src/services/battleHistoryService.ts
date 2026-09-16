@@ -137,7 +137,7 @@ export class BattleHistoryService {
       wins,
       battles,
       winRate,
-      winRateFormatted: `${winRate.toFixed(1)}%`,
+      winRateFormatted: `${Math.round(winRate)}%`,
     };
   }
 }

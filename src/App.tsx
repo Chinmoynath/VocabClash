@@ -58,9 +58,17 @@ import {
   subscribeToUserCloudData,
   checkRedirectAuthResult,
   getPendingRegistrationDisplayName,
-  setPendingRegistrationDisplayName
+  setPendingRegistrationDisplayName,
+  saveDailyChallengeToFirestore,
+  deleteDailyChallengeDayFromFirestore
 } from './services/firebaseService';
-import { mergeDailyChallengeHistory, getDailyChallengeHistory } from './services/dailyChallengeService';
+import { 
+  mergeDailyChallengeHistory, 
+  getDailyChallengeHistory,
+  setDailyChallengeHistoryForUser,
+  clearDailyChallengeLocalCache,
+  sanitizeDailyChallengeHistory
+} from './services/dailyChallengeService';
 import { syncUserToLeaderboard } from './services/leaderboardService';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { AndroidDeviceShell } from './components/AndroidDeviceShell';
@@ -338,9 +346,20 @@ export function clearUserDataOnSignOut() {
     localStorage.removeItem('vocabclash_ai_daily_usage_v2');
   } catch {}
 
-  // 11. Dispatch events so all UI listeners (DailyCommandCenterCard, DailyTargetCard, TopBar) update immediately
+  // 11. Clear daily challenge storage & caches
+  clearDailyChallengeLocalCache();
+
+  // 12. Reset battle history & analytics
+  try {
+    localStorage.removeItem('vocabclash_battle_history_v1');
+    localStorage.removeItem('vocabclash_battle_summary_v1');
+    localStorage.removeItem('vocabclash_battle_events_v1');
+  } catch {}
+
+  // 13. Dispatch events so all UI listeners (DailyCommandCenterCard, DailyTargetCard, TopBar, DailyChallengeCard) update immediately
   window.dispatchEvent(new CustomEvent('daily-target-updated'));
   window.dispatchEvent(new CustomEvent('user-stats-updated'));
+  window.dispatchEvent(new CustomEvent('daily-challenge-updated'));
   window.dispatchEvent(new CustomEvent('storage'));
 }
 
@@ -954,6 +973,12 @@ export default function App() {
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
+        const previousUid = previousUserUidRef.current;
+        const isSwitchingUser = !!previousUid && previousUid !== user.uid;
+        if (isSwitchingUser) {
+          console.log('[Auth] Account switch detected:', previousUid, '->', user.uid, '- purging previous user local cache');
+          clearUserDataOnSignOut();
+        }
         previousUserUidRef.current = user.uid;
         setCurrentUser(user);
         questionReviewScheduler.setAuthUser(user.uid);
@@ -963,14 +988,16 @@ export default function App() {
         hydrateStatsFromCloud(user.uid).catch(e => console.warn('Hydrate stats error:', e));
         setIsSyncing(true);
         try {
-          // Read local player state right now before overwriting
-          let localPlayer = player;
-          try {
-            const localSavedRaw = localStorage.getItem(STORAGE_KEY_PLAYER);
-            if (localSavedRaw) {
-              localPlayer = JSON.parse(localSavedRaw);
-            }
-          } catch { /* ignore */ }
+          // Read local player state right now before overwriting - do NOT carry over previous user's state
+          let localPlayer = isSwitchingUser ? { ...INITIAL_PLAYER } : player;
+          if (!isSwitchingUser) {
+            try {
+              const localSavedRaw = localStorage.getItem(STORAGE_KEY_PLAYER);
+              if (localSavedRaw) {
+                localPlayer = JSON.parse(localSavedRaw);
+              }
+            } catch { /* ignore */ }
+          }
 
           // Try to load existing cloud data for this user
           const cloudData = await fetchUserDataFromFirestore(user.uid);
@@ -1084,9 +1111,19 @@ export default function App() {
               }
             }
             if (cloudData.dailyChallengeHistory && Array.isArray(cloudData.dailyChallengeHistory)) {
-              mergeDailyChallengeHistory(cloudData.dailyChallengeHistory);
-              // Ingest all completed challenge dates into streak history to ensure streak integrity
-              for (const attempt of cloudData.dailyChallengeHistory) {
+              const sanitizedHistory = sanitizeDailyChallengeHistory(cloudData.dailyChallengeHistory, user.uid, user.email);
+
+              // If contaminated records existed in cloud (e.g. Chinmoy attempt leaked to Suraj), purge them from Firestore
+              if (sanitizedHistory.length !== cloudData.dailyChallengeHistory.length) {
+                console.log('[Daily Challenge] Purged contaminated cloud records for', user.uid);
+                saveDailyChallengeToFirestore(user.uid, null, sanitizedHistory).catch(() => {});
+                deleteDailyChallengeDayFromFirestore(user.uid, getTodayDateString()).catch(() => {});
+              }
+
+              setDailyChallengeHistoryForUser(user.uid, sanitizedHistory);
+
+              // Ingest all completed genuine challenge dates into streak history to ensure streak integrity
+              for (const attempt of sanitizedHistory) {
                 if (attempt?.date) {
                   mergedStreak.history[attempt.date] = true;
                 }
@@ -1094,6 +1131,8 @@ export default function App() {
               const recalc = calculateStreakFromHistory(mergedStreak.history);
               mergedStreak.currentStreak = Math.max(mergedStreak.currentStreak, recalc.currentStreak);
               mergedStreak.longestStreak = Math.max(mergedStreak.longestStreak, recalc.longestStreak);
+            } else {
+              setDailyChallengeHistoryForUser(user.uid, []);
             }
 
             if (isChinmoyUser) {
@@ -1116,7 +1155,7 @@ export default function App() {
                 streak: mergedStreak, 
                 savedWords: (cloudData.savedWords && cloudData.savedWords.length > 0) ? cloudData.savedWords : savedWords,
                 dailyTarget: cloudData.dailyTarget || getDailyTargetState(),
-                dailyChallengeHistory: getDailyChallengeHistory(),
+                dailyChallengeHistory: getDailyChallengeHistory(user.uid),
               },
               user
             ).catch((err) => console.warn('Background sync notice:', err));
@@ -1186,6 +1225,7 @@ export default function App() {
               practiceFilters: localPlayer.practiceFilters || practiceFilters,
             };
 
+            setDailyChallengeHistoryForUser(user.uid, []);
             setPlayer(newPlayer);
             saveUserDataToFirestore(
               user.uid,
@@ -1195,7 +1235,7 @@ export default function App() {
                 streak, 
                 savedWords, 
                 dailyTarget: getDailyTargetState(),
-                dailyChallengeHistory: getDailyChallengeHistory(),
+                dailyChallengeHistory: [],
               },
               user
             ).catch((err) => console.warn('Initial save notice:', err));
@@ -1256,7 +1296,7 @@ export default function App() {
             streak, 
             savedWords,
             dailyTarget: getDailyTargetState(),
-            dailyChallengeHistory: getDailyChallengeHistory(),
+            dailyChallengeHistory: getDailyChallengeHistory(currentUser.uid),
           },
           currentUser
         ).catch(() => {});
@@ -1277,7 +1317,9 @@ export default function App() {
         });
       }
       if (cloudData.dailyChallengeHistory && Array.isArray(cloudData.dailyChallengeHistory)) {
-        mergeDailyChallengeHistory(cloudData.dailyChallengeHistory);
+        const clean = sanitizeDailyChallengeHistory(cloudData.dailyChallengeHistory, currentUser.uid, currentUser.email);
+        setDailyChallengeHistoryForUser(currentUser.uid, clean);
+        window.dispatchEvent(new CustomEvent('daily-challenge-updated'));
       }
       if (cloudData.player) {
         setPlayer(prev => {

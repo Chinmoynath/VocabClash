@@ -718,8 +718,8 @@ export async function saveDailyChallengeToFirestore(
   if (!uid || uid === 'default_user') return;
   try {
     const userDocRef = doc(db, 'users', uid);
-    const cleanHistory = sanitizeForFirestore(fullHistory);
-    const cleanAttempt = sanitizeForFirestore(attempt);
+    const cleanHistory = sanitizeForFirestore(fullHistory || []);
+    const cleanAttempt = attempt ? sanitizeForFirestore(attempt) : null;
 
     // 1. Update full history in user document
     await withTimeout(
@@ -728,9 +728,9 @@ export async function saveDailyChallengeToFirestore(
       undefined
     );
 
-    // 2. Also write specific day record in subcollection
-    if (attempt?.date) {
-      const dayDocRef = doc(db, 'users', uid, 'daily_challenges', attempt.date);
+    // 2. Also write specific day record in subcollection if attempt provided
+    if (cleanAttempt && cleanAttempt?.date) {
+      const dayDocRef = doc(db, 'users', uid, 'daily_challenges', cleanAttempt.date);
       await withTimeout(
         setDoc(dayDocRef, { ...cleanAttempt, uid, updatedAt: Date.now() }, { merge: true }),
         2000,
@@ -739,6 +739,19 @@ export async function saveDailyChallengeToFirestore(
     }
   } catch (err) {
     console.warn('[DAILY CHALLENGE FIRESTORE] Notice saving attempt:', err);
+  }
+}
+
+/**
+ * Deletes a specific day attempt from a user's daily_challenges subcollection
+ */
+export async function deleteDailyChallengeDayFromFirestore(uid: string, date: string): Promise<void> {
+  if (!uid || uid === 'default_user' || !date) return;
+  try {
+    const dayDocRef = doc(db, 'users', uid, 'daily_challenges', date);
+    await withTimeout(deleteDoc(dayDocRef), 2000, undefined).catch(() => {});
+  } catch (err) {
+    console.warn('[DAILY CHALLENGE FIRESTORE] Notice deleting day attempt:', err);
   }
 }
 

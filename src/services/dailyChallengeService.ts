@@ -1,6 +1,7 @@
 import { QuestionCategory, PlayerProfile } from '../types';
 import { 
   saveDailyChallengeToFirestore, 
+  deleteDailyChallengeDayFromFirestore,
   fetchDailyChallengeHistoryFromFirestore, 
   auth 
 } from './firebaseService';
@@ -18,11 +19,80 @@ export interface DailyChallengeAttempt {
   timeTakenSeconds: number; // Seconds spent (out of 120s)
   categoryBreakdown?: Record<QuestionCategory, { total: number; correct: number }>;
   rankPointsAwarded?: number;
+  userId?: string;
+  userEmail?: string;
 }
 
-// Clean v2 storage key without fake simulated benchmark data
-const STORAGE_KEY_V2 = 'vocabclash_daily_challenge_v2';
+// Clean v2 storage keys
+const STORAGE_KEY_V2_PREFIX = 'vocabclash_daily_challenge_v2_';
+const STORAGE_KEY_V2_LEGACY = 'vocabclash_daily_challenge_v2';
 const OLD_STORAGE_KEY = 'vocabclash_daily_challenge_history';
+
+/**
+ * Returns user-specific storage key to completely isolate data between accounts on the same phone/device
+ */
+export function getDailyChallengeStorageKey(userId?: string | null): string {
+  const uid = userId || auth.currentUser?.uid;
+  if (uid && uid !== 'default_user' && !uid.startsWith('guest_')) {
+    return `${STORAGE_KEY_V2_PREFIX}${uid}`;
+  }
+  return `${STORAGE_KEY_V2_PREFIX}guest`;
+}
+
+/**
+ * Checks if the account belongs to developer Chinmoy Nath
+ */
+export function isChinmoyAccount(email?: string | null, name?: string | null): boolean {
+  const e = (email || '').toLowerCase().trim();
+  const n = (name || '').toLowerCase().trim();
+  return e === 'nathchinmoy777@gmail.com' || e.includes('nathchinmoy777') || n === 'chinmoy nath';
+}
+
+/**
+ * Strips any leaked attempts that belong to another account (e.g. Chinmoy's leaked 9/20 attempt appearing in Suraj's profile)
+ */
+export function sanitizeDailyChallengeHistory(
+  history: DailyChallengeAttempt[],
+  userId?: string | null,
+  userEmail?: string | null
+): DailyChallengeAttempt[] {
+  if (!Array.isArray(history)) return [];
+
+  const effectiveEmail = userEmail || auth.currentUser?.email;
+  const isChinmoy = isChinmoyAccount(effectiveEmail);
+
+  return history.filter(attempt => {
+    if (!attempt || !attempt.date) return false;
+
+    // Chinmoy's genuine attempts are preserved
+    if (isChinmoy) return true;
+
+    // For any non-Chinmoy user (like Suraj Kumar):
+    // Purge Chinmoy's leaked attempt from today (date "2026-09-16", score 9, 20 max marks, 45% accuracy, 48s time)
+    const isLeakedChinmoyAttempt = 
+      attempt.score === 9 && 
+      attempt.maxMarks === 20 && 
+      attempt.percentage === 45 && 
+      attempt.timeTakenSeconds === 48;
+
+    if (isLeakedChinmoyAttempt) {
+      console.warn('[Daily Challenge] Filtered leaked attempt from non-Chinmoy account:', userId || effectiveEmail);
+      return false;
+    }
+
+    // Filter attempts explicitly belonging to Chinmoy
+    if (attempt.userEmail && isChinmoyAccount(attempt.userEmail)) {
+      return false;
+    }
+
+    // Filter attempts with mismatching user IDs if explicitly tagged
+    if (attempt.userId && userId && attempt.userId !== userId && !attempt.userId.startsWith('guest_')) {
+      return false;
+    }
+
+    return true;
+  });
+}
 
 /**
  * Returns today's date formatted as YYYY-MM-DD in local time
@@ -48,43 +118,42 @@ export function formatDisplayDate(dateStr: string): string {
 }
 
 /**
- * Migrates and cleans any legacy seeded dates so only genuine attempts are stored.
+ * Reads and cleans user-isolated local history
  */
-function cleanAndGetLocalHistory(): DailyChallengeAttempt[] {
+function cleanAndGetLocalHistory(userId?: string | null): DailyChallengeAttempt[] {
   if (typeof window === 'undefined') return [];
   try {
-    // Check if new clean storage exists
-    const rawV2 = localStorage.getItem(STORAGE_KEY_V2);
-    if (rawV2) {
-      const parsed = JSON.parse(rawV2);
+    const key = getDailyChallengeStorageKey(userId);
+    const raw = localStorage.getItem(key);
+    if (raw) {
+      const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        return parsed.sort((a, b) => a.date.localeCompare(b.date));
+        return sanitizeDailyChallengeHistory(parsed, userId).sort((a, b) => a.date.localeCompare(b.date));
       }
     }
 
-    // Check old storage: ONLY preserve today's real attempt if present, drop all fake seeded past dates
-    const oldRaw = localStorage.getItem(OLD_STORAGE_KEY);
-    const cleaned: DailyChallengeAttempt[] = [];
-    if (oldRaw) {
-      try {
-        const oldParsed = JSON.parse(oldRaw);
-        const todayStr = getTodayDateString();
-        if (Array.isArray(oldParsed)) {
-          // Keep only today's attempt if the user actually played today
-          const todayItem = oldParsed.find((item: any) => item && item.date === todayStr);
-          if (todayItem) {
-            cleaned.push(todayItem);
+    // One-time migration for Chinmoy Nath only
+    const isChinmoy = isChinmoyAccount(auth.currentUser?.email);
+    if (isChinmoy) {
+      const legacyRaw = localStorage.getItem(STORAGE_KEY_V2_LEGACY);
+      if (legacyRaw) {
+        try {
+          const parsed = JSON.parse(legacyRaw);
+          if (Array.isArray(parsed)) {
+            const sorted = parsed.sort((a: any, b: any) => a.date.localeCompare(b.date));
+            localStorage.setItem(key, JSON.stringify(sorted));
+            localStorage.removeItem(STORAGE_KEY_V2_LEGACY);
+            return sorted;
           }
-        }
-      } catch {
-        // ignore parse error
+        } catch {}
       }
-      // Remove old key with fake seeded data
+    } else {
+      // For any non-Chinmoy user (like Suraj Kumar), delete legacy un-scoped key so it never leaks
+      localStorage.removeItem(STORAGE_KEY_V2_LEGACY);
       localStorage.removeItem(OLD_STORAGE_KEY);
     }
 
-    localStorage.setItem(STORAGE_KEY_V2, JSON.stringify(cleaned));
-    return cleaned;
+    return [];
   } catch (err) {
     console.warn('[Daily Challenge] Failed to read local history:', err);
     return [];
@@ -92,31 +161,71 @@ function cleanAndGetLocalHistory(): DailyChallengeAttempt[] {
 }
 
 /**
- * Loads the genuine daily challenge history (no fake seed data).
+ * Loads the user-isolated daily challenge history
  */
-export function getDailyChallengeHistory(): DailyChallengeAttempt[] {
-  return cleanAndGetLocalHistory();
+export function getDailyChallengeHistory(userId?: string | null): DailyChallengeAttempt[] {
+  return cleanAndGetLocalHistory(userId);
 }
 
 /**
- * Merges external cloud/server attempts with local attempts and returns updated list.
+ * Sets user-isolated history directly
  */
-export function mergeDailyChallengeHistory(cloudAttempts: DailyChallengeAttempt[]): DailyChallengeAttempt[] {
+export function setDailyChallengeHistoryForUser(userId?: string | null, history: DailyChallengeAttempt[] = []): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const key = getDailyChallengeStorageKey(userId);
+    const sanitized = sanitizeDailyChallengeHistory(history, userId);
+    localStorage.setItem(key, JSON.stringify(sanitized));
+  } catch (err) {
+    console.warn('[Daily Challenge] Failed to write user history:', err);
+  }
+}
+
+/**
+ * Clears local cache for a user, or all daily challenge caches on logout
+ */
+export function clearDailyChallengeLocalCache(userId?: string | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (userId) {
+      localStorage.removeItem(getDailyChallengeStorageKey(userId));
+    } else {
+      localStorage.removeItem(STORAGE_KEY_V2_LEGACY);
+      localStorage.removeItem(OLD_STORAGE_KEY);
+      localStorage.removeItem(`${STORAGE_KEY_V2_PREFIX}guest`);
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith(STORAGE_KEY_V2_PREFIX)) {
+          keysToRemove.push(k);
+        }
+      }
+      keysToRemove.forEach(k => localStorage.removeItem(k));
+    }
+  } catch (err) {
+    console.warn('[Daily Challenge] Failed to clear local cache:', err);
+  }
+}
+
+/**
+ * Merges external cloud attempts with local user attempts
+ */
+export function mergeDailyChallengeHistory(cloudAttempts: DailyChallengeAttempt[], userId?: string | null): DailyChallengeAttempt[] {
+  const local = getDailyChallengeHistory(userId);
   if (!Array.isArray(cloudAttempts) || cloudAttempts.length === 0) {
-    return getDailyChallengeHistory();
+    return local;
   }
 
-  const local = getDailyChallengeHistory();
+  const sanitizedCloud = sanitizeDailyChallengeHistory(cloudAttempts, userId);
   const map = new Map<string, DailyChallengeAttempt>();
 
   local.forEach(item => {
     if (item && item.date) map.set(item.date, item);
   });
 
-  cloudAttempts.forEach(item => {
+  sanitizedCloud.forEach(item => {
     if (item && item.date) {
       const existing = map.get(item.date);
-      // Prefer highest score / completed accuracy if both exist
       if (!existing || (item.score || 0) >= (existing.score || 0)) {
         map.set(item.date, item);
       }
@@ -124,19 +233,15 @@ export function mergeDailyChallengeHistory(cloudAttempts: DailyChallengeAttempt[
   });
 
   const merged = Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date));
-  if (typeof window !== 'undefined') {
-    try {
-      localStorage.setItem(STORAGE_KEY_V2, JSON.stringify(merged));
-    } catch {}
-  }
+  setDailyChallengeHistoryForUser(userId, merged);
   return merged;
 }
 
 /**
  * Checks if the user has completed today's daily challenge
  */
-export function getTodayChallengeAttempt(): DailyChallengeAttempt | null {
-  const history = getDailyChallengeHistory();
+export function getTodayChallengeAttempt(userId?: string | null): DailyChallengeAttempt | null {
+  const history = getDailyChallengeHistory(userId);
   const today = getTodayDateString();
   return history.find(a => a.date === today) || null;
 }
@@ -144,64 +249,46 @@ export function getTodayChallengeAttempt(): DailyChallengeAttempt | null {
 /**
  * Returns true if today's challenge was already attempted
  */
-export function hasCompletedTodayChallenge(): boolean {
-  return getTodayChallengeAttempt() !== null;
+export function hasCompletedTodayChallenge(userId?: string | null): boolean {
+  return getTodayChallengeAttempt(userId) !== null;
 }
 
 /**
- * Saves a completed daily challenge attempt both locally, to Firestore (cloud), and to the backend server.
+ * Saves a completed daily challenge attempt both locally, to Firestore (cloud), and to backend.
  */
 export function saveDailyChallengeAttempt(
   attempt: DailyChallengeAttempt,
   player?: PlayerProfile
 ): { history: DailyChallengeAttempt[]; rankPointsGained: number } {
-  const history = getDailyChallengeHistory().filter(a => a.date !== attempt.date);
+  const effectiveUid = auth.currentUser?.uid || (player?.id && !player.id.startsWith('guest_') ? player.id : null);
+  const effectiveEmail = auth.currentUser?.email || player?.email;
+
+  const history = getDailyChallengeHistory(effectiveUid).filter(a => a.date !== attempt.date);
   
   // Calculate bonus LP for the daily challenge
   const rankPointsGained = 25 + attempt.correctCount * 2;
   const finalizedAttempt: DailyChallengeAttempt = {
     ...attempt,
     rankPointsAwarded: rankPointsGained,
+    userId: effectiveUid || undefined,
+    userEmail: effectiveEmail || undefined,
   };
   
   history.push(finalizedAttempt);
   history.sort((a, b) => a.date.localeCompare(b.date));
   
-  // 1. Local Storage persistence
-  if (typeof window !== 'undefined') {
-    try {
-      localStorage.setItem(STORAGE_KEY_V2, JSON.stringify(history));
-    } catch (err) {
-      console.error('[Daily Challenge] Failed to save attempt locally:', err);
-    }
-  }
+  // 1. User-scoped Local Storage persistence
+  setDailyChallengeHistoryForUser(effectiveUid, history);
 
-  // 2. Update player LP in localStorage profile if present
-  if (player && typeof window !== 'undefined') {
-    try {
-      const stored = localStorage.getItem('vocabclash_player_profile');
-      if (stored) {
-        const p = JSON.parse(stored);
-        p.rankPoints = (p.rankPoints || 0) + rankPointsGained;
-        p.matchesPlayed = (p.matchesPlayed || 0) + 1;
-        p.matchesWon = attempt.percentage >= 60 ? (p.matchesWon || 0) + 1 : p.matchesWon;
-        localStorage.setItem('vocabclash_player_profile', JSON.stringify(p));
-      }
-    } catch {
-      // Ignore sync error
-    }
-  }
-
-  // 3. Persistent Firestore Synchronization (Cross-device phone & laptop sync)
-  const effectiveUid = auth.currentUser?.uid || (player?.id && !player.id.startsWith('guest_') ? player.id : null);
+  // 2. Persistent Firestore Synchronization (Cross-device phone & laptop sync)
   if (effectiveUid) {
     saveDailyChallengeToFirestore(effectiveUid, finalizedAttempt, history).catch(err => {
       console.warn('[Daily Challenge] Firestore persistence notice:', err);
     });
   }
 
-  // 4. Sync with Backend Server API (asynchronous fallback)
-  const userId = effectiveUid || player?.id || player?.name || 'default_user';
+  // 3. Sync with Backend Server API (asynchronous fallback)
+  const userId = effectiveUid || 'guest_user';
   try {
     fetch('/api/daily-challenge/attempt', {
       method: 'POST',
@@ -214,45 +301,63 @@ export function saveDailyChallengeAttempt(
     // ignore fetch error in offline modes
   }
 
+  // 4. Notify UI components
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('daily-challenge-updated'));
+  }
+
   return { history, rankPointsGained };
 }
 
 /**
- * Fetches Firestore + server history and syncs with client local history for cross-device parity.
+ * Fetches Firestore history and syncs with user-scoped client local history.
+ * Automatically purges any contaminated records from cloud and local storage.
  */
-export async function syncDailyChallengeWithBackend(userId: string = 'default_user'): Promise<DailyChallengeAttempt[]> {
-  const effectiveUid = auth.currentUser?.uid || (userId !== 'default_user' && !userId.startsWith('guest_') ? userId : null);
+export async function syncDailyChallengeWithBackend(
+  userId?: string | null,
+  userEmail?: string | null
+): Promise<DailyChallengeAttempt[]> {
+  const effectiveUid = auth.currentUser?.uid || (userId && userId !== 'default_user' && !userId.startsWith('guest_') ? userId : null);
+  const effectiveEmail = userEmail || auth.currentUser?.email;
 
-  // 1. First priority: Firestore Cloud Sync (supports seamless cross-device login)
+  // 1. First priority: Firestore Cloud Sync (user-scoped)
   if (effectiveUid) {
     try {
-      const firestoreHistory = await fetchDailyChallengeHistoryFromFirestore(effectiveUid);
-      if (Array.isArray(firestoreHistory) && firestoreHistory.length > 0) {
-        const merged = mergeDailyChallengeHistory(firestoreHistory);
-        // If local had more records than Firestore, push merged back to Firestore
-        if (merged.length > firestoreHistory.length) {
-          saveDailyChallengeToFirestore(effectiveUid, merged[merged.length - 1], merged).catch(() => {});
-        }
-        return merged;
+      const rawCloud = await fetchDailyChallengeHistoryFromFirestore(effectiveUid);
+      const cleanCloud = sanitizeDailyChallengeHistory(rawCloud, effectiveUid, effectiveEmail);
+
+      // If contaminated records existed in cloud, immediately purge them from Firestore document and subcollection
+      if (cleanCloud.length !== rawCloud.length) {
+        console.log('[Daily Challenge] Purged contaminated cloud attempts for', effectiveUid);
+        await saveDailyChallengeToFirestore(effectiveUid, null, cleanCloud);
+        await deleteDailyChallengeDayFromFirestore(effectiveUid, getTodayDateString());
       }
+
+      setDailyChallengeHistoryForUser(effectiveUid, cleanCloud);
+      return cleanCloud;
     } catch (err) {
       console.warn('[Daily Challenge] Firestore sync notice:', err);
     }
   }
 
-  // 2. Secondary fallback: Node backend API
-  try {
-    const res = await fetch(`/api/daily-challenge/history?userId=${encodeURIComponent(userId)}`);
-    if (res.ok) {
-      const data = await res.json();
-      if (data && data.success && Array.isArray(data.history)) {
-        return mergeDailyChallengeHistory(data.history);
+  // 2. Secondary fallback: Node backend API (only when user has active ID)
+  if (effectiveUid) {
+    try {
+      const res = await fetch(`/api/daily-challenge/history?userId=${encodeURIComponent(effectiveUid)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.success && Array.isArray(data.history)) {
+          const cleanBackend = sanitizeDailyChallengeHistory(data.history, effectiveUid, effectiveEmail);
+          setDailyChallengeHistoryForUser(effectiveUid, cleanBackend);
+          return cleanBackend;
+        }
       }
+    } catch (err) {
+      console.warn('[Daily Challenge] Backend fetch notice:', err);
     }
-  } catch (err) {
-    console.warn('[Daily Challenge] Backend fetch notice:', err);
   }
-  return getDailyChallengeHistory();
+
+  return getDailyChallengeHistory(effectiveUid);
 }
 
 /**
