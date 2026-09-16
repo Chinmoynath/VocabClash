@@ -1488,13 +1488,13 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
                           Vocab Category:
                         </span>
                         <span className="text-[10px] text-sky-400 font-mono">
-                          {pendingCategory === 'mixed' ? 'All Mixed' : pendingCategory.toUpperCase()}
+                          {pendingCategory === 'mixed' ? 'All PYQs' : pendingCategory.toUpperCase()}
                         </span>
                       </div>
 
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-1">
                         {[
-                          { id: 'mixed', label: 'All Mixed' },
+                          { id: 'mixed', label: 'All PYQs' },
                           { id: 'antonyms', label: 'Antonyms' },
                           { id: 'synonyms', label: 'Synonyms' },
                           { id: 'ows', label: 'One Word' },
@@ -1610,11 +1610,11 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
           {/* Category Pills */}
           <div className="flex gap-1.5 overflow-x-auto pb-1 text-xs no-scrollbar">
             {[
-              { id: 'mixed', label: 'All Mixed (24k+)' },
-              { id: 'antonyms', label: 'Antonyms (6k+)' },
-              { id: 'synonyms', label: 'Synonyms (6k+)' },
-              { id: 'ows', label: 'One Word (6k+)' },
-              { id: 'idioms', label: 'Idioms (6k+)' },
+              { id: 'mixed', label: 'All PYQs' },
+              { id: 'antonyms', label: 'Antonyms' },
+              { id: 'synonyms', label: 'Synonyms' },
+              { id: 'ows', label: 'One Word' },
+              { id: 'idioms', label: 'Idioms' },
             ].map(tab => (
               <button
                 key={tab.id}

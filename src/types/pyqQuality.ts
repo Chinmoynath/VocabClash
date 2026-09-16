@@ -35,7 +35,7 @@ export interface UserQuestionReport {
   userEmail?: string;
   userName?: string;
   reportedAt: number;
-  status: 'open' | 'reviewed' | 'dismissed';
+  status: 'open' | 'reviewed' | 'dismissed' | 'resolved';
 }
 
 export interface QualityAuditStats {

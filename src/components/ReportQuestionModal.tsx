@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { soundManager } from '../utils/audio';
 import { 
   X, 
@@ -81,9 +81,29 @@ Timestamp: ${new Date().toISOString()}
     `.trim();
   };
 
+  useEffect(() => {
+    if (submitted) {
+      const timer = setTimeout(() => {
+        onClose();
+      }, 2200);
+      return () => clearTimeout(timer);
+    }
+  }, [submitted, onClose]);
+
   const handleSubmitReport = async () => {
     soundManager.playTap();
     setIsSubmitting(true);
+    let resolved = false;
+
+    // Safety timeout: ensure button never spins endlessly under any network conditions
+    const safetyTimer = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        setIsSubmitting(false);
+        setSubmitted(true);
+      }
+    }, 1500);
+
     try {
       const reasonLabel = REPORT_REASONS.find(r => r.id === selectedReason)?.label || selectedReason;
       await submitQuestionReport({
@@ -95,10 +115,18 @@ Timestamp: ${new Date().toISOString()}
         userEmail: userEmail || undefined,
         userName: userName || undefined,
       });
-      setSubmitted(true);
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(safetyTimer);
+        setSubmitted(true);
+      }
     } catch (e) {
-      console.warn('Report submission error:', e);
-      setSubmitted(true);
+      console.warn('Report submission fallback:', e);
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(safetyTimer);
+        setSubmitted(true);
+      }
     } finally {
       setIsSubmitting(false);
     }

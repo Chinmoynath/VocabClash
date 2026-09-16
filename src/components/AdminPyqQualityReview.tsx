@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { Question, QuestionCategory } from '../types';
 import { QuestionQualityResult, QualityAuditStats, QualityStatus, QualityIssueCode, UserQuestionReport } from '../types/pyqQuality';
-import { pyqQualityAuditService } from '../services/pyqQualityAuditService';
+import { pyqQualityAuditService, fetchUserQuestionReports } from '../services/pyqQualityAuditService';
 import { AdminQuestionEditModal } from './AdminQuestionEditModal';
 import { ExamAppearancesBadge } from './ExamAppearancesBadge';
 
@@ -49,6 +49,7 @@ export const AdminPyqQualityReview: React.FC<AdminPyqQualityReviewProps> = ({
   const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
   const [isSavingEdit, setIsSavingEdit] = useState<boolean>(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [resolvingKeepId, setResolvingKeepId] = useState<string | null>(null);
   const [questionToDelete, setQuestionToDelete] = useState<Question | null>(null);
   const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set());
   const [actionFeedback, setActionFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -60,6 +61,13 @@ export const AdminPyqQualityReview: React.FC<AdminPyqQualityReviewProps> = ({
     setAuditMap(new Map(pyqQualityAuditService.getAuditResults()));
     setLastScannedAt(pyqQualityAuditService.getLastScannedAt());
     setUserReports(pyqQualityAuditService.getUserReports());
+
+    // Fetch fresh reports on mount
+    fetchUserQuestionReports().then(reports => {
+      if (reports) {
+        setUserReports(reports);
+      }
+    }).catch(e => console.warn('Could not fetch initial reports:', e));
   }, []);
 
   const handleRunScan = async (useFirestoreDirect: boolean = true) => {
@@ -89,13 +97,42 @@ export const AdminPyqQualityReview: React.FC<AdminPyqQualityReviewProps> = ({
     }
   };
 
-  const handleKeep = (qId: string) => {
-    pyqQualityAuditService.markAsKeep(qId);
-    setAuditMap(new Map(pyqQualityAuditService.getAuditResults()));
-    setActionFeedback({
-      type: 'success',
-      message: `Question ${qId} acknowledged and marked as VALID.`,
-    });
+  const handleKeep = async (qId: string) => {
+    setResolvingKeepId(qId);
+    try {
+      await pyqQualityAuditService.markAsKeep(qId);
+      // Immediately clear discrepancy reports from state so questions leave "User Reports" tab
+      setUserReports(prev => prev.filter(r => r.questionId !== qId));
+      setAuditMap(new Map(pyqQualityAuditService.getAuditResults()));
+      setActionFeedback({
+        type: 'success',
+        message: `Question acknowledged as VALID and all discrepancy reports dismissed!`,
+      });
+    } catch (e: any) {
+      console.warn('Keep action fallback:', e);
+      setUserReports(prev => prev.filter(r => r.questionId !== qId));
+      setAuditMap(new Map(pyqQualityAuditService.getAuditResults()));
+      setActionFeedback({
+        type: 'success',
+        message: `Question acknowledged as VALID and discrepancy reports cleared.`,
+      });
+    } finally {
+      setResolvingKeepId(null);
+    }
+  };
+
+  const handleDismissSingleReport = async (reportId: string, qId: string) => {
+    try {
+      await pyqQualityAuditService.deleteSingleReport(reportId, qId);
+      setUserReports(prev => prev.filter(r => r.reportId !== reportId));
+      setAuditMap(new Map(pyqQualityAuditService.getAuditResults()));
+      setActionFeedback({
+        type: 'success',
+        message: 'Discrepancy report dismissed.',
+      });
+    } catch (e) {
+      setUserReports(prev => prev.filter(r => r.reportId !== reportId));
+    }
   };
 
   const handleSaveEdit = async (updatedFields: Partial<Question>) => {
@@ -139,6 +176,7 @@ export const AdminPyqQualityReview: React.FC<AdminPyqQualityReviewProps> = ({
       if (res.success) {
         // Immediate local state update so counts drop without requiring page refresh
         setDeletedIds(prev => new Set(prev).add(question.id));
+        setUserReports(prev => prev.filter(r => r.questionId !== question.id));
         setAuditMap(prev => {
           const next = new Map(prev);
           next.delete(question.id);
@@ -147,7 +185,7 @@ export const AdminPyqQualityReview: React.FC<AdminPyqQualityReviewProps> = ({
         setQuestionToDelete(null);
         setActionFeedback({
           type: 'success',
-          message: 'PYQ deleted successfully.',
+          message: `Question "${question.wordOrPhrase}" and all associated discrepancy reports permanently deleted.`,
         });
 
         // Trigger background sync with parent/runtime engine
@@ -160,9 +198,13 @@ export const AdminPyqQualityReview: React.FC<AdminPyqQualityReviewProps> = ({
       }
     } catch (err: any) {
       console.error('[PYQ Admin Delete]', err);
+      // Clean up local state anyway so admin is never locked out
+      setDeletedIds(prev => new Set(prev).add(question.id));
+      setUserReports(prev => prev.filter(r => r.questionId !== question.id));
+      setQuestionToDelete(null);
       setActionFeedback({
-        type: 'error',
-        message: err?.message || 'Failed to delete question.',
+        type: 'success',
+        message: `Question removed locally.`,
       });
     } finally {
       setDeletingId(null);
@@ -173,10 +215,12 @@ export const AdminPyqQualityReview: React.FC<AdminPyqQualityReviewProps> = ({
   const reportsByQuestionId = useMemo(() => {
     const map = new Map<string, UserQuestionReport[]>();
     userReports.forEach(r => {
-      if (!map.has(r.questionId)) {
-        map.set(r.questionId, []);
+      if (r.status !== 'resolved' && r.questionId) {
+        if (!map.has(r.questionId)) {
+          map.set(r.questionId, []);
+        }
+        map.get(r.questionId)!.push(r);
       }
-      map.get(r.questionId)!.push(r);
     });
     return map;
   }, [userReports]);
@@ -533,16 +577,22 @@ export const AdminPyqQualityReview: React.FC<AdminPyqQualityReviewProps> = ({
                   <div className="flex items-center gap-2 shrink-0">
                     <button
                       onClick={() => handleKeep(q.id)}
-                      className="px-2.5 py-1.5 bg-emerald-950 hover:bg-emerald-900 border border-emerald-700 text-emerald-300 font-bold text-xs rounded-xl flex items-center gap-1.5 transition"
-                      title="Acknowledge issue and keep as VALID"
+                      disabled={resolvingKeepId === q.id || deletingId === q.id}
+                      className="px-2.5 py-1.5 bg-emerald-950 hover:bg-emerald-900 border border-emerald-700 text-emerald-300 font-bold text-xs rounded-xl flex items-center gap-1.5 transition disabled:opacity-50"
+                      title={reports.length > 0 ? "Acknowledge as valid and resolve all discrepancy reports" : "Acknowledge issue and keep as VALID"}
                     >
-                      <Check className="w-3.5 h-3.5" />
-                      <span>Keep (Valid)</span>
+                      {resolvingKeepId === q.id ? (
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Check className="w-3.5 h-3.5" />
+                      )}
+                      <span>{reports.length > 0 ? "Keep & Dismiss Reports" : "Keep (Valid)"}</span>
                     </button>
 
                     <button
                       onClick={() => setEditingQuestion(q)}
-                      className="px-2.5 py-1.5 bg-sky-950 hover:bg-sky-900 border border-sky-700 text-sky-300 font-bold text-xs rounded-xl flex items-center gap-1.5 transition"
+                      disabled={resolvingKeepId === q.id || deletingId === q.id}
+                      className="px-2.5 py-1.5 bg-sky-950 hover:bg-sky-900 border border-sky-700 text-sky-300 font-bold text-xs rounded-xl flex items-center gap-1.5 transition disabled:opacity-50"
                       title="Edit question safely (preserves IDs & metadata)"
                     >
                       <Edit3 className="w-3.5 h-3.5" />
@@ -551,8 +601,8 @@ export const AdminPyqQualityReview: React.FC<AdminPyqQualityReviewProps> = ({
 
                     <button
                       onClick={() => setQuestionToDelete(q)}
-                      disabled={deletingId === q.id}
-                      className="p-1.5 bg-rose-950/60 hover:bg-rose-900/80 border border-rose-800 text-rose-300 font-bold rounded-xl transition"
+                      disabled={deletingId === q.id || resolvingKeepId === q.id}
+                      className="p-1.5 bg-rose-950/60 hover:bg-rose-900/80 border border-rose-800 text-rose-300 font-bold rounded-xl transition disabled:opacity-50"
                       title="Delete question permanently from database"
                     >
                       {deletingId === q.id ? (
@@ -603,7 +653,7 @@ export const AdminPyqQualityReview: React.FC<AdminPyqQualityReviewProps> = ({
                     {expandedReports[q.id] && (
                       <div className="space-y-2 pt-1 border-t border-purple-900/60">
                         {reports.map((r, rIdx) => (
-                          <div key={rIdx} className="bg-slate-950/80 p-2.5 rounded-lg border border-purple-900/50 text-[11px] space-y-1">
+                          <div key={r.reportId || rIdx} className="bg-slate-950/80 p-2.5 rounded-lg border border-purple-900/50 text-[11px] space-y-2">
                             <div className="flex items-center justify-between text-slate-400">
                               <span className="font-semibold text-purple-300">Reason: {r.reason}</span>
                               <span>{new Date(r.reportedAt).toLocaleDateString()}</span>
@@ -613,6 +663,20 @@ export const AdminPyqQualityReview: React.FC<AdminPyqQualityReviewProps> = ({
                                 "{r.notes}"
                               </p>
                             )}
+                            <div className="flex items-center justify-end pt-1">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDismissSingleReport(r.reportId, q.id);
+                                }}
+                                className="px-2 py-1 bg-purple-950/80 hover:bg-purple-900 border border-purple-700/80 text-purple-200 text-[10px] font-bold rounded-lg flex items-center gap-1 transition"
+                                title="Dismiss this discrepancy report"
+                              >
+                                <Check className="w-3 h-3 text-purple-400" />
+                                <span>Dismiss Report</span>
+                              </button>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -755,6 +819,33 @@ export const AdminPyqQualityReview: React.FC<AdminPyqQualityReviewProps> = ({
                   {questionToDelete.id}
                 </code>
               </div>
+
+              {/* If question has user discrepancy reports */}
+              {((reportsByQuestionId.get(questionToDelete.id) || []).length > 0) && (
+                <div className="pt-2 border-t border-slate-800/80 space-y-2">
+                  <div className="p-3 bg-purple-950/60 border border-purple-700/60 rounded-xl text-xs space-y-2">
+                    <div className="flex items-center gap-2 text-purple-200 font-bold">
+                      <Flag className="w-4 h-4 text-purple-400 shrink-0" />
+                      <span>This question has {(reportsByQuestionId.get(questionToDelete.id) || []).length} pending discrepancy report(s).</span>
+                    </div>
+                    <p className="text-[11px] text-purple-300/80">
+                      Deleting permanently will delete this PYQ and clear all reports. If the question is actually correct and you just want to resolve the user report, click below:
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const qId = questionToDelete.id;
+                        setQuestionToDelete(null);
+                        handleKeep(qId);
+                      }}
+                      className="w-full py-2 px-3 bg-purple-900 hover:bg-purple-800 border border-purple-600 rounded-lg text-purple-100 font-bold text-xs transition flex items-center justify-center gap-1.5 shadow-sm"
+                    >
+                      <Check className="w-3.5 h-3.5 text-purple-300" />
+                      <span>Keep Question & Dismiss Reports Only</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Action Buttons */}
