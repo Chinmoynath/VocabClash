@@ -71,11 +71,11 @@ export const DailyChallengeQuizModal: React.FC<DailyChallengeQuizModalProps> = (
     setRankPointsGained(0);
     startTimeRef.current = Date.now();
 
-    // Fetch 20 high-yield random questions
-    const pool = questionBankEngine.getSpeedBlitzSessionQuestions(
-      'mixed',
-      (player.targetExam as any) || 'ALL',
-      TOTAL_QUESTIONS_COUNT
+    // Fetch 20 high-yield deterministic questions for today's daily challenge
+    const todayStr = getTodayDateString();
+    const pool = questionBankEngine.getDailyChallengeQuestions(
+      todayStr,
+      (player.targetExam as any) || 'ALL'
     );
     setQuestions(pool);
   }, [isOpen, player.targetExam]);

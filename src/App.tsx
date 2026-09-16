@@ -56,6 +56,7 @@ import {
   getPendingRegistrationDisplayName,
   setPendingRegistrationDisplayName
 } from './services/firebaseService';
+import { mergeDailyChallengeHistory, getDailyChallengeHistory } from './services/dailyChallengeService';
 import { syncUserToLeaderboard } from './services/leaderboardService';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { AndroidDeviceShell } from './components/AndroidDeviceShell';
@@ -1074,6 +1075,9 @@ export default function App() {
                 saveDailyTargetState(cloudData.dailyTarget);
               }
             }
+            if (cloudData.dailyChallengeHistory && Array.isArray(cloudData.dailyChallengeHistory)) {
+              mergeDailyChallengeHistory(cloudData.dailyChallengeHistory);
+            }
 
             // Asynchronously write merged data back to Firestore in background without blocking UI
             saveUserDataToFirestore(
@@ -1083,7 +1087,8 @@ export default function App() {
                 subscription: cloudData.subscription || subscription, 
                 streak: cloudData.streak || streak, 
                 savedWords: (cloudData.savedWords && cloudData.savedWords.length > 0) ? cloudData.savedWords : savedWords,
-                dailyTarget: cloudData.dailyTarget || getDailyTargetState()
+                dailyTarget: cloudData.dailyTarget || getDailyTargetState(),
+                dailyChallengeHistory: getDailyChallengeHistory(),
               },
               user
             ).catch((err) => console.warn('Background sync notice:', err));
@@ -1156,7 +1161,14 @@ export default function App() {
             setPlayer(newPlayer);
             saveUserDataToFirestore(
               user.uid,
-              { player: newPlayer, subscription, streak, savedWords, dailyTarget: getDailyTargetState() },
+              { 
+                player: newPlayer, 
+                subscription, 
+                streak, 
+                savedWords, 
+                dailyTarget: getDailyTargetState(),
+                dailyChallengeHistory: getDailyChallengeHistory(),
+              },
               user
             ).catch((err) => console.warn('Initial save notice:', err));
             syncUserToLeaderboard(newPlayer, user.uid).catch((err) => console.warn('Leaderboard sync notice:', err));
@@ -2203,7 +2215,10 @@ export default function App() {
         </AnimatePresence>
 
         {/* Main Dynamic View Content */}
-        <main id="app-main-content" className="flex-1 min-h-0 relative overflow-y-auto flex flex-col no-scrollbar">
+        <main 
+          id="app-main-content" 
+          className="flex-1 min-h-0 relative overflow-y-auto flex flex-col no-scrollbar"
+        >
         {matchState ? (
           !isMatchCompleted ? (
             /* Live 1v1 Battle Arena Screen */

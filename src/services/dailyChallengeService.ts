@@ -1,4 +1,9 @@
 import { QuestionCategory, PlayerProfile } from '../types';
+import { 
+  saveDailyChallengeToFirestore, 
+  fetchDailyChallengeHistoryFromFirestore, 
+  auth 
+} from './firebaseService';
 
 export interface DailyChallengeAttempt {
   date: string; // ISO format "YYYY-MM-DD"
@@ -94,6 +99,40 @@ export function getDailyChallengeHistory(): DailyChallengeAttempt[] {
 }
 
 /**
+ * Merges external cloud/server attempts with local attempts and returns updated list.
+ */
+export function mergeDailyChallengeHistory(cloudAttempts: DailyChallengeAttempt[]): DailyChallengeAttempt[] {
+  if (!Array.isArray(cloudAttempts) || cloudAttempts.length === 0) {
+    return getDailyChallengeHistory();
+  }
+
+  const local = getDailyChallengeHistory();
+  const map = new Map<string, DailyChallengeAttempt>();
+
+  local.forEach(item => {
+    if (item && item.date) map.set(item.date, item);
+  });
+
+  cloudAttempts.forEach(item => {
+    if (item && item.date) {
+      const existing = map.get(item.date);
+      // Prefer highest score / completed accuracy if both exist
+      if (!existing || (item.score || 0) >= (existing.score || 0)) {
+        map.set(item.date, item);
+      }
+    }
+  });
+
+  const merged = Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date));
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem(STORAGE_KEY_V2, JSON.stringify(merged));
+    } catch {}
+  }
+  return merged;
+}
+
+/**
  * Checks if the user has completed today's daily challenge
  */
 export function getTodayChallengeAttempt(): DailyChallengeAttempt | null {
@@ -110,7 +149,7 @@ export function hasCompletedTodayChallenge(): boolean {
 }
 
 /**
- * Saves a completed daily challenge attempt both locally and to the backend server.
+ * Saves a completed daily challenge attempt both locally, to Firestore (cloud), and to the backend server.
  */
 export function saveDailyChallengeAttempt(
   attempt: DailyChallengeAttempt,
@@ -128,6 +167,7 @@ export function saveDailyChallengeAttempt(
   history.push(finalizedAttempt);
   history.sort((a, b) => a.date.localeCompare(b.date));
   
+  // 1. Local Storage persistence
   if (typeof window !== 'undefined') {
     try {
       localStorage.setItem(STORAGE_KEY_V2, JSON.stringify(history));
@@ -136,7 +176,7 @@ export function saveDailyChallengeAttempt(
     }
   }
 
-  // Update player LP in localStorage profile if present
+  // 2. Update player LP in localStorage profile if present
   if (player && typeof window !== 'undefined') {
     try {
       const stored = localStorage.getItem('vocabclash_player_profile');
@@ -152,8 +192,16 @@ export function saveDailyChallengeAttempt(
     }
   }
 
-  // Sync with Backend Server API (asynchronous)
-  const userId = player?.id || player?.name || 'default_user';
+  // 3. Persistent Firestore Synchronization (Cross-device phone & laptop sync)
+  const effectiveUid = auth.currentUser?.uid || (player?.id && !player.id.startsWith('guest_') ? player.id : null);
+  if (effectiveUid) {
+    saveDailyChallengeToFirestore(effectiveUid, finalizedAttempt, history).catch(err => {
+      console.warn('[Daily Challenge] Firestore persistence notice:', err);
+    });
+  }
+
+  // 4. Sync with Backend Server API (asynchronous fallback)
+  const userId = effectiveUid || player?.id || player?.name || 'default_user';
   try {
     fetch('/api/daily-challenge/attempt', {
       method: 'POST',
@@ -170,26 +218,35 @@ export function saveDailyChallengeAttempt(
 }
 
 /**
- * Fetches server history and syncs with client local history.
+ * Fetches Firestore + server history and syncs with client local history for cross-device parity.
  */
 export async function syncDailyChallengeWithBackend(userId: string = 'default_user'): Promise<DailyChallengeAttempt[]> {
+  const effectiveUid = auth.currentUser?.uid || (userId !== 'default_user' && !userId.startsWith('guest_') ? userId : null);
+
+  // 1. First priority: Firestore Cloud Sync (supports seamless cross-device login)
+  if (effectiveUid) {
+    try {
+      const firestoreHistory = await fetchDailyChallengeHistoryFromFirestore(effectiveUid);
+      if (Array.isArray(firestoreHistory) && firestoreHistory.length > 0) {
+        const merged = mergeDailyChallengeHistory(firestoreHistory);
+        // If local had more records than Firestore, push merged back to Firestore
+        if (merged.length > firestoreHistory.length) {
+          saveDailyChallengeToFirestore(effectiveUid, merged[merged.length - 1], merged).catch(() => {});
+        }
+        return merged;
+      }
+    } catch (err) {
+      console.warn('[Daily Challenge] Firestore sync notice:', err);
+    }
+  }
+
+  // 2. Secondary fallback: Node backend API
   try {
     const res = await fetch(`/api/daily-challenge/history?userId=${encodeURIComponent(userId)}`);
     if (res.ok) {
       const data = await res.json();
       if (data && data.success && Array.isArray(data.history)) {
-        const local = getDailyChallengeHistory();
-        const map = new Map<string, DailyChallengeAttempt>();
-        
-        // Merge genuine records by date
-        local.forEach(item => map.set(item.date, item));
-        data.history.forEach((item: DailyChallengeAttempt) => map.set(item.date, item));
-
-        const merged = Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date));
-        if (typeof window !== 'undefined') {
-          localStorage.setItem(STORAGE_KEY_V2, JSON.stringify(merged));
-        }
-        return merged;
+        return mergeDailyChallengeHistory(data.history);
       }
     }
   } catch (err) {

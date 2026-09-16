@@ -1615,6 +1615,102 @@ export class QuestionBankEngine {
   }
 
   /**
+   * DETERMINISTIC DAILY CHALLENGE QUESTIONS (20 Questions):
+   * Guarantees that EVERY user opening the Daily Challenge on a given calendar day
+   * receives the exact same set of 20 high-yield questions (5 Synonyms, 5 Antonyms, 5 OWS, 5 Idioms)
+   * in the exact same sequence worldwide.
+   */
+  public getDailyChallengeQuestions(
+    dateStr: string = new Date().toISOString().slice(0, 10),
+    targetExam: ExamType = 'ALL'
+  ): Question[] {
+    this.init();
+
+    // 1. Generate stable numerical seed from date string (e.g. "2026-09-15")
+    let seed = 0x811c9dc5;
+    for (let i = 0; i < dateStr.length; i++) {
+      seed ^= dateStr.charCodeAt(i);
+      seed = Math.imul(seed, 0x01000193);
+    }
+    seed = seed >>> 0;
+
+    // Mulberry32 32-bit deterministic PRNG
+    let s = seed;
+    const rng = () => {
+      s = (s + 0x6D2B79F5) >>> 0;
+      let t = Math.imul(s ^ (s >>> 15), 1 | s);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+
+    const categories: QuestionCategory[] = ['synonyms', 'antonyms', 'ows', 'idioms'];
+    const selected20: Question[] = [];
+    const usedWords = new Set<string>();
+
+    for (const cat of categories) {
+      const pool = this.getPlayablePool(cat).filter(q => {
+        if (!q || !q.wordOrPhrase) return false;
+        if (targetExam !== 'ALL' && !this.matchesExam(q, targetExam)) return false;
+        return true;
+      });
+
+      // Deduplicate and sort deterministically by stable ID
+      const map = new Map<string, Question>();
+      for (const q of pool) {
+        const id = q.id || q.canonicalQuestionId || q.wordOrPhrase;
+        if (!map.has(id)) {
+          map.set(id, q);
+        }
+      }
+
+      // Sort deterministically before seeded shuffle
+      const stableArray = Array.from(map.values()).sort((a, b) => {
+        const idA = a.id || a.canonicalQuestionId || a.wordOrPhrase;
+        const idB = b.id || b.canonicalQuestionId || b.wordOrPhrase;
+        return idA.localeCompare(idB);
+      });
+
+      // Seeded Fisher-Yates shuffle for this category
+      const shuffledCat = [...stableArray];
+      for (let i = shuffledCat.length - 1; i > 0; i--) {
+        const j = Math.floor(rng() * (i + 1));
+        [shuffledCat[i], shuffledCat[j]] = [shuffledCat[j], shuffledCat[i]];
+      }
+
+      let pickedFromCat = 0;
+      for (const q of shuffledCat) {
+        const normWord = q.wordOrPhrase.trim().toLowerCase();
+        if (!usedWords.has(normWord)) {
+          usedWords.add(normWord);
+          selected20.push(q);
+          pickedFromCat++;
+          if (pickedFromCat >= 5) break;
+        }
+      }
+
+      // Fallback if less than 5 unique
+      if (pickedFromCat < 5) {
+        for (const q of shuffledCat) {
+          if (!selected20.some(s => s.id === q.id)) {
+            selected20.push(q);
+            pickedFromCat++;
+            if (pickedFromCat >= 5) break;
+          }
+        }
+      }
+    }
+
+    // Final seeded shuffle across all 20 questions so categories are interleaved
+    const finalShuffled = [...selected20];
+    for (let i = finalShuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [finalShuffled[i], finalShuffled[j]] = [finalShuffled[j], finalShuffled[i]];
+    }
+
+    return finalShuffled.slice(0, 20);
+  }
+
+  /**
    * SPEED BLITZ SESSION QUESTION GENERATOR:
    * Guarantees:
    * 1. Strictly unique questions within the session based on question ID.

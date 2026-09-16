@@ -264,6 +264,7 @@ export interface UserCloudData {
   subscription: UserSubscription;
   streak: DailyStreakState;
   savedWords: SavedWord[];
+  dailyChallengeHistory?: any[];
   practiceFilters?: {
     category: QuestionCategory | 'mixed';
     exam: ExamType;
@@ -621,6 +622,7 @@ export async function saveUserDataToFirestore(
     subscription: UserSubscription;
     streak: DailyStreakState;
     savedWords: SavedWord[];
+    dailyChallengeHistory?: any[];
     practiceFilters?: {
       category: QuestionCategory | 'mixed';
       exam: ExamType;
@@ -660,6 +662,7 @@ export async function saveUserDataToFirestore(
       },
       streak: data.streak || null,
       savedWords: data.savedWords || [],
+      ...(data.dailyChallengeHistory ? { dailyChallengeHistory: data.dailyChallengeHistory } : {}),
       practiceFilters: data.practiceFilters || data.player.practiceFilters || null,
       dailyTarget: data.dailyTarget || null,
       updatedAt: Date.now(),
@@ -701,6 +704,61 @@ export async function saveUserDataToFirestore(
   } finally {
     isWritingUserData = false;
   }
+}
+
+/**
+ * Saves a daily challenge attempt to Firestore for cross-device sync
+ */
+export async function saveDailyChallengeToFirestore(
+  uid: string,
+  attempt: any,
+  fullHistory: any[]
+): Promise<void> {
+  if (!uid || uid === 'default_user') return;
+  try {
+    const userDocRef = doc(db, 'users', uid);
+    const cleanHistory = sanitizeForFirestore(fullHistory);
+    const cleanAttempt = sanitizeForFirestore(attempt);
+
+    // 1. Update full history in user document
+    await withTimeout(
+      setDoc(userDocRef, { dailyChallengeHistory: cleanHistory, updatedAt: Date.now() }, { merge: true }),
+      2500,
+      undefined
+    );
+
+    // 2. Also write specific day record in subcollection
+    if (attempt?.date) {
+      const dayDocRef = doc(db, 'users', uid, 'daily_challenges', attempt.date);
+      await withTimeout(
+        setDoc(dayDocRef, { ...cleanAttempt, uid, updatedAt: Date.now() }, { merge: true }),
+        2000,
+        undefined
+      );
+    }
+  } catch (err) {
+    console.warn('[DAILY CHALLENGE FIRESTORE] Notice saving attempt:', err);
+  }
+}
+
+/**
+ * Fetches daily challenge history from Firestore for cross-device sync
+ */
+export async function fetchDailyChallengeHistoryFromFirestore(uid: string): Promise<any[]> {
+  if (!uid || uid === 'default_user') return [];
+  try {
+    const userDocRef = doc(db, 'users', uid);
+    const snap = await withTimeout(getDoc(userDocRef), 2200, null);
+    if (snap && snap.exists()) {
+      const data = snap.data();
+      if (Array.isArray(data?.dailyChallengeHistory)) {
+        return data.dailyChallengeHistory;
+      }
+    }
+  } catch (err) {
+    console.warn('[DAILY CHALLENGE FIRESTORE] Notice fetching history:', err);
+  }
+  return [];
 }
 
 /**
