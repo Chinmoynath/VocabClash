@@ -43,7 +43,7 @@ export const OnboardingTourModal: React.FC<OnboardingTourModalProps> = ({
   const [showDetailedExplanation, setShowDetailedExplanation] = useState<boolean>(false);
   const [isSlidingUp, setIsSlidingUp] = useState<boolean>(false);
   const dragControls = useDragControls();
-  const touchStartY = useRef<number | null>(null);
+  const isDraggingRef = useRef<boolean>(false);
 
   if (!isOpen) return null;
 
@@ -194,40 +194,28 @@ export const OnboardingTourModal: React.FC<OnboardingTourModalProps> = ({
       dragControls={dragControls}
       dragListener={false}
       dragConstraints={{ top: -1400, bottom: 0 }}
-      dragElastic={{ top: 1, bottom: 0.08 }}
+      dragElastic={{ top: 0.15, bottom: 0 }}
       dragDirectionLock
+      onDragStart={() => {
+        isDraggingRef.current = true;
+      }}
       onDragEnd={(_e, info: PanInfo) => {
-        // If pulled upward by > 50px or flicked upward with velocity
-        if (info.offset.y < -50 || info.velocity.y < -150) {
+        // If deliberately pulled upward by > 90px or flicked upward with velocity
+        if (info.offset.y < -90 || info.velocity.y < -250) {
           handleSlideUpDismiss();
+        } else {
+          setTimeout(() => {
+            isDraggingRef.current = false;
+          }, 80);
         }
       }}
       animate={isSlidingUp ? { y: '-100%' } : { y: 0 }}
       transition={
         isSlidingUp 
-          ? { duration: 0.38, ease: [0.22, 1, 0.36, 1] } 
-          : { type: 'spring', damping: 26, stiffness: 280, mass: 0.8 }
+          ? { duration: 0.36, ease: [0.22, 1, 0.36, 1] } 
+          : { type: 'spring', damping: 28, stiffness: 280, mass: 0.8 }
       }
       onAnimationComplete={handleAnimationComplete}
-      onTouchStart={(e) => {
-        touchStartY.current = e.touches[0].clientY;
-      }}
-      onTouchEnd={(e) => {
-        if (touchStartY.current !== null) {
-          const deltaY = touchStartY.current - e.changedTouches[0].clientY;
-          // Swiped upward by > 60px
-          if (deltaY > 60) {
-            handleSlideUpDismiss();
-          }
-          touchStartY.current = null;
-        }
-      }}
-      onWheel={(e) => {
-        // Scrolled downward with mouse wheel to slide up
-        if (e.deltaY > 45) {
-          handleSlideUpDismiss();
-        }
-      }}
       className="fixed inset-0 z-50 overflow-hidden bg-[#050714] text-slate-100 flex flex-col justify-between selection:bg-orange-500/30 selection:text-white border-b-2 border-sky-500/30 shadow-[0_25px_60px_rgba(0,0,0,0.9)]"
     >
       {/* Subtle Ambient Background Glows */}
@@ -269,7 +257,7 @@ export const OnboardingTourModal: React.FC<OnboardingTourModalProps> = ({
       </header>
 
       {/* 2. MAIN HERO SECTION (Responsive: Stack on Mobile, Side-by-Side on PC / Laptop) */}
-      <main className="relative z-10 flex-1 overflow-y-auto w-full px-4 sm:px-6 py-4 sm:py-6 flex flex-col justify-start">
+      <main className="relative z-10 flex-1 overflow-y-auto overscroll-contain w-full px-4 sm:px-6 py-4 sm:py-6 flex flex-col justify-start">
         
         {/* DESKTOP / PC VIEW: SIDE BY SIDE (lg:grid) */}
         <div className="hidden lg:grid lg:grid-cols-12 lg:gap-8 lg:items-center max-w-5xl xl:max-w-6xl mx-auto w-full my-auto">
@@ -607,9 +595,14 @@ export const OnboardingTourModal: React.FC<OnboardingTourModalProps> = ({
       <footer 
         id="landing-shutter-handle-bar"
         onPointerDown={(e) => {
+          isDraggingRef.current = false;
           dragControls.start(e);
         }}
-        onClick={handleSlideUpDismiss}
+        onClick={() => {
+          if (!isDraggingRef.current) {
+            handleSlideUpDismiss();
+          }
+        }}
         style={{ touchAction: 'none' }}
         className="relative z-30 w-full text-center py-2.5 pb-4 sm:pb-5 cursor-grab active:cursor-grabbing select-none group shrink-0 border-t border-blue-950/80 bg-[#050714]/95 backdrop-blur-md transition-colors hover:bg-[#090D24]"
         title="Slide or pull up like a window shutter to explore the arena"
