@@ -117,6 +117,7 @@ import { PublicArticlesIndex } from './components/public/PublicArticlesIndex';
 import { PublicArticleDetail } from './components/public/PublicArticleDetail';
 import { Article } from './types/article';
 import { isUserAdmin } from './services/pyqFirestoreService';
+import { StartupSplashOverlay } from './components/StartupSplashOverlay';
 import { BattleAnalyticsDashboard } from './components/admin/BattleAnalyticsDashboard';
 import { 
   recordBattleStarted, 
@@ -2206,149 +2207,164 @@ export default function App() {
   if (showAdminArticles) {
     if (adminArticleMode === 'editor') {
       return (
-        <ArticleEditor
-          initialArticle={editingArticle}
-          onBack={() => {
-            setAdminArticleMode('dashboard');
-            setEditingArticle(null);
-          }}
-          onSaved={() => {
-            setAdminArticleMode('dashboard');
-            setEditingArticle(null);
-          }}
-        />
+        <>
+          <StartupSplashOverlay />
+          <ArticleEditor
+            initialArticle={editingArticle}
+            onBack={() => {
+              setAdminArticleMode('dashboard');
+              setEditingArticle(null);
+            }}
+            onSaved={() => {
+              setAdminArticleMode('dashboard');
+              setEditingArticle(null);
+            }}
+          />
+        </>
       );
     }
     return (
-      <ArticlesDashboard
-        onNewArticle={() => {
-          setEditingArticle(null);
-          setAdminArticleMode('editor');
-        }}
-        onEditArticle={(art) => {
-          setEditingArticle(art);
-          setAdminArticleMode('editor');
-        }}
-        onPreviewArticle={(art) => {
-          setShowAdminArticles(false);
-          setActiveArticleSlug(art.slug);
-          if (typeof window !== 'undefined') {
-            window.history.pushState(null, '', `/articles/${art.slug}`);
-          }
-        }}
-        onBackToApp={() => {
-          setShowAdminArticles(false);
-          if (typeof window !== 'undefined') {
-            window.history.pushState(null, '', '/');
-          }
-        }}
-        currentUserEmail={currentUser?.email || null}
-      />
+      <>
+        <StartupSplashOverlay />
+        <ArticlesDashboard
+          onNewArticle={() => {
+            setEditingArticle(null);
+            setAdminArticleMode('editor');
+          }}
+          onEditArticle={(art) => {
+            setEditingArticle(art);
+            setAdminArticleMode('editor');
+          }}
+          onPreviewArticle={(art) => {
+            setShowAdminArticles(false);
+            setActiveArticleSlug(art.slug);
+            if (typeof window !== 'undefined') {
+              window.history.pushState(null, '', `/articles/${art.slug}`);
+            }
+          }}
+          onBackToApp={() => {
+            setShowAdminArticles(false);
+            if (typeof window !== 'undefined') {
+              window.history.pushState(null, '', '/');
+            }
+          }}
+          currentUserEmail={currentUser?.email || null}
+        />
+      </>
     );
   }
 
   // 2. Render Public Crawlable Article Detail Page (/articles/:slug)
   if (activeArticleSlug) {
     return (
-      <PublicArticleDetail
-        articleSlug={activeArticleSlug}
-        onNavigateHome={() => {
-          setActiveArticleSlug(null);
-          if (typeof window !== 'undefined') {
-            window.history.pushState(null, '', '/');
-          }
-          setCurrentTab('arena');
-        }}
-        onNavigateToArticles={() => {
-          setActiveArticleSlug(null);
-          setIsViewingArticlesIndex(true);
-          if (typeof window !== 'undefined') {
-            window.history.pushState(null, '', '/articles');
-          }
-        }}
-        onNavigateToSlug={(slug) => {
-          setActiveArticleSlug(slug);
-          if (typeof window !== 'undefined') {
-            window.history.pushState(null, '', `/articles/${slug}`);
-          }
-        }}
-        onStartPractice={(route) => {
-          setActiveArticleSlug(null);
-          handleStartPracticeFromArticle(route);
-        }}
-      />
+      <>
+        <StartupSplashOverlay />
+        <PublicArticleDetail
+          articleSlug={activeArticleSlug}
+          onNavigateHome={() => {
+            setActiveArticleSlug(null);
+            if (typeof window !== 'undefined') {
+              window.history.pushState(null, '', '/');
+            }
+            setCurrentTab('arena');
+          }}
+          onNavigateToArticles={() => {
+            setActiveArticleSlug(null);
+            setIsViewingArticlesIndex(true);
+            if (typeof window !== 'undefined') {
+              window.history.pushState(null, '', '/articles');
+            }
+          }}
+          onNavigateToSlug={(slug) => {
+            setActiveArticleSlug(slug);
+            if (typeof window !== 'undefined') {
+              window.history.pushState(null, '', `/articles/${slug}`);
+            }
+          }}
+          onStartPractice={(route) => {
+            setActiveArticleSlug(null);
+            handleStartPracticeFromArticle(route);
+          }}
+        />
+      </>
     );
   }
 
   // 3. Render Public Articles Index Listing (/articles)
   if (isViewingArticlesIndex) {
     return (
-      <PublicArticlesIndex
-        onSelectArticle={(slug) => {
-          setIsViewingArticlesIndex(false);
-          setActiveArticleSlug(slug);
-          if (typeof window !== 'undefined') {
-            window.history.pushState(null, '', `/articles/${slug}`);
-          }
-        }}
-        onNavigateHome={() => {
-          setIsViewingArticlesIndex(false);
-          if (typeof window !== 'undefined') {
-            window.history.pushState(null, '', '/');
-          }
-          setCurrentTab('arena');
-        }}
-        onStartPractice={(route) => {
-          setIsViewingArticlesIndex(false);
-          handleStartPracticeFromArticle(route);
-        }}
-        isAdmin={isUserAdmin(currentUser?.email)}
-        onNavigateToAdmin={() => {
-          setIsViewingArticlesIndex(false);
-          setShowAdminArticles(true);
-          setAdminArticleMode('dashboard');
-          if (typeof window !== 'undefined') {
-            window.history.pushState(null, '', '/admin/articles');
-          }
-        }}
-      />
+      <>
+        <StartupSplashOverlay />
+        <PublicArticlesIndex
+          onSelectArticle={(slug) => {
+            setIsViewingArticlesIndex(false);
+            setActiveArticleSlug(slug);
+            if (typeof window !== 'undefined') {
+              window.history.pushState(null, '', `/articles/${slug}`);
+            }
+          }}
+          onNavigateHome={() => {
+            setIsViewingArticlesIndex(false);
+            if (typeof window !== 'undefined') {
+              window.history.pushState(null, '', '/');
+            }
+            setCurrentTab('arena');
+          }}
+          onStartPractice={(route) => {
+            setIsViewingArticlesIndex(false);
+            handleStartPracticeFromArticle(route);
+          }}
+          isAdmin={isUserAdmin(currentUser?.email)}
+          onNavigateToAdmin={() => {
+            setIsViewingArticlesIndex(false);
+            setShowAdminArticles(true);
+            setAdminArticleMode('dashboard');
+            if (typeof window !== 'undefined') {
+              window.history.pushState(null, '', '/admin/articles');
+            }
+          }}
+        />
+      </>
     );
   }
 
   // 4. Render Public Crawlable SEO Page when URL matches any of the 8 SEO topic hubs
   if (activeSeoPage) {
     return (
-      <SeoPublicPage
-        pageData={activeSeoPage}
-        onNavigateHome={() => {
-          if (typeof window !== 'undefined') {
-            window.history.pushState(null, '', '/');
-          }
-          setActiveSeoSlug(null);
-          setCurrentTab('arena');
-        }}
-        onStartBattle={() => {
-          if (typeof window !== 'undefined') {
-            window.history.pushState(null, '', '/');
-          }
-          setActiveSeoSlug(null);
-          setCurrentTab('arena');
-          setShowPlayModeModal(true);
-        }}
-        onStartPractice={() => {
-          if (typeof window !== 'undefined') {
-            window.history.pushState(null, '', '/');
-          }
-          setActiveSeoSlug(null);
-          setCurrentTab('practice');
-        }}
-        onNavigateToSlug={(slug) => {
-          if (typeof window !== 'undefined') {
-            window.history.pushState(null, '', slug);
-          }
-          setActiveSeoSlug(slug);
-        }}
-      />
+      <>
+        <StartupSplashOverlay />
+        <SeoPublicPage
+          pageData={activeSeoPage}
+          onNavigateHome={() => {
+            if (typeof window !== 'undefined') {
+              window.history.pushState(null, '', '/');
+            }
+            setActiveSeoSlug(null);
+            setCurrentTab('arena');
+          }}
+          onStartBattle={() => {
+            if (typeof window !== 'undefined') {
+              window.history.pushState(null, '', '/');
+            }
+            setActiveSeoSlug(null);
+            setCurrentTab('arena');
+            setShowPlayModeModal(true);
+          }}
+          onStartPractice={() => {
+            if (typeof window !== 'undefined') {
+              window.history.pushState(null, '', '/');
+            }
+            setActiveSeoSlug(null);
+            setCurrentTab('practice');
+          }}
+          onNavigateToSlug={(slug) => {
+            if (typeof window !== 'undefined') {
+              window.history.pushState(null, '', slug);
+            }
+            setActiveSeoSlug(slug);
+          }}
+        />
+      </>
     );
   }
 

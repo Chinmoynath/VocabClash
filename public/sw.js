@@ -1,5 +1,5 @@
 // VocabClash High-Performance Service Worker for PWA, PWABuilder & Google Play TWA
-const CACHE_NAME = 'vocabclash-v2.6';
+const CACHE_NAME = 'vocabclash-v2.7';
 const OFFLINE_FALLBACK_URL = '/';
 
 const PRECACHE_ASSETS = [
