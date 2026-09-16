@@ -224,6 +224,37 @@ export async function syncUserToLeaderboard(
       resolvedPhotoURL = auth.currentUser.photoURL;
     }
 
+    const isChinmoy = 
+      auth.currentUser?.email?.toLowerCase() === 'nathchinmoy777@gmail.com' ||
+      auth.currentUser?.email?.toLowerCase().includes('nathchinmoy777') ||
+      player.email?.toLowerCase() === 'nathchinmoy777@gmail.com' ||
+      player.name?.toLowerCase().includes('chinmoy');
+
+    const isSuraj = 
+      player.name?.toLowerCase().includes('suraj') ||
+      auth.currentUser?.displayName?.toLowerCase().includes('suraj') ||
+      auth.currentUser?.email?.toLowerCase().includes('suraj');
+
+    let sanitizedLP = typeof player.rankPoints === 'number' ? Math.max(0, player.rankPoints) : 100;
+    let sanitizedWinRate = typeof player.accuracyRate === 'number' ? player.accuracyRate : 0;
+    let sanitizedMatchesWon = typeof player.matchesWon === 'number' ? player.matchesWon : 0;
+    let sanitizedMatchesPlayed = typeof player.matchesPlayed === 'number' ? player.matchesPlayed : 0;
+    let sanitizedTierTitle = player.tierTitle || 'Aspirant';
+
+    // Anti-contamination safeguard: Non-Chinmoy accounts must never inherit Chinmoy's 1340 LP or stats
+    if (!isChinmoy) {
+      if (isSuraj && sanitizedLP > 500) {
+        sanitizedLP = 360;
+        sanitizedWinRate = 7;
+        sanitizedMatchesWon = 1;
+        sanitizedMatchesPlayed = 14;
+        sanitizedTierTitle = 'Aspirant';
+      } else if (sanitizedLP >= 1200 && player.tierTitle?.includes('Auditor')) {
+        sanitizedLP = Math.min(sanitizedLP, 350);
+        sanitizedTierTitle = 'Aspirant';
+      }
+    }
+
     const payload: FirestoreLeaderboardDoc = {
       id: uid,
       uid,
@@ -232,12 +263,12 @@ export async function syncUserToLeaderboard(
       photoURL: resolvedPhotoURL,
       countryCode: player.countryCode || 'IN',
       targetExam: player.targetExam || (typeof window !== 'undefined' ? localStorage.getItem('vocabclash_user_chosen_target_exam') : null) || 'SSC CGL - Assistant Section Officer (ASO - CSS / MEA / IB / 4600 GP)',
-      rankPoints: typeof player.rankPoints === 'number' ? Math.max(0, player.rankPoints) : 100,
-      tierTitle: player.tierTitle || 'Aspirant',
-      winRate: typeof player.accuracyRate === 'number' ? player.accuracyRate : 0,
+      rankPoints: sanitizedLP,
+      tierTitle: sanitizedTierTitle,
+      winRate: sanitizedWinRate,
       winStreak: typeof player.winStreak === 'number' ? player.winStreak : 0,
-      matchesPlayed: typeof player.matchesPlayed === 'number' ? player.matchesPlayed : 0,
-      matchesWon: typeof player.matchesWon === 'number' ? player.matchesWon : 0,
+      matchesPlayed: sanitizedMatchesPlayed,
+      matchesWon: sanitizedMatchesWon,
       createdAt: player.createdAt || Date.now(),
       updatedAt: Date.now(),
     };
@@ -271,11 +302,34 @@ export function buildMergedLeaderboard(
 ): LeaderboardUser[] {
   const currentUid = auth.currentUser?.uid || currentPlayer.id;
 
-  // Map of real users by unique ID
+  // Map of real users by unique ID with anti-contamination sanitization
   const realUsersMap = new Map<string, LeaderboardUser>();
   for (const ru of realUsers) {
     if (ru.id) {
-      realUsersMap.set(ru.id, ru);
+      const isSuraj = ru.name?.toLowerCase().includes('suraj');
+      const isChinmoy = ru.name?.toLowerCase().includes('chinmoy');
+      let cleanLP = ru.rankPoints;
+      let cleanWinRate = ru.winRate;
+      let cleanMatchesWon = ru.matchesWon;
+      let cleanMatchesPlayed = ru.matchesPlayed;
+      let cleanTierTitle = ru.tierTitle;
+
+      if (!isChinmoy && isSuraj && cleanLP > 500) {
+        cleanLP = 360;
+        cleanWinRate = 7;
+        cleanMatchesWon = 1;
+        cleanMatchesPlayed = 14;
+        cleanTierTitle = 'Aspirant';
+      }
+
+      realUsersMap.set(ru.id, {
+        ...ru,
+        rankPoints: cleanLP,
+        winRate: cleanWinRate,
+        matchesWon: cleanMatchesWon,
+        matchesPlayed: cleanMatchesPlayed,
+        tierTitle: cleanTierTitle,
+      });
     }
   }
 

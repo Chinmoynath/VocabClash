@@ -67,7 +67,8 @@ import {
   getDailyChallengeHistory,
   setDailyChallengeHistoryForUser,
   clearDailyChallengeLocalCache,
-  sanitizeDailyChallengeHistory
+  sanitizeDailyChallengeHistory,
+  getTodayChallengeAttempt
 } from './services/dailyChallengeService';
 import { syncUserToLeaderboard } from './services/leaderboardService';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
@@ -139,6 +140,24 @@ const STORAGE_KEY_PLAYER = 'vocabclash_player_v5';
 const STORAGE_KEY_VAULT = 'vocabclash_vault_v2';
 const STORAGE_KEY_SUBSCRIPTION = 'vocabclash_subscription_v2';
 
+export function getPlayerStorageKey(userId?: string | null): string {
+  if (!userId || userId === 'default_user' || userId.startsWith('guest_')) {
+    return 'vocabclash_player_profile_guest';
+  }
+  return `vocabclash_player_profile_${userId}`;
+}
+
+export function cleanupLegacyUnscopedPlayerStorage(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem(STORAGE_KEY_PLAYER);
+    localStorage.removeItem('vocabclash_player_v3');
+    localStorage.removeItem('vocabclash_player_v2');
+    localStorage.removeItem('vocabclash_player_v1');
+    localStorage.removeItem('vocabclash_player_profile');
+  } catch {}
+}
+
 // Generates and persists a unique device guest ID so no two guest devices ever collide
 export function getOrCreateGuestId(): string {
   if (typeof window !== 'undefined') {
@@ -193,6 +212,126 @@ const INITIAL_PLAYER: PlayerProfile = {
   badges: ['🏛️ SSC CGL Aspirant'],
 };
 
+/**
+ * Sanitizes and repairs contaminated accounts (e.g. Suraj Kumar inheriting Chinmoy's 1340 LP).
+ * Restores genuine baseline stats while preserving earned daily challenge bonuses and preventing future leaks.
+ */
+export function sanitizeAndRepairPlayerProfile(
+  rawProfile: PlayerProfile,
+  authUser: { uid: string; email?: string | null; displayName?: string | null }
+): { player: PlayerProfile; wasRepaired: boolean } {
+  const isChinmoy = 
+    authUser.email?.toLowerCase() === 'nathchinmoy777@gmail.com' ||
+    authUser.email?.toLowerCase().includes('nathchinmoy777');
+
+  const isSuraj = 
+    authUser.email?.toLowerCase().includes('suraj') ||
+    authUser.displayName?.toLowerCase().includes('suraj') ||
+    rawProfile.name?.toLowerCase().includes('suraj');
+
+  // Case 1: Chinmoy Nath (admin/owner account)
+  if (isChinmoy) {
+    const minLP = 1265;
+    const finalLP = Math.max(rawProfile.rankPoints || 0, minLP, 1340);
+    const finalMatches = Math.max(rawProfile.matchesPlayed || 0, 32);
+    const finalWins = Math.max(rawProfile.matchesWon || 0, 28);
+    const finalTier = getTierFromLP(finalLP);
+    return {
+      player: {
+        ...rawProfile,
+        id: authUser.uid,
+        name: 'Chinmoy Nath',
+        email: 'nathchinmoy777@gmail.com',
+        rankPoints: finalLP,
+        matchesPlayed: finalMatches,
+        matchesWon: finalWins,
+        winStreak: Math.max(rawProfile.winStreak || 0, 5),
+        pyqScore: Math.max(rawProfile.pyqScore || 0, 730),
+        accuracyRate: Math.round((finalWins / finalMatches) * 100),
+        level: Math.max(rawProfile.level || 1, 34),
+        tier: finalTier,
+        tierTitle: getTierTitle(finalTier),
+        targetExam: rawProfile.targetExam || 'SSC CGL - Assistant Section Officer (ASO - CSS / MEA / IB / 4600 GP)',
+        badges: ['🏛️ SSC CGL Aspirant'],
+      },
+      wasRepaired: false,
+    };
+  }
+
+  // Case 2: Non-Chinmoy account contaminated with Chinmoy's stats
+  const isContaminated = 
+    rawProfile.tierTitle?.includes('Auditor') ||
+    rawProfile.tierTitle?.includes('Accountant') ||
+    (rawProfile.rankPoints >= 1265 && rawProfile.accuracyRate === 29 && rawProfile.matchesWon === 28) ||
+    (rawProfile.rankPoints >= 1200 && rawProfile.level >= 30) ||
+    (isSuraj && rawProfile.rankPoints > 500);
+
+  if (isContaminated) {
+    console.warn(`[ProfileSanitizer] Cross-account contamination detected for ${authUser.email || authUser.uid}. Repairing genuine stats.`);
+    
+    if (isSuraj) {
+      let dailyBonus = 0;
+      try {
+        const todayAttempt = getTodayChallengeAttempt(authUser.uid);
+        if (todayAttempt) {
+          dailyBonus = todayAttempt.rankPointsAwarded || (25 + (todayAttempt.correctCount || 0) * 2);
+        }
+      } catch {}
+
+      const baseLP = 360;
+      const repairedLP = baseLP + dailyBonus;
+      const repairedTier = getTierFromLP(repairedLP);
+      return {
+        player: {
+          ...rawProfile,
+          id: authUser.uid,
+          name: 'Suraj Kumar',
+          email: authUser.email || undefined,
+          rankPoints: repairedLP,
+          level: 20,
+          matchesPlayed: 14,
+          matchesWon: 1,
+          winStreak: 0,
+          accuracyRate: 7,
+          pyqScore: Math.min(rawProfile.pyqScore || 0, 150),
+          tier: repairedTier,
+          tierTitle: getTierTitle(repairedTier),
+          targetExam: rawProfile.targetExam || 'SSC CGL - Assistant Section Officer (ASO - CSS / MEA / IB / 4600 GP)',
+          badges: ['🏛️ SSC CGL Aspirant'],
+        },
+        wasRepaired: true,
+      };
+    } else {
+      const clampedLP = Math.min(rawProfile.rankPoints || 0, 350);
+      const clampedTier = getTierFromLP(clampedLP);
+      return {
+        player: {
+          ...rawProfile,
+          id: authUser.uid,
+          rankPoints: clampedLP,
+          level: Math.min(rawProfile.level || 1, 10),
+          tier: clampedTier,
+          tierTitle: getTierTitle(clampedTier),
+          accuracyRate: Math.min(rawProfile.accuracyRate || 0, 60),
+          badges: ['🏛️ SSC CGL Aspirant'],
+        },
+        wasRepaired: true,
+      };
+    }
+  }
+
+  // Case 3: Clean, non-contaminated user
+  return {
+    player: {
+      ...rawProfile,
+      id: authUser.uid,
+      tier: getTierFromLP(rawProfile.rankPoints || 0),
+      tierTitle: getTierTitle(getTierFromLP(rawProfile.rankPoints || 0)),
+    },
+    wasRepaired: false,
+  };
+}
+
 // Helper to sanitize and cleanse any lingering demo template state
 function sanitizeProfile(raw: any, googleUser?: FirebaseUser | null): PlayerProfile {
   const deviceGuestId = getOrCreateGuestId();
@@ -212,7 +351,7 @@ function sanitizeProfile(raw: any, googleUser?: FirebaseUser | null): PlayerProf
       name: cleanUserName || 'Govt Aspirant',
       photoURL: googleUser?.photoURL || undefined,
       email: googleUser?.email || undefined,
-      rankPoints: 100,
+      rankPoints: 0,
       pyqScore: 0,
       tier: 'Aspirant',
       tierTitle: '🥉 Govt Job Aspirant',
@@ -224,7 +363,7 @@ function sanitizeProfile(raw: any, googleUser?: FirebaseUser | null): PlayerProf
     };
   }
 
-  let rankPoints = typeof raw.rankPoints === 'number' ? Math.max(0, raw.rankPoints) : 100;
+  let rankPoints = typeof raw.rankPoints === 'number' ? Math.max(0, raw.rankPoints) : 0;
   let pyqScore = typeof raw.pyqScore === 'number' ? Math.max(0, raw.pyqScore) : 0;
   let matchesPlayed = typeof raw.matchesPlayed === 'number' ? Math.max(0, raw.matchesPlayed) : 0;
   let matchesWon = typeof raw.matchesWon === 'number' ? Math.max(0, raw.matchesWon) : 0;
@@ -232,14 +371,14 @@ function sanitizeProfile(raw: any, googleUser?: FirebaseUser | null): PlayerProf
   let accuracyRate = matchesPlayed > 0 ? Math.round((matchesWon / matchesPlayed) * 100) : 0;
   let level = Math.max(1, Math.floor(matchesPlayed / 3) + 1);
 
-  const userEmail = googleUser?.email || raw.email;
+  const userEmail = googleUser?.email;
   let effectiveName = resolvePlayerName({
     cloudName: raw.name,
     authDisplayName: googleUser?.displayName,
     email: userEmail,
   });
 
-  // Restore progress for Chinmoy Nath (admin/owner account) if accidentally wiped down to 100 LP
+  // Restore progress for Chinmoy Nath (admin/owner account) ONLY if authenticated as Chinmoy
   const isChinmoy = 
     userEmail?.toLowerCase() === 'nathchinmoy777@gmail.com' || 
     userEmail?.toLowerCase().includes('nathchinmoy777');
@@ -304,11 +443,12 @@ export function clearUserDataOnSignOut() {
 
   // 1. Reset user profile, vault, subscription, streak from localStorage
   try {
-    localStorage.removeItem(STORAGE_KEY_PLAYER);
+    localStorage.removeItem('vocabclash_player_profile_guest');
     localStorage.removeItem(STORAGE_KEY_VAULT);
     localStorage.removeItem(STORAGE_KEY_SUBSCRIPTION);
     localStorage.removeItem('vocabclash_daily_streak_v2');
     localStorage.removeItem(STORAGE_KEY_STREAK_BONUS_CLAIMED_DATE);
+    cleanupLegacyUnscopedPlayerStorage();
   } catch {}
 
   // 2. Reset daily target state & config so guest gets fresh 0-progress target
@@ -973,11 +1113,16 @@ export default function App() {
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
+        const lastActiveUid = typeof window !== 'undefined' ? localStorage.getItem('vocabclash_last_active_user_uid') : null;
         const previousUid = previousUserUidRef.current;
-        const isSwitchingUser = !!previousUid && previousUid !== user.uid;
+        const priorUid = previousUid || lastActiveUid;
+        const isSwitchingUser = !!priorUid && priorUid !== user.uid;
         if (isSwitchingUser) {
-          console.log('[Auth] Account switch detected:', previousUid, '->', user.uid, '- purging previous user local cache');
+          console.log('[Auth] Account switch detected:', priorUid, '->', user.uid, '- purging previous user local cache');
           clearUserDataOnSignOut();
+        }
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('vocabclash_last_active_user_uid', user.uid);
         }
         previousUserUidRef.current = user.uid;
         setCurrentUser(user);
@@ -988,13 +1133,13 @@ export default function App() {
         hydrateStatsFromCloud(user.uid).catch(e => console.warn('Hydrate stats error:', e));
         setIsSyncing(true);
         try {
-          // Read local player state right now before overwriting - do NOT carry over previous user's state
-          let localPlayer = isSwitchingUser ? { ...INITIAL_PLAYER } : player;
+          // Read user-scoped local player state right now before overwriting
+          let localPlayer: PlayerProfile = { ...INITIAL_PLAYER, id: user.uid };
           if (!isSwitchingUser) {
             try {
-              const localSavedRaw = localStorage.getItem(STORAGE_KEY_PLAYER);
-              if (localSavedRaw) {
-                localPlayer = JSON.parse(localSavedRaw);
+              const userScopedRaw = localStorage.getItem(getPlayerStorageKey(user.uid));
+              if (userScopedRaw) {
+                localPlayer = JSON.parse(userScopedRaw);
               }
             } catch { /* ignore */ }
           }
@@ -1015,73 +1160,43 @@ export default function App() {
               email: user.email,
             });
 
-            // Intelligently merge: preserve whichever source has higher progress
-            let mergedLP = Math.max(cloudP.rankPoints ?? 0, localPlayer.rankPoints ?? 0, 100);
-            let mergedPYQScore = Math.max(cloudP.pyqScore ?? 0, localPlayer.pyqScore ?? 0);
-            let mergedMatches = Math.max(cloudP.matchesPlayed ?? 0, localPlayer.matchesPlayed ?? 0);
-            let mergedWins = Math.max(cloudP.matchesWon ?? 0, localPlayer.matchesWon ?? 0);
-            let mergedWinStreak = Math.max(cloudP.winStreak ?? 0, localPlayer.winStreak ?? 0);
+            // SANITIZE & REPAIR: Never merge cross-account stats with Math.max!
+            // The cloud profile is the authoritative source of truth.
+            const { player: repairedPlayer, wasRepaired } = sanitizeAndRepairPlayerProfile(cloudP, user);
 
-            // Recover Chinmoy Nath's progress (developer account)
-            const isChinmoy = 
-              user.email?.toLowerCase() === 'nathchinmoy777@gmail.com' ||
-              user.email?.toLowerCase().includes('nathchinmoy777');
-
-            if (isChinmoy) {
-              resolvedName = 'Chinmoy Nath';
-              if (mergedLP < 1265) {
-                mergedLP = 1265; // Restore Auditor / Accountant 2800 GP tier (1200+ LP)
-                mergedMatches = Math.max(mergedMatches, 32);
-                mergedWins = Math.max(mergedWins, 28);
-                mergedWinStreak = Math.max(mergedWinStreak, 5);
-                mergedPYQScore = Math.max(mergedPYQScore, 730);
-              }
-            }
-
-            const mergedAccuracy = mergedMatches > 0 ? Math.round((mergedWins / mergedMatches) * 100) : 0;
-            const mergedTier = getTierFromLP(mergedLP);
-            const mergedTierTitle = getTierTitle(mergedTier);
-            const mergedLevel = Math.max(cloudP.level ?? 1, localPlayer.level ?? 1, Math.floor(mergedMatches / 3) + 1, isChinmoy ? 12 : 1);
-
-            const resolvedTargetExam = resolveTargetExam(cloudP.targetExam, localPlayer.targetExam);
+            const resolvedTargetExam = resolveTargetExam(repairedPlayer.targetExam, localPlayer.targetExam);
             if (typeof window !== 'undefined') {
               try {
                 localStorage.setItem('vocabclash_user_chosen_target_exam', resolvedTargetExam);
               } catch {}
             }
 
-            const mergedPlayer: PlayerProfile = {
+            const resolvedPlayer: PlayerProfile = {
               ...INITIAL_PLAYER,
-              ...cloudP,
+              ...repairedPlayer,
               id: user.uid,
-              name: resolvedName || cleanAuthName || localPlayer.name || 'Govt Aspirant',
-              avatar: cloudP.avatar || localPlayer.avatar || '👨‍💼',
-              country: cloudP.country || localPlayer.country || 'India',
-              countryCode: cloudP.countryCode || localPlayer.countryCode || 'IN',
+              name: resolvedName || cleanAuthName || repairedPlayer.name || 'Govt Aspirant',
+              avatar: repairedPlayer.avatar || '👨‍💼',
+              country: repairedPlayer.country || 'India',
+              countryCode: repairedPlayer.countryCode || 'IN',
               targetExam: resolvedTargetExam,
-              photoURL: cloudP.photoURL === null ? null : (cloudP.photoURL || user.photoURL || undefined),
-              email: user.email || cloudP.email || undefined,
-              rankPoints: mergedLP,
-              pyqScore: mergedPYQScore,
-              tier: mergedTier,
-              tierTitle: mergedTierTitle,
-              matchesPlayed: mergedMatches,
-              matchesWon: mergedWins,
-              winStreak: mergedWinStreak,
-              accuracyRate: mergedAccuracy,
-              level: mergedLevel,
-              bestCategory: cloudP.bestCategory || localPlayer.bestCategory || 'synonyms',
-              badges: cloudP.badges || localPlayer.badges || ['🏛️ SSC CGL Aspirant'],
-              ...(cloudP.practiceFilters || localPlayer.practiceFilters || practiceFilters
-                ? { practiceFilters: cloudP.practiceFilters || localPlayer.practiceFilters || practiceFilters }
+              photoURL: repairedPlayer.photoURL === null ? null : (repairedPlayer.photoURL || user.photoURL || undefined),
+              email: user.email || repairedPlayer.email || undefined,
+              badges: repairedPlayer.badges || ['🏛️ SSC CGL Aspirant'],
+              ...(repairedPlayer.practiceFilters || practiceFilters
+                ? { practiceFilters: repairedPlayer.practiceFilters || practiceFilters }
                 : {}),
             };
 
-            setPlayer(mergedPlayer);
+            setPlayer(resolvedPlayer);
+            try {
+              localStorage.setItem(getPlayerStorageKey(user.uid), JSON.stringify(resolvedPlayer));
+            } catch {}
 
-            if (cloudP.targetExam !== resolvedTargetExam) {
-              saveUserProfileFieldsToFirestore(user.uid, mergedPlayer, user).catch(() => {});
-              syncUserToLeaderboard(mergedPlayer, user.uid).catch(() => {});
+            // If profile was contaminated or exam updated, push repaired stats to Firestore users & leaderboard
+            if (wasRepaired || cloudP.targetExam !== resolvedTargetExam) {
+              saveUserProfileFieldsToFirestore(user.uid, resolvedPlayer, user).catch(() => {});
+              syncUserToLeaderboard(resolvedPlayer, user.uid).catch(() => {});
             }
 
             if (cloudP.practiceFilters) {
@@ -1146,11 +1261,11 @@ export default function App() {
             setStreak(mergedStreak);
             saveStreakState(mergedStreak);
 
-            // Asynchronously write merged data back to Firestore in background without blocking UI
+            // Asynchronously write clean repaired data back to Firestore in background without blocking UI
             saveUserDataToFirestore(
               user.uid,
               { 
-                player: mergedPlayer, 
+                player: resolvedPlayer, 
                 subscription: cloudData.subscription || subscription, 
                 streak: mergedStreak, 
                 savedWords: (cloudData.savedWords && cloudData.savedWords.length > 0) ? cloudData.savedWords : savedWords,
@@ -1159,27 +1274,31 @@ export default function App() {
               },
               user
             ).catch((err) => console.warn('Background sync notice:', err));
-            syncUserToLeaderboard(mergedPlayer, user.uid).catch((err) => console.warn('Leaderboard sync notice:', err));
+            syncUserToLeaderboard(resolvedPlayer, user.uid).catch((err) => console.warn('Leaderboard sync notice:', err));
           } else {
-            // First time sign-in with Google or Email: Carry over user's existing local progress!
+            // First time sign-in with Google or Email: Carry over only genuine anonymous guest progress
             const isChinmoy = 
               user.email?.toLowerCase() === 'nathchinmoy777@gmail.com' ||
               user.email?.toLowerCase().includes('nathchinmoy777');
 
-            let initialLP = Math.max(100, localPlayer.rankPoints || 100);
-            let initialPYQScore = localPlayer.pyqScore || 0;
-            let initialMatches = localPlayer.matchesPlayed || 0;
-            let initialWins = localPlayer.matchesWon || 0;
-            let initialWinStreak = localPlayer.winStreak || 0;
+            const isGenuineGuest = 
+              !localPlayer.email && 
+              typeof localPlayer.id === 'string' && 
+              localPlayer.id.startsWith('guest_') && 
+              (localPlayer.rankPoints ?? 0) < 300;
+
+            let initialLP = isGenuineGuest ? Math.max(0, localPlayer.rankPoints || 0) : 0;
+            let initialPYQScore = isGenuineGuest ? (localPlayer.pyqScore || 0) : 0;
+            let initialMatches = isGenuineGuest ? (localPlayer.matchesPlayed || 0) : 0;
+            let initialWins = isGenuineGuest ? (localPlayer.matchesWon || 0) : 0;
+            let initialWinStreak = isGenuineGuest ? (localPlayer.winStreak || 0) : 0;
 
             if (isChinmoy) {
-              if (initialLP < 1265) {
-                initialLP = 1265;
-                initialMatches = Math.max(initialMatches, 32);
-                initialWins = Math.max(initialWins, 28);
-                initialWinStreak = Math.max(initialWinStreak, 5);
-                initialPYQScore = Math.max(initialPYQScore, 730);
-              }
+              initialLP = 1340;
+              initialMatches = Math.max(initialMatches, 32);
+              initialWins = Math.max(initialWins, 28);
+              initialWinStreak = Math.max(initialWinStreak, 5);
+              initialPYQScore = Math.max(initialPYQScore, 730);
             }
 
             const initialAccuracy = initialMatches > 0 ? Math.round((initialWins / initialMatches) * 100) : 0;
@@ -1227,6 +1346,10 @@ export default function App() {
 
             setDailyChallengeHistoryForUser(user.uid, []);
             setPlayer(newPlayer);
+            try {
+              localStorage.setItem(getPlayerStorageKey(user.uid), JSON.stringify(newPlayer));
+            } catch {}
+
             saveUserDataToFirestore(
               user.uid,
               { 
@@ -1267,10 +1390,13 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Save to localStorage on change
+  // Save to user-scoped localStorage on change
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY_PLAYER, JSON.stringify(player));
-  }, [player]);
+    try {
+      const key = getPlayerStorageKey(currentUser?.uid || (player.id?.startsWith('guest_') ? null : player.id));
+      localStorage.setItem(key, JSON.stringify(player));
+    } catch {}
+  }, [player, currentUser]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY_VAULT, JSON.stringify(savedWords));
@@ -1399,6 +1525,9 @@ export default function App() {
     // 3. Instantly clear all authenticated user session data and return to guest mode
     clearUserDataOnSignOut();
     previousUserUidRef.current = null;
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('vocabclash_last_active_user_uid');
+    }
     setCurrentUser(null);
     questionReviewScheduler.setAuthUser(null);
     setPlayer({ ...INITIAL_PLAYER });
@@ -2003,7 +2132,8 @@ export default function App() {
     setPlayer(updatedPlayer);
 
     try {
-      localStorage.setItem(STORAGE_KEY_PLAYER, JSON.stringify(updatedPlayer));
+      const key = getPlayerStorageKey(currentUser?.uid || player.id);
+      localStorage.setItem(key, JSON.stringify(updatedPlayer));
     } catch { /* storage quota */ }
 
     // Fast asynchronous sync to Firestore users and leaderboard collections
