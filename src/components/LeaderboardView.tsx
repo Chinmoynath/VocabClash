@@ -1,12 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { PlayerProfile, LeaderboardUser } from '../types';
-import { 
-  getDeterministicBots, 
-  subscribeToRealLeaderboardUsers, 
-  buildMergedLeaderboard, 
-  syncUserToLeaderboard,
-  INCLUDE_BOTS_IN_RANKLIST
-} from '../services/leaderboardService';
 import { soundManager } from '../utils/audio';
 import { 
   Trophy, 
@@ -28,15 +21,85 @@ import {
 } from '../utils/cadreCategoryService';
 import { UserAvatar } from './UserAvatar';
 import { DailyChallengeCard } from './DailyChallengeCard';
+import { useRankStore, rankStore } from '../services/rankStore';
 
 interface LeaderboardViewProps {
   player: PlayerProfile;
   isPremium?: boolean;
 }
 
+const LeaderboardSkeleton: React.FC<{ player: PlayerProfile }> = ({ player }) => (
+  <div className="p-3.5 sm:p-5 lg:p-6 space-y-4 pb-8 max-w-5xl mx-auto w-full animate-pulse">
+    {/* Daily Challenge Card */}
+    <DailyChallengeCard player={player} />
+
+    {/* Top Standings Banner Skeleton */}
+    <div className="bg-slate-850/80 border border-slate-800 rounded-2xl p-3.5 space-y-2.5">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-slate-800 border border-slate-700" />
+          <div className="space-y-1.5">
+            <div className="h-4 w-28 bg-slate-800 rounded" />
+            <div className="h-3 w-36 bg-slate-800/60 rounded" />
+          </div>
+        </div>
+        <div className="text-right space-y-1.5">
+          <div className="h-2.5 w-20 bg-slate-800 rounded ml-auto" />
+          <div className="h-5 w-14 bg-slate-800 rounded ml-auto" />
+          <div className="h-2.5 w-16 bg-slate-800/60 rounded ml-auto" />
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-800">
+        <div className="bg-slate-900/60 rounded-xl p-2 border border-slate-800/80 h-10" />
+        <div className="bg-slate-900/60 rounded-xl p-2 border border-slate-800/80 h-10" />
+        <div className="bg-slate-900/60 rounded-xl p-2 border border-slate-800/80 h-10" />
+      </div>
+    </div>
+
+    {/* Tabs Skeleton */}
+    <div className="flex bg-slate-850 p-1 rounded-xl border border-slate-800 h-9" />
+
+    {/* Podium Skeleton */}
+    <div className="grid grid-cols-3 gap-2 items-stretch">
+      <div className="bg-slate-850/80 border border-slate-800 rounded-2xl p-4 h-28 flex flex-col items-center justify-center space-y-2" />
+      <div className="bg-slate-850/90 border border-amber-500/30 rounded-2xl p-4 h-32 flex flex-col items-center justify-center space-y-2" />
+      <div className="bg-slate-850/80 border border-slate-800 rounded-2xl p-4 h-28 flex flex-col items-center justify-center space-y-2" />
+    </div>
+
+    {/* Ranking List Skeleton */}
+    <div className="space-y-2">
+      <div className="h-4 w-28 bg-slate-800 rounded px-1" />
+      {[1, 2, 3, 4, 5].map((i) => (
+        <div key={i} className="p-3 rounded-2xl border border-slate-800 bg-slate-850/60 h-14 flex items-center justify-between" />
+      ))}
+    </div>
+  </div>
+);
+
 export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ player, isPremium = false }) => {
   const [activeTab, setActiveTab] = useState<'leaderboard' | 'tiers'>('leaderboard');
-  const [realUsers, setRealUsers] = useState<LeaderboardUser[]>([]);
+
+  // Read instant in-memory data from global rankStore
+  const {
+    userStats,
+    leaderboard,
+    userRank,
+    exactPercentile,
+    top10List,
+    bracketSlice,
+    nextTargetInfo,
+    isLoading,
+  } = useRankStore();
+
+  const mergedLeaderboard = leaderboard.mergedLeaderboard;
+  const totalAspirantsCount = leaderboard.totalAspirants;
+  const isInTop10 = userRank <= 10;
+
+  // Stale-While-Revalidate check on mount (does not refetch if fresh; silent background revalidation if > 3 min)
+  useEffect(() => {
+    rankStore.updatePlayer(player);
+    rankStore.checkAndRevalidateIfStale();
+  }, [player]);
 
   // Category determination
   const userCategoryKey = useMemo<ExamCategoryKey>(() => {
@@ -54,76 +117,10 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ player, isPrem
     return CATEGORY_CADRE_CONFIGS[selectedCategoryKey] || CATEGORY_CADRE_CONFIGS['SSC'];
   }, [selectedCategoryKey]);
 
-  // 1. Subscribe to real Firestore users in real-time & sync current player
-  useEffect(() => {
-    syncUserToLeaderboard(player);
-    const unsubscribe = subscribeToRealLeaderboardUsers((users) => {
-      setRealUsers(users);
-    });
-
-    return () => {
-      unsubscribe();
-    };
-  }, [player]);
-
-  // 2. Deterministic base bots kept available for matchmaking or future toggle
-  const baseBots = useMemo(() => getDeterministicBots(), []);
-
-  // 3. Build single real-player leaderboard (bots excluded per user request)
-  const mergedLeaderboard = useMemo(() => {
-    return buildMergedLeaderboard(baseBots, realUsers, player, INCLUDE_BOTS_IN_RANKLIST);
-  }, [baseBots, realUsers, player]);
-
-  const totalAspirantsCount = mergedLeaderboard.length;
-
-  // 4. Find current user's position in the merged leaderboard
-  const myIndex = useMemo(() => {
-    const idx = mergedLeaderboard.findIndex(
-      (u) => u.isCurrentUser || u.id === player.id
-    );
-    return idx !== -1 ? idx : 0;
-  }, [mergedLeaderboard, player.id]);
-
-  const currentUserEntry = mergedLeaderboard[myIndex];
-  const userRank = currentUserEntry ? currentUserEntry.rank : 1;
-  const isInTop10 = myIndex < 10;
-
-  // 5. Percentile calculation across active real players
-  const exactPercentile = useMemo(() => {
-    if (totalAspirantsCount <= 1) return 100;
-    const candidatesBelow = Math.max(0, totalAspirantsCount - userRank);
-    return Math.min(
-      99.9,
-      Math.max(1.0, (candidatesBelow / (totalAspirantsCount - 1)) * 100)
-    );
-  }, [totalAspirantsCount, userRank]);
-
-  // 6. Only show Top 10 for the primary leaderboard list
-  const top10List = useMemo(() => {
-    return mergedLeaderboard.slice(0, 10);
-  }, [mergedLeaderboard]);
-
-  // 7. Live Match Bracket (show players near the user's rank)
-  const bracketSlice = useMemo(() => {
-    if (mergedLeaderboard.length <= 1) return [];
-    const start = Math.max(0, myIndex - 2);
-    const end = Math.min(mergedLeaderboard.length, myIndex + 3);
-    return mergedLeaderboard.slice(start, end);
-  }, [mergedLeaderboard, myIndex]);
-
-  // 8. Next Higher LP target calculation (one rank directly above the current user)
-  const nextTargetInfo = useMemo(() => {
-    if (myIndex <= 0 || !mergedLeaderboard[myIndex - 1]) return null;
-    
-    const playerAbove = mergedLeaderboard[myIndex - 1];
-    const diff = playerAbove.rankPoints - player.rankPoints;
-    const lpNeeded = diff > 0 ? diff + 1 : 10;
-
-    return {
-      lpNeeded,
-      targetRank: playerAbove.rank,
-    };
-  }, [mergedLeaderboard, myIndex, player.rankPoints]);
+  // Show loading skeleton strictly on true cold first load before any data/cache exists
+  if (isLoading) {
+    return <LeaderboardSkeleton player={player} />;
+  }
 
   return (
     <div className="p-3.5 sm:p-5 lg:p-6 space-y-4 pb-8 max-w-5xl mx-auto w-full">

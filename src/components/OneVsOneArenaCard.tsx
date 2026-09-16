@@ -147,7 +147,7 @@ export const OneVsOneArenaCard: React.FC<OneVsOneArenaCardProps> = ({
         <div className="flex-1 min-w-0 bg-[#091b2a]/95 border border-[#14364f] rounded-2xl px-2.5 sm:px-4 py-2.5 sm:py-3 flex items-center justify-between divide-x divide-slate-800/80 shadow-inner">
           {/* Wins */}
           <div className="pr-1.5 sm:pr-3 text-center sm:text-left flex-1 min-w-0">
-            <div className="text-base xs:text-lg sm:text-xl md:text-2xl font-black text-white font-mono tracking-tight leading-none whitespace-nowrap">
+            <div className="text-base xs:text-lg sm:text-xl md:text-2xl font-[800] text-white font-sans tracking-[-0.02em] leading-none whitespace-nowrap">
               {stats.wins}
             </div>
             <div className="text-[10px] sm:text-xs font-bold text-emerald-400 mt-1 whitespace-nowrap">
@@ -157,7 +157,7 @@ export const OneVsOneArenaCard: React.FC<OneVsOneArenaCardProps> = ({
 
           {/* Battles */}
           <div className="px-1.5 sm:px-3 text-center sm:text-left flex-1 min-w-0">
-            <div className="text-base xs:text-lg sm:text-xl md:text-2xl font-black text-white font-mono tracking-tight leading-none whitespace-nowrap">
+            <div className="text-base xs:text-lg sm:text-xl md:text-2xl font-[800] text-white font-sans tracking-[-0.02em] leading-none whitespace-nowrap">
               {stats.battles}
             </div>
             <div className="text-[10px] sm:text-xs font-medium text-slate-400 mt-1 whitespace-nowrap">
@@ -167,7 +167,7 @@ export const OneVsOneArenaCard: React.FC<OneVsOneArenaCardProps> = ({
 
           {/* Win Rate */}
           <div className="pl-1.5 sm:pl-3 text-center sm:text-left flex-1 min-w-0">
-            <div className="text-base xs:text-lg sm:text-xl md:text-2xl font-black text-white font-mono tracking-tight leading-none whitespace-nowrap">
+            <div className="text-base xs:text-lg sm:text-xl md:text-2xl font-[800] text-white font-sans tracking-[-0.02em] leading-none whitespace-nowrap">
               {stats.winRateFormatted}
             </div>
             <div className="text-[10px] sm:text-xs font-bold text-cyan-400 mt-1 whitespace-nowrap">

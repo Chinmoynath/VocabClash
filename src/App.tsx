@@ -71,6 +71,7 @@ import {
   getTodayChallengeAttempt
 } from './services/dailyChallengeService';
 import { syncUserToLeaderboard } from './services/leaderboardService';
+import { rankStore } from './services/rankStore';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { AndroidDeviceShell } from './components/AndroidDeviceShell';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -439,7 +440,7 @@ const INITIAL_SUBSCRIPTION: UserSubscription = {
  * Purge all user-specific data from local caches and reset all managers upon user sign out
  * Ensures guest starts completely fresh with 0 questions, 0 daily target progress, and no lingering stats
  */
-export function clearUserDataOnSignOut() {
+export function clearUserDataOnSignOut(specificUid?: string | null) {
   if (typeof window === 'undefined') return;
 
   // 1. Reset user profile, vault, subscription, streak from localStorage
@@ -450,7 +451,29 @@ export function clearUserDataOnSignOut() {
     localStorage.removeItem('vocabclash_daily_streak_v2');
     localStorage.removeItem(STORAGE_KEY_STREAK_BONUS_CLAIMED_DATE);
     cleanupLegacyUnscopedPlayerStorage();
+
+    if (specificUid) {
+      localStorage.removeItem(getPlayerStorageKey(specificUid));
+      localStorage.removeItem(`vocabclash:user:${specificUid}:stats`);
+    }
+
+    // Clean up any remaining namespaced keys for authenticated user
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && (k.startsWith('vocabclash:user:') || k.startsWith('vocabclash_player_profile_'))) {
+        if (specificUid && k.includes(specificUid)) {
+          keysToRemove.push(k);
+        } else if (!specificUid && !k.endsWith('_guest')) {
+          keysToRemove.push(k);
+        }
+      }
+    }
+    keysToRemove.forEach(k => localStorage.removeItem(k));
   } catch {}
+
+  // Reset global in-memory rank store and unsubscribe Firestore listeners
+  rankStore.handleLogout(specificUid);
 
   // 2. Reset daily target state & config so guest gets fresh 0-progress target
   resetDailyTargetState();
@@ -1190,6 +1213,7 @@ export default function App() {
             };
 
             setPlayer(resolvedPlayer);
+            rankStore.handleAuthChange(user, resolvedPlayer);
             try {
               localStorage.setItem(getPlayerStorageKey(user.uid), JSON.stringify(resolvedPlayer));
             } catch {}
@@ -1347,6 +1371,7 @@ export default function App() {
 
             setDailyChallengeHistoryForUser(user.uid, []);
             setPlayer(newPlayer);
+            rankStore.handleAuthChange(user, newPlayer);
             try {
               localStorage.setItem(getPlayerStorageKey(user.uid), JSON.stringify(newPlayer));
             } catch {}
@@ -1374,12 +1399,13 @@ export default function App() {
       } else {
         // If transitioning from a logged-in user to null (e.g. sign out occurred or token revoked)
         if (previousUserUidRef.current) {
-          clearUserDataOnSignOut();
+          clearUserDataOnSignOut(previousUserUidRef.current);
           setPlayer({ ...INITIAL_PLAYER });
           setSubscription({ ...INITIAL_SUBSCRIPTION });
           setSavedWords([]);
           setStreak(getInitialStreak());
         }
+        rankStore.handleLogout(previousUserUidRef.current);
         previousUserUidRef.current = null;
         setCurrentUser(null);
         questionReviewScheduler.setAuthUser(null);
@@ -1389,6 +1415,11 @@ export default function App() {
     });
 
     return () => unsubscribe();
+  }, []);
+
+  // Synchronize player state into global rank store on initial mount
+  useEffect(() => {
+    rankStore.updatePlayer(player);
   }, []);
 
   // Save to user-scoped localStorage on change
@@ -1524,7 +1555,8 @@ export default function App() {
     }
 
     // 3. Instantly clear all authenticated user session data and return to guest mode
-    clearUserDataOnSignOut();
+    clearUserDataOnSignOut(userToSignOut?.uid);
+    rankStore.handleLogout(userToSignOut?.uid);
     previousUserUidRef.current = null;
     if (typeof window !== 'undefined') {
       localStorage.removeItem('vocabclash_last_active_user_uid');
@@ -1830,6 +1862,7 @@ export default function App() {
     };
 
     setPlayer(updatedPlayer);
+    rankStore.handleBattleCompleted(updatedPlayer, currentUser?.uid);
     syncUserToLeaderboard(updatedPlayer, currentUser?.uid).catch(() => {});
 
     setMatchState(prev => prev ? {
@@ -2040,6 +2073,7 @@ export default function App() {
       };
 
       setPlayer(updatedPlayer);
+      rankStore.handleBattleCompleted(updatedPlayer, currentUser?.uid);
 
       // Instantly persist penalty to Firestore if user is authenticated
       if (currentUser) {
@@ -2101,6 +2135,7 @@ export default function App() {
     };
 
     setPlayer(cleanPlayer);
+    rankStore.updatePlayer(cleanPlayer);
 
     if (currentUser) {
       setIsSyncing(true);
@@ -2131,6 +2166,7 @@ export default function App() {
     };
 
     setPlayer(updatedPlayer);
+    rankStore.updatePlayer(updatedPlayer);
 
     try {
       const key = getPlayerStorageKey(currentUser?.uid || player.id);
@@ -2155,12 +2191,14 @@ export default function App() {
       const newLP = prev.rankPoints + amount;
       const newTier = getTierFromLP(newLP);
       const newTierTitle = getTierTitle(newTier);
-      return {
+      const updated = {
         ...prev,
         rankPoints: newLP,
         tier: newTier,
         tierTitle: newTierTitle,
       };
+      rankStore.updatePlayer(updated);
+      return updated;
     });
   };
 
