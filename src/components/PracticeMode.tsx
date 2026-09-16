@@ -95,6 +95,8 @@ interface PracticeModeProps {
   onReviewMistakes?: () => void;
   onExitCustomQueue?: () => void;
   isActive?: boolean;
+  showFilterGuidance?: boolean;
+  onFilterGuidanceDismissed?: () => void;
 }
 
 export const STORAGE_KEY_ACTIVE_DRILL = 'vocabclash_active_drill_question_v1';
@@ -239,6 +241,8 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
   onReviewMistakes,
   onExitCustomQueue,
   isActive = true,
+  showFilterGuidance = false,
+  onFilterGuidanceDismissed,
 }) => {
   const [category, setCategory] = useState<QuestionCategory | 'mixed'>(() => {
     return categoryProp || getStoredPyqFilterPreferences().category;
@@ -1365,6 +1369,9 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
                   id="practice-filter-button"
                   onClick={() => {
                     soundManager.playTap();
+                    if (showFilterGuidance) {
+                      onFilterGuidanceDismissed?.();
+                    }
                     if (!isFilterOpen) {
                       setPendingCategory(category);
                       setPendingExam(exam);
@@ -1373,7 +1380,9 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
                     setIsFilterOpen(prev => !prev);
                   }}
                   className={`flex items-center justify-center gap-1 sm:gap-1.5 px-2 py-1 sm:px-2.5 sm:py-1 rounded-xl border text-xs font-bold transition-all shadow-sm cursor-pointer select-none active:scale-95 shrink-0 ${
-                    isFilterOpen || normalizeFilterToFamily(exam) !== 'all'
+                    showFilterGuidance && !isFilterOpen
+                      ? 'bg-amber-950/70 border-amber-400 text-amber-300 ring-2 ring-amber-400/80 shadow-[0_0_15px_rgba(245,158,11,0.4)]'
+                      : isFilterOpen || normalizeFilterToFamily(exam) !== 'all'
                       ? 'bg-cyan-950/60 border-cyan-500/70 text-cyan-300 ring-1 ring-cyan-500/40'
                       : 'bg-slate-850 hover:bg-slate-800 border-slate-700/80 text-slate-300 hover:text-white'
                   }`}
@@ -1395,6 +1404,41 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
                   </span>
                   <ChevronDown className={`w-3 h-3 text-slate-400 transition-transform duration-200 shrink-0 ${isFilterOpen ? 'rotate-180 text-cyan-400' : ''}`} />
                 </button>
+
+                {/* 🎯 Subtle Animated Filter Guidance Pointer (Target / Exam Filter Education) */}
+                {showFilterGuidance && !isFilterOpen && (
+                  <div 
+                    id="pyq-filter-guidance-container"
+                    className="absolute right-0 top-full mt-2 z-40 flex flex-col items-end pointer-events-auto select-none"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      soundManager.playTap();
+                      onFilterGuidanceDismissed?.();
+                      setPendingCategory(category);
+                      setPendingExam(exam);
+                      setIsAppliedAnimation(false);
+                      setIsFilterOpen(true);
+                    }}
+                  >
+                    {/* Pulsing Upward Pointer Arrow */}
+                    <div className="mr-5 mb-1 text-amber-400 animate-bounce flex items-center justify-center">
+                      <svg className="w-5 h-5 drop-shadow-[0_2px_8px_rgba(245,158,11,0.8)]" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 3L4 11h5v10h6V11h5L12 3z" />
+                      </svg>
+                    </div>
+
+                    {/* Compact Explanatory Tooltip Card */}
+                    <div className="bg-[#090D24]/95 border border-amber-500/80 rounded-xl p-2 sm:p-2.5 shadow-[0_12px_32px_rgba(0,0,0,0.85)] text-right backdrop-blur-md max-w-[210px] sm:max-w-[240px] cursor-pointer hover:border-amber-400 transition-all ring-1 ring-amber-400/30 active:scale-95">
+                      <div className="text-[11px] font-extrabold text-amber-300 flex items-center justify-end gap-1">
+                        <span>Tap to choose target exam</span>
+                        <Target className="w-3 h-3 text-amber-400 shrink-0" />
+                      </div>
+                      <div className="text-[10px] text-slate-300 mt-0.5 leading-snug">
+                        Filter by SSC, Banking, Defence, or DSSSB
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Dropdown Popover */}
                 {isFilterOpen && (

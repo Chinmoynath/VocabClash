@@ -826,6 +826,7 @@ export default function App() {
     }
     return false;
   });
+  const [shouldShowPyqFilterGuidance, setShouldShowPyqFilterGuidance] = useState<boolean>(false);
   const [showPlayModeModal, setShowPlayModeModal] = useState<boolean>(false);
   const [showFriendLobbyModal, setShowFriendLobbyModal] = useState<boolean>(false);
   const [showOfflineWarningModal, setShowOfflineWarningModal] = useState<boolean>(false);
@@ -2747,6 +2748,13 @@ export default function App() {
                   setSscTop100InitialCorrect(0);
                   setCurrentTab(wasTop100 ? 'arena' : 'ai_coach');
                 }}
+                showFilterGuidance={shouldShowPyqFilterGuidance}
+                onFilterGuidanceDismissed={() => {
+                  setShouldShowPyqFilterGuidance(false);
+                  try {
+                    localStorage.setItem('vocabclash_filter_guided_completed_v1', 'true');
+                  } catch {}
+                }}
               />
             </div>
 
@@ -3003,6 +3011,20 @@ export default function App() {
       <OnboardingTourModal
         isOpen={showTourModal}
         onClose={() => setShowTourModal(false)}
+        onStartPyq={() => {
+          setShowTourModal(false);
+          setCurrentTab('practice');
+          if (typeof window !== 'undefined') {
+            try {
+              const alreadyGuided = localStorage.getItem('vocabclash_filter_guided_completed_v1');
+              if (!alreadyGuided) {
+                setShouldShowPyqFilterGuidance(true);
+              }
+            } catch {
+              setShouldShowPyqFilterGuidance(true);
+            }
+          }
+        }}
         onStartBattle={() => {
           setShowTourModal(false);
           handleStartMatchmaking('1v1_ranked');
