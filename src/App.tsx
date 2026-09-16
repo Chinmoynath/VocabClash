@@ -1114,12 +1114,48 @@ export default function App() {
             mode: (matchState.mode as any) || '1v1_ranked',
             isGuest: !currentUser,
             isRealPlayer: Boolean(matchState.isRealPlayer),
-            roundCount: matchState.questions.length,
+            roundCount: matchState.questions?.length || 5,
             currentQuestionIndex: matchState.currentQuestionIndex,
-            questionsAnswered: matchState.playerAnswers.length,
+            questionsAnswered: matchState.playerAnswers?.length || 0,
             reason: 'window_close',
             userId: currentUser?.uid,
           });
+
+          // Record as definitive loss in 30-day battle history
+          battleHistoryService.recordMatch({
+            id: matchState.matchId,
+            timestamp: Date.now(),
+            mode: (matchState.mode as any) || '1v1_ranked',
+            category: matchState.categoryFilter,
+            exam: matchState.examFilter,
+            playerScore: matchState.playerScore,
+            opponentScore: matchState.opponentScore,
+            opponentName: matchState.opponent?.name || 'Opponent',
+            opponentAvatar: matchState.opponent?.avatar,
+            isWin: false,
+            isDraw: false,
+            lpDelta: -15,
+          });
+
+          // Deduct -15 LP and increment matchesPlayed in local cache
+          const nextMatchesPlayed = (player.matchesPlayed || 0) + 1;
+          const nextMatchesWon = player.matchesWon || 0;
+          const nextLP = Math.max(0, (player.rankPoints || 0) - 15);
+          const nextAccuracy = Math.round((nextMatchesWon / nextMatchesPlayed) * 100);
+          const localUpdated: PlayerProfile = {
+            ...player,
+            matchesPlayed: nextMatchesPlayed,
+            matchesWon: nextMatchesWon,
+            rankPoints: nextLP,
+            winStreak: 0,
+            accuracyRate: nextAccuracy,
+          };
+          localStorage.setItem('vocabclash_user_profile', JSON.stringify(localUpdated));
+
+          if (matchState.isRealPlayer && (matchState.realRoomId || matchState.matchId)) {
+            const rId = matchState.realRoomId || matchState.matchId;
+            forfeitLiveRoom(rId, player.id, matchState.opponent?.id).catch(() => {});
+          }
         } catch {}
       }
     };
@@ -1127,7 +1163,7 @@ export default function App() {
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, [matchState, isMatchCompleted, currentUser]);
+  }, [matchState, isMatchCompleted, currentUser, player]);
 
   // Listen to Firebase Auth state & sync with Google Account
   const [sessionLoaded, setSessionLoaded] = useState<boolean>(false);
@@ -2062,8 +2098,9 @@ export default function App() {
       const newTier = getTierFromLP(newLP);
       const newTierTitle = getTierTitle(newTier);
 
-      const nextMatchesPlayed = player.matchesPlayed + 1;
-      const nextAccuracy = Math.round((player.matchesWon / nextMatchesPlayed) * 100);
+      const nextMatchesPlayed = (player.matchesPlayed || 0) + 1;
+      const nextMatchesWon = player.matchesWon || 0; // Won matches remain unchanged, increasing loss count
+      const nextAccuracy = Math.round((nextMatchesWon / nextMatchesPlayed) * 100);
 
       const updatedPlayer: PlayerProfile = {
         ...player,
@@ -2071,6 +2108,7 @@ export default function App() {
         tier: newTier,
         tierTitle: newTierTitle,
         matchesPlayed: nextMatchesPlayed,
+        matchesWon: nextMatchesWon,
         winStreak: 0, // Forfeiting breaks active win streak
         accuracyRate: nextAccuracy,
       };
@@ -2090,11 +2128,11 @@ export default function App() {
       // If it's a real live room, broadcast forfeit result to opponent in Firestore
       if (matchState.isRealPlayer && (matchState.realRoomId || matchState.matchId)) {
         const rId = matchState.realRoomId || matchState.matchId;
-        forfeitLiveRoom(rId, player.id).catch(err => console.warn('Failed to broadcast room forfeit:', err));
+        forfeitLiveRoom(rId, player.id, matchState.opponent?.id).catch(err => console.warn('Failed to broadcast room forfeit:', err));
       }
 
       // Display floating forfeit penalty notification
-      setForfeitNotice('⚠️ Match Forfeited: -15 LP deducted & win streak reset');
+      setForfeitNotice('⚠️ Match Forfeited (Counted as Loss): -15 LP deducted & win streak reset');
       setTimeout(() => {
         setForfeitNotice(null);
       }, 4500);

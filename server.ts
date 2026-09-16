@@ -944,14 +944,22 @@ app.post('/api/match/room/sync', (req, res) => {
         }
       }
 
-      // Check for dual completion
+      // Check for dual completion or forfeit
       if (room.completedPlayers && (room.completedPlayers.length >= 2 || (isLastQuestion && room.forfeitedBy))) {
         const p1Id = room.player1?.id;
         const p2Id = room.player2?.id;
         const p1Score = (p1Id ? room.scores?.[p1Id] : 0) ?? 0;
         const p2Score = (p2Id ? room.scores?.[p2Id] : 0) ?? 0;
-        const winnerId = p1Score > p2Score ? p1Id : (p2Score > p1Score ? p2Id : 'draw');
-        const loserId = winnerId === p1Id ? p2Id : (winnerId === p2Id ? p1Id : '');
+        
+        let winnerId = '';
+        let loserId = '';
+        if (room.forfeitedBy) {
+          loserId = room.forfeitedBy;
+          winnerId = loserId === p1Id ? (p2Id || '') : (p1Id || '');
+        } else {
+          winnerId = p1Score > p2Score ? p1Id : (p2Score > p1Score ? p2Id : 'draw');
+          loserId = winnerId === p1Id ? p2Id : (winnerId === p2Id ? p1Id : '');
+        }
 
         room.status = 'completed';
         room.finalResult = {
@@ -984,7 +992,7 @@ app.post('/api/match/room/sync', (req, res) => {
   }
 });
 
-// Live Room Forfeit Endpoint (Player leaves, match continues for opponent)
+// Live Room Forfeit Endpoint (Forfeiting player automatically takes a loss, non-forfeiting opponent wins)
 app.post('/api/match/room/forfeit', (req, res) => {
   try {
     const { roomId, forfeitingPlayerId } = req.body;
@@ -994,6 +1002,22 @@ app.post('/api/match/room/forfeit', (req, res) => {
     const room = serverLiveRooms.get(roomId);
     if (room) {
       room.forfeitedBy = forfeitingPlayerId;
+      const p1Id = room.player1?.id;
+      const p2Id = room.player2?.id;
+      const winnerId = forfeitingPlayerId === p1Id ? p2Id : p1Id;
+      const p1Score = (p1Id ? room.scores?.[p1Id] : 0) ?? 0;
+      const p2Score = (p2Id ? room.scores?.[p2Id] : 0) ?? 0;
+
+      room.status = 'completed';
+      room.finalResult = {
+        winnerId: winnerId || '',
+        loserId: forfeitingPlayerId,
+        player1FinalScore: p1Score,
+        player2FinalScore: p2Score,
+        player1LPChange: forfeitingPlayerId === p1Id ? -15 : 30,
+        player2LPChange: forfeitingPlayerId === p2Id ? -15 : 30,
+        finalised: true,
+      };
       room.updatedAt = Date.now();
       serverLiveRooms.set(roomId, room);
     }

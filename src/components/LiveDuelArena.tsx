@@ -365,7 +365,7 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
     } catch {}
 
     if (isRealMatch && roomId) {
-      forfeitLiveRoom(roomId, myPlayerId).catch(() => {});
+      forfeitLiveRoom(roomId, myPlayerId, oppPlayerId).catch(() => {});
       const finalResult: LiveRoomFinalResult = {
         winnerId: oppPlayerId,
         loserId: myPlayerId,
@@ -431,18 +431,19 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
           hasCompletedRef.current = true;
           onCompleteMatch(liveRoom.finalResult, finalScoresSnapshot);
         } else if (opponentLeft || liveRoom?.forfeitedBy) {
-          // Opponent left! Current scores determine who won
+          // Opponent forfeited or left! The remaining active player is the definite winner
           const pScore = currentLiveScoresRef.current.playerScore;
           const oScore = currentLiveScoresRef.current.opponentScore;
-          const winnerId = pScore > oScore ? myPlayerId : (oScore > pScore ? oppPlayerId : 'draw');
-          const loserId = winnerId === myPlayerId ? oppPlayerId : (winnerId === oppPlayerId ? myPlayerId : '');
+          const forfeiter = liveRoom?.forfeitedBy || (opponentLeft ? oppPlayerId : myPlayerId);
+          const winnerId = forfeiter === oppPlayerId ? myPlayerId : oppPlayerId;
+          const loserId = forfeiter;
           const finalResult: LiveRoomFinalResult = {
             winnerId,
             loserId,
             player1FinalScore: pScore,
             player2FinalScore: oScore,
-            player1LPChange: winnerId === myPlayerId ? 30 : (winnerId === 'draw' ? 5 : -15),
-            player2LPChange: winnerId === oppPlayerId ? 30 : (winnerId === 'draw' ? 5 : -15),
+            player1LPChange: winnerId === myPlayerId ? 30 : -15,
+            player2LPChange: winnerId === oppPlayerId ? 30 : -15,
             finalised: true,
           };
           hasCompletedRef.current = true;
@@ -617,20 +618,21 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
   useEffect(() => {
     if (!isWaitingForOpponent || !isRealMatch || !roomId) return;
 
-    // If opponent already left, immediately finalize based on score
+    // If opponent already left or forfeited, immediately finalize as victory for remaining active player
     if (opponentLeft || liveRoom?.forfeitedBy) {
       if (!hasCompletedRef.current) {
         const pScore = currentLiveScoresRef.current.playerScore;
         const oScore = currentLiveScoresRef.current.opponentScore;
-        const winnerId = pScore > oScore ? myPlayerId : (oScore > pScore ? oppPlayerId : 'draw');
-        const loserId = winnerId === myPlayerId ? oppPlayerId : (winnerId === oppPlayerId ? myPlayerId : '');
+        const forfeiter = liveRoom?.forfeitedBy || (opponentLeft ? oppPlayerId : myPlayerId);
+        const winnerId = forfeiter === oppPlayerId ? myPlayerId : oppPlayerId;
+        const loserId = forfeiter;
         const finalResult: LiveRoomFinalResult = {
           winnerId,
           loserId,
           player1FinalScore: pScore,
           player2FinalScore: oScore,
-          player1LPChange: winnerId === myPlayerId ? 30 : (winnerId === 'draw' ? 5 : -15),
-          player2LPChange: winnerId === oppPlayerId ? 30 : (winnerId === 'draw' ? 5 : -15),
+          player1LPChange: winnerId === myPlayerId ? 30 : -15,
+          player2LPChange: winnerId === oppPlayerId ? 30 : -15,
           finalised: true,
         };
         hasCompletedRef.current = true;
@@ -1431,7 +1433,7 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
                   soundManager.playWrong();
                   setShowLeaveConfirm(false);
                   if (isRealMatch && roomId) {
-                    forfeitLiveRoom(roomId, myPlayerId).catch(console.warn);
+                    forfeitLiveRoom(roomId, myPlayerId, oppPlayerId).catch(console.warn);
                   }
                   onLeaveMatch();
                 }}

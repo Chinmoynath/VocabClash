@@ -764,8 +764,15 @@ export async function submitPlayerAnswerToLiveRoom(
 
         // If both players have completed, or if one player finished after opponent left:
         if (completedPlayers.length >= 2 || (isLastQuestion && opponentLeft)) {
-          const winnerId = p1Score > p2Score ? p1Id : (p2Score > p1Score ? p2Id : 'draw');
-          const loserId = winnerId === p1Id ? p2Id : (winnerId === p2Id ? p1Id : '');
+          let winnerId = '';
+          let loserId = '';
+          if (opponentLeft && room.forfeitedBy) {
+            loserId = room.forfeitedBy;
+            winnerId = loserId === p1Id ? (p2Id || '') : (p1Id || '');
+          } else {
+            winnerId = p1Score > p2Score ? p1Id : (p2Score > p1Score ? p2Id : 'draw');
+            loserId = winnerId === p1Id ? p2Id : (winnerId === p2Id ? p1Id : '');
+          }
 
           updatedRoom.status = 'completed';
           updatedRoom.finalResult = {
@@ -916,15 +923,27 @@ export async function forceFinalizeLiveRoom(
 
 export async function forfeitLiveRoom(
   roomId: string,
-  forfeitingPlayerId: string
+  forfeitingPlayerId: string,
+  opponentPlayerId?: string
 ): Promise<void> {
   const roomRef = doc(db, 'live_rooms', roomId);
   if (auth.currentUser) {
     try {
-      await setDoc(roomRef, {
+      const payload: Record<string, any> = {
         forfeitedBy: forfeitingPlayerId,
+        status: 'completed',
         updatedAt: Date.now(),
-      }, { merge: true });
+      };
+      if (opponentPlayerId) {
+        payload.finalResult = {
+          winnerId: opponentPlayerId,
+          loserId: forfeitingPlayerId,
+          player1LPChange: forfeitingPlayerId.includes('1') ? -15 : 30,
+          player2LPChange: forfeitingPlayerId.includes('1') ? 30 : -15,
+          finalised: true,
+        };
+      }
+      await setDoc(roomRef, payload, { merge: true });
     } catch (e) {
       console.warn('[LiveRoom] Forfeit sync warning:', e);
     }

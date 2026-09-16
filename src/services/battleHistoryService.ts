@@ -99,7 +99,7 @@ export class BattleHistoryService {
     const profileAccuracy = typeof player?.accuracyRate === 'number' ? Math.max(0, player.accuracyRate) : 0;
     
     let profileWins = typeof player?.matchesWon === 'number' ? Math.max(0, player.matchesWon) : 0;
-    if (profileWins === 0 && profileMatches > 0 && profileAccuracy > 0) {
+    if (typeof player?.matchesWon !== 'number' && profileMatches > 0 && profileAccuracy > 0) {
       profileWins = Math.round(profileMatches * (profileAccuracy / 100));
     }
 
@@ -118,13 +118,13 @@ export class BattleHistoryService {
 
     // 3. Take whichever is higher/more comprehensive so we NEVER wipe out user's career progress
     const battles = Math.max(effectiveBaselineMatches, recentBattles);
-    let wins = Math.max(profileWins, recentWins);
+    let wins = typeof player?.matchesWon === 'number' && battles === effectiveBaselineMatches
+      ? profileWins
+      : Math.max(profileWins, recentWins);
 
     // 4. Determine win rate accurately
     let winRate = 0;
-    if (profileAccuracy > 0 && battles === effectiveBaselineMatches) {
-      winRate = profileAccuracy;
-    } else if (battles > 0) {
+    if (battles > 0) {
       winRate = (wins / battles) * 100;
     }
 
