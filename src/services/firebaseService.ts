@@ -32,7 +32,8 @@ import {
   getDoc, 
   setDoc,
   deleteDoc,
-  getDocFromServer
+  getDocFromServer,
+  onSnapshot
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { PlayerProfile, UserSubscription, DailyStreakState, SavedWord, QuestionCategory, ExamType } from '../types';
@@ -851,6 +852,39 @@ export async function fetchUserDataFromFirestore(uid: string, timeoutMs: number 
       } catch { /* ignore */ }
     }
     return null;
+  }
+}
+
+/**
+ * Real-time listener for cross-device synchronization.
+ * When a user solves a question on mobile/desktop, the cloud update is instantly
+ * pushed to all other active devices without needing a manual refresh.
+ */
+export function subscribeToUserCloudData(
+  uid: string,
+  onUpdate: (data: UserCloudData) => void
+): () => void {
+  if (!uid || uid === 'default_user' || isFirestoreQuotaExhausted()) {
+    return () => {};
+  }
+  try {
+    const userDocRef = doc(db, 'users', uid);
+    const unsubscribe = onSnapshot(
+      userDocRef,
+      (docSnap) => {
+        if (docSnap.exists()) {
+          const data = docSnap.data() as UserCloudData;
+          onUpdate(data);
+        }
+      },
+      (err) => {
+        console.warn('[User Cloud Listener Notice]:', err);
+      }
+    );
+    return unsubscribe;
+  } catch (err) {
+    console.warn('[User Cloud Listener Setup]:', err);
+    return () => {};
   }
 }
 

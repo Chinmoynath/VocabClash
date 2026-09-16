@@ -5,6 +5,7 @@ import { questionReviewScheduler } from '../services/questionReviewScheduler';
 import { recordAttemptEvent } from '../services/attemptTrackingService';
 import { trackDueRevisionStart, trackDueRevisionComplete } from '../services/analyticsService';
 import { soundManager } from '../utils/audio';
+import { triggerGlobalQuestionSolved } from '../utils/streakManager';
 import { resolveRevisionCard, NormalizedMistakeVaultItem } from '../utils/mistakeVaultCardResolver';
 import { 
   Brain, 
@@ -88,6 +89,9 @@ export const DueRevisionSessionModal: React.FC<DueRevisionSessionModalProps> = (
 
     // 1. Authoritative Spaced Repetition Record
     questionReviewScheduler.recordAttempt(currentItem.question, isCorrect, responseTimeMs);
+
+    // Broadcast question solved to daily streak & targets
+    triggerGlobalQuestionSolved();
 
     // 2. Authoritative Attempt Log
     recordAttemptEvent({

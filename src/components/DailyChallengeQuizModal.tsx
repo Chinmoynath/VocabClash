@@ -21,6 +21,7 @@ import {
   formatDuration 
 } from '../services/dailyChallengeService';
 import { soundManager } from '../utils/audio';
+import { triggerGlobalQuestionSolved } from '../utils/streakManager';
 
 interface DailyChallengeQuizModalProps {
   isOpen: boolean;
@@ -163,6 +164,9 @@ export const DailyChallengeQuizModal: React.FC<DailyChallengeQuizModalProps> = (
 
     setSelectedOption(index);
     setIsAnswerRevealed(true);
+
+    // Broadcast solve so daily streak and targets update instantly across app & devices
+    triggerGlobalQuestionSolved();
 
     const isCorrect = index === currentQ.correctIndex;
     if (isCorrect) {

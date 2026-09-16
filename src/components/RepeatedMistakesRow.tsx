@@ -590,9 +590,13 @@ ${selectedWordDetail.rootEtymology ? `🧬 Root: ${selectedWordDetail.rootEtymol
 
             {/* Modal Footer with Close Button */}
             <div className="p-3 sm:p-4 border-t border-slate-800 bg-slate-900 flex items-center justify-between gap-2 shrink-0">
-              <span className="text-xs text-slate-500">
-                Showing {modalFilteredWords.length} of {allMissingWords.length} missing words
-              </span>
+              {searchFilter ? (
+                <span className="text-xs text-slate-400 font-medium">
+                  {modalFilteredWords.length} {modalFilteredWords.length === 1 ? 'word' : 'words'} found
+                </span>
+              ) : (
+                <div />
+              )}
               <button
                 onClick={() => {
                   soundManager.playTap();

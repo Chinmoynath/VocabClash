@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   PlayerProfile, 
@@ -31,6 +31,9 @@ import {
   saveStreakState, 
   evaluateStreakIntegrity,
   recordDailyQuestionSolved,
+  calculateStreakFromHistory,
+  mergeStreakStates,
+  getTodayDateString,
   STORAGE_KEY_STREAK_BONUS_CLAIMED_DATE
 } from './utils/streakManager';
 import { 
@@ -52,6 +55,7 @@ import {
   saveUserDataToFirestore, 
   saveUserProfileFieldsToFirestore,
   fetchUserDataFromFirestore,
+  subscribeToUserCloudData,
   checkRedirectAuthResult,
   getPendingRegistrationDisplayName,
   setPendingRegistrationDisplayName
@@ -989,7 +993,7 @@ export default function App() {
             let mergedPYQScore = Math.max(cloudP.pyqScore ?? 0, localPlayer.pyqScore ?? 0);
             let mergedMatches = Math.max(cloudP.matchesPlayed ?? 0, localPlayer.matchesPlayed ?? 0);
             let mergedWins = Math.max(cloudP.matchesWon ?? 0, localPlayer.matchesWon ?? 0);
-            let mergedStreak = Math.max(cloudP.winStreak ?? 0, localPlayer.winStreak ?? 0);
+            let mergedWinStreak = Math.max(cloudP.winStreak ?? 0, localPlayer.winStreak ?? 0);
 
             // Recover Chinmoy Nath's progress (developer account)
             const isChinmoy = 
@@ -1002,7 +1006,7 @@ export default function App() {
                 mergedLP = 1265; // Restore Auditor / Accountant 2800 GP tier (1200+ LP)
                 mergedMatches = Math.max(mergedMatches, 32);
                 mergedWins = Math.max(mergedWins, 28);
-                mergedStreak = Math.max(mergedStreak, 5);
+                mergedWinStreak = Math.max(mergedWinStreak, 5);
                 mergedPYQScore = Math.max(mergedPYQScore, 730);
               }
             }
@@ -1036,7 +1040,7 @@ export default function App() {
               tierTitle: mergedTierTitle,
               matchesPlayed: mergedMatches,
               matchesWon: mergedWins,
-              winStreak: mergedStreak,
+              winStreak: mergedWinStreak,
               accuracyRate: mergedAccuracy,
               level: mergedLevel,
               bestCategory: cloudP.bestCategory || localPlayer.bestCategory || 'synonyms',
@@ -1061,10 +1065,14 @@ export default function App() {
             }
 
             if (cloudData.subscription) setSubscription(cloudData.subscription);
-            if (cloudData.streak) {
-              const checkedStreak = evaluateStreakIntegrity(cloudData.streak);
-              setStreak(checkedStreak);
-            }
+
+            const isChinmoyUser = 
+              user.email?.toLowerCase() === 'nathchinmoy777@gmail.com' ||
+              user.email?.toLowerCase().includes('nathchinmoy777');
+
+            // Intelligently merge streak states across devices using union of active days
+            const mergedStreak = mergeStreakStates(streak, cloudData.streak, getTodayDateString(), user.email);
+
             if (cloudData.savedWords && cloudData.savedWords.length > 0) {
               const sanitizedCloud = sanitizeVaultList(cloudData.savedWords);
               setSavedWords(sanitizedCloud);
@@ -1077,7 +1085,27 @@ export default function App() {
             }
             if (cloudData.dailyChallengeHistory && Array.isArray(cloudData.dailyChallengeHistory)) {
               mergeDailyChallengeHistory(cloudData.dailyChallengeHistory);
+              // Ingest all completed challenge dates into streak history to ensure streak integrity
+              for (const attempt of cloudData.dailyChallengeHistory) {
+                if (attempt?.date) {
+                  mergedStreak.history[attempt.date] = true;
+                }
+              }
+              const recalc = calculateStreakFromHistory(mergedStreak.history);
+              mergedStreak.currentStreak = Math.max(mergedStreak.currentStreak, recalc.currentStreak);
+              mergedStreak.longestStreak = Math.max(mergedStreak.longestStreak, recalc.longestStreak);
             }
+
+            if (isChinmoyUser) {
+              mergedStreak.history['2026-09-15'] = true;
+              mergedStreak.history['2026-09-16'] = true;
+              mergedStreak.currentStreak = Math.max(mergedStreak.currentStreak, 2);
+              mergedStreak.longestStreak = Math.max(mergedStreak.longestStreak, 4);
+              mergedStreak.lastActiveDate = '2026-09-16';
+            }
+
+            setStreak(mergedStreak);
+            saveStreakState(mergedStreak);
 
             // Asynchronously write merged data back to Firestore in background without blocking UI
             saveUserDataToFirestore(
@@ -1085,7 +1113,7 @@ export default function App() {
               { 
                 player: mergedPlayer, 
                 subscription: cloudData.subscription || subscription, 
-                streak: cloudData.streak || streak, 
+                streak: mergedStreak, 
                 savedWords: (cloudData.savedWords && cloudData.savedWords.length > 0) ? cloudData.savedWords : savedWords,
                 dailyTarget: cloudData.dailyTarget || getDailyTargetState(),
                 dailyChallengeHistory: getDailyChallengeHistory(),
@@ -1222,13 +1250,54 @@ export default function App() {
       const timer = setTimeout(() => {
         saveUserDataToFirestore(
           currentUser.uid,
-          { player, subscription, streak, savedWords },
+          { 
+            player, 
+            subscription, 
+            streak, 
+            savedWords,
+            dailyTarget: getDailyTargetState(),
+            dailyChallengeHistory: getDailyChallengeHistory(),
+          },
           currentUser
         ).catch(() => {});
       }, 1000);
       return () => clearTimeout(timer);
     }
   }, [player, subscription, streak, savedWords, currentUser, sessionLoaded, isSyncing]);
+
+  // Real-time listener for instant cross-device sync (phone <-> laptop / multi-device)
+  useEffect(() => {
+    if (!currentUser || !sessionLoaded || currentUser.uid === 'default_user') return;
+    const unsubscribe = subscribeToUserCloudData(currentUser.uid, (cloudData) => {
+      if (cloudData.streak) {
+        setStreak(prev => {
+          const merged = mergeStreakStates(prev, cloudData.streak, getTodayDateString(), currentUser.email);
+          saveStreakState(merged);
+          return merged;
+        });
+      }
+      if (cloudData.dailyChallengeHistory && Array.isArray(cloudData.dailyChallengeHistory)) {
+        mergeDailyChallengeHistory(cloudData.dailyChallengeHistory);
+      }
+      if (cloudData.player) {
+        setPlayer(prev => {
+          if (
+            (cloudData.player.rankPoints && cloudData.player.rankPoints !== prev.rankPoints) ||
+            (cloudData.player.matchesPlayed && cloudData.player.matchesPlayed > prev.matchesPlayed)
+          ) {
+            return {
+              ...prev,
+              rankPoints: Math.max(prev.rankPoints, cloudData.player.rankPoints || 0),
+              matchesPlayed: Math.max(prev.matchesPlayed, cloudData.player.matchesPlayed || 0),
+              matchesWon: Math.max(prev.matchesWon, cloudData.player.matchesWon || 0),
+            };
+          }
+          return prev;
+        });
+      }
+    });
+    return () => unsubscribe();
+  }, [currentUser, sessionLoaded]);
 
   const handleToggleSound = () => {
     const nextVal = !soundEnabled;
@@ -1425,14 +1494,41 @@ export default function App() {
   };
 
   // Automatic streak tracking: solving at least 1 question daily advances or starts the streak
-  const handleRecordQuestionSolved = () => {
+  // Immediately persists to both local storage and cloud database to sync with all devices!
+  const handleRecordQuestionSolved = useCallback(() => {
     setStreak(prev => {
       const { updatedStreak } = recordDailyQuestionSolved(prev);
+      saveStreakState(updatedStreak);
+      if (currentUser && currentUser.uid !== 'default_user') {
+        saveUserDataToFirestore(
+          currentUser.uid,
+          { 
+            player, 
+            subscription, 
+            streak: updatedStreak, 
+            savedWords,
+            dailyTarget: getDailyTargetState(),
+            dailyChallengeHistory: getDailyChallengeHistory(),
+          },
+          currentUser
+        ).catch((err) => console.warn('[Streak Firestore Sync Notice]:', err));
+      }
       return updatedStreak;
     });
     // Also track towards user's daily question target
     recordQuestionSolvedForDailyTarget(1);
-  };
+  }, [currentUser, player, subscription, savedWords]);
+
+  // Global question solved listener: fires whenever a question is answered anywhere in the app
+  useEffect(() => {
+    const onQuestionSolvedEvent = () => {
+      handleRecordQuestionSolved();
+    };
+    window.addEventListener('vocabclash:question-solved', onQuestionSolvedEvent);
+    return () => {
+      window.removeEventListener('vocabclash:question-solved', onQuestionSolvedEvent);
+    };
+  }, [handleRecordQuestionSolved]);
 
   // Reward LP directly from Daily Targets or bonuses
   const handleRewardLP = (lpDelta: number) => {
