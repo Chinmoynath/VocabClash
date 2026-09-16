@@ -32,7 +32,6 @@ import { resolveCardEducation } from '../utils/questionEducationResolver';
 import { QuestionSolutionBreakdown } from './QuestionSolutionBreakdown';
 import { MistakeVaultRevisionCard } from './MistakeVaultRevisionCard';
 import { resolveRevisionCard } from '../utils/mistakeVaultCardResolver';
-import { MistakeVaultScrollBar } from './MistakeVaultScrollBar';
 
 interface MistakeVaultProps {
   savedWords: SavedWord[];
@@ -692,11 +691,6 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
           question={reportingQuestion}
           onClose={() => setReportingQuestion(null)}
         />
-      )}
-
-      {/* Right-Side Vault Depth & Scroll Bar (Only in list grid mode) */}
-      {activeView === 'list' && (
-        <MistakeVaultScrollBar totalItems={filteredWords.length} />
       )}
     </div>
   );

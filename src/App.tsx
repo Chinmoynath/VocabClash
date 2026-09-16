@@ -2540,7 +2540,7 @@ export default function App() {
         {/* Main Dynamic View Content */}
         <main 
           id="app-main-content" 
-          className="flex-1 min-h-0 relative overflow-y-auto flex flex-col no-scrollbar"
+          className="flex-1 min-h-0 relative overflow-y-auto flex flex-col custom-scrollbar"
         >
         {matchState ? (
           !isMatchCompleted ? (
