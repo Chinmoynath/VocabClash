@@ -121,6 +121,7 @@ import { Article } from './types/article';
 import { isUserAdmin } from './services/pyqFirestoreService';
 import { StartupSplashOverlay } from './components/StartupSplashOverlay';
 import { BattleAnalyticsDashboard } from './components/admin/BattleAnalyticsDashboard';
+import { recordTabForLaunch, resolveInitialTab } from './utils/launchRoutingManager';
 import { 
   recordBattleStarted, 
   recordBattleCompleted, 
@@ -658,16 +659,9 @@ export default function App() {
   // Daily Streak state (evaluates day difference and resets to 0 if 1 day missed)
   const [streak, setStreak] = useState<DailyStreakState>(() => getInitialStreak());
 
-  // Navigation & View state
+  // Navigation & View state (Smart cold-launch routing: opens PYQ Drill if last main section was PYQ Drill, else 1v1 Arena)
   const [currentTab, setCurrentTab] = useState<TabType>(() => {
-    if (typeof window !== 'undefined') {
-      const rawPath = window.location.pathname.toLowerCase();
-      if (rawPath.includes('/pyq-drill') || rawPath.includes('/practice')) return 'practice';
-      if (rawPath.includes('/mistake-vault') || rawPath.includes('/vault') || rawPath.includes('/mistakes')) return 'mistakes';
-      if (rawPath.includes('/ranks') || rawPath.includes('/leaderboard')) return 'leaderboard';
-      if (rawPath.includes('/ai-coach') || rawPath.includes('/ai-mentor')) return 'ai_coach';
-    }
-    return 'arena';
+    return resolveInitialTab();
   });
   const [selectedCategory, setSelectedCategory] = useState<QuestionCategory | 'mixed'>('mixed');
   const [selectedExam, setSelectedExam] = useState<ExamType>(() => {
@@ -1056,6 +1050,11 @@ export default function App() {
       window.location.origin + route.page_path
     );
   }, [currentTab, activeSeoSlug, activeArticleSlug, isViewingArticlesIndex, showAdminArticles, Boolean(matchState), isMatchmaking]);
+
+  // Track current main tab for smart cold-launch routing
+  useEffect(() => {
+    recordTabForLaunch(currentTab);
+  }, [currentTab]);
 
   // Update default SEO meta tags when not on a specific SEO guide page
   useEffect(() => {
