@@ -2804,6 +2804,7 @@ export default function App() {
             {currentTab === 'mistakes' && (
               <MistakeVault
                 savedWords={savedWords}
+                userId={currentUser?.uid || player.id}
                 onRemoveWord={handleRemoveSavedWord}
                 onToggleUserSaved={handleToggleUserSaved}
                 onOpenAiTutor={handleOpenAiTutor}

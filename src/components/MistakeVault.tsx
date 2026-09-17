@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence, PanInfo } from 'motion/react';
 import { SavedWord, Question } from '../types';
 import { soundManager } from '../utils/audio';
@@ -23,7 +23,8 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
-  CheckCircle2
+  CheckCircle2,
+  Loader2
 } from 'lucide-react';
 import { ReportQuestionModal } from './ReportQuestionModal';
 import { formatExamTag } from '../services/jsonPyqParser';
@@ -33,8 +34,11 @@ import { QuestionSolutionBreakdown } from './QuestionSolutionBreakdown';
 import { MistakeVaultRevisionCard } from './MistakeVaultRevisionCard';
 import { resolveRevisionCard } from '../utils/mistakeVaultCardResolver';
 
+const PAGE_SIZE = 20;
+
 interface MistakeVaultProps {
   savedWords: SavedWord[];
+  userId?: string;
   onRemoveWord: (questionId: string, scope?: 'all' | 'saved_by_me' | 'mistakes') => void;
   onToggleUserSaved?: (questionId: string, question?: Question) => void;
   onOpenAiTutor?: (question: Question) => void;
@@ -44,6 +48,7 @@ interface MistakeVaultProps {
 
 export const MistakeVault: React.FC<MistakeVaultProps> = ({
   savedWords,
+  userId,
   onRemoveWord,
   onToggleUserSaved,
   onOpenAiTutor,
@@ -54,37 +59,93 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
   const [filterOrigin, setFilterOrigin] = useState<'all' | 'saved_by_me' | 'mistakes'>('all');
   const [filterCategory, setFilterCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState<string>('');
+  const [visibleLimit, setVisibleLimit] = useState<number>(PAGE_SIZE);
+  const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [currentFlashcardIndex, setCurrentFlashcardIndex] = useState<number>(0);
   const [isFlipped, setIsFlipped] = useState<boolean>(false);
   const [swipeDirection, setSwipeDirection] = useState<number>(1);
   const [reportingQuestion, setReportingQuestion] = useState<Question | null>(null);
   const isDraggingRef = useRef<boolean>(false);
 
-  // Independent counts for top tabs
+  // Debounce search query by 250ms to prevent expensive re-filters during rapid keystrokes
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Reset pagination window whenever user switches filters, search terms, or account identity
+  useEffect(() => {
+    setVisibleLimit(PAGE_SIZE);
+    setCurrentFlashcardIndex(0);
+    setLoadError(null);
+  }, [filterOrigin, filterCategory, debouncedSearchQuery, userId]);
+
+  // Independent total counts for top tabs (always reflecting full dataset)
   const totalCount = savedWords.length;
   const userSavedCount = savedWords.filter(isItemSaved).length;
   const mistakesCount = savedWords.filter(isItemMistake).length;
 
   // Filtered dataset: strictly respects active tab filter, category filter, and search query
-  const filteredWords = savedWords.filter(item => {
-    // 1. Origin Filter: Saved vs Mistakes vs All
-    if (filterOrigin === 'saved_by_me' && !isItemSaved(item)) return false;
-    if (filterOrigin === 'mistakes' && !isItemMistake(item)) return false;
+  const filteredWords = useMemo(() => {
+    return savedWords.filter(item => {
+      if (!item || !item.question) return false;
 
-    // 2. Category Filter
-    if (filterCategory !== 'all' && item.question.category !== filterCategory) return false;
+      // 1. Origin Filter: Saved vs Mistakes vs All
+      if (filterOrigin === 'saved_by_me' && !isItemSaved(item)) return false;
+      if (filterOrigin === 'mistakes' && !isItemMistake(item)) return false;
 
-    // 3. Search query: strictly filtered within the currently selected collection
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      const matchWord = item.question.wordOrPhrase.toLowerCase().includes(q);
-      const matchHindi = item.question.hindiMeaning?.toLowerCase().includes(q) || false;
-      const matchMeaning = item.question.meaning?.toLowerCase().includes(q) || false;
-      return matchWord || matchHindi || matchMeaning;
+      // 2. Category Filter
+      if (filterCategory !== 'all' && item.question.category !== filterCategory) return false;
+
+      // 3. Search query: strictly filtered within the currently selected collection
+      if (debouncedSearchQuery.trim()) {
+        const q = debouncedSearchQuery.toLowerCase();
+        const matchWord = item.question.wordOrPhrase?.toLowerCase().includes(q) || false;
+        const matchHindi = item.question.hindiMeaning?.toLowerCase().includes(q) || false;
+        const matchMeaning = item.question.meaning?.toLowerCase().includes(q) || false;
+        return matchWord || matchHindi || matchMeaning;
+      }
+
+      return true;
+    });
+  }, [savedWords, filterOrigin, filterCategory, debouncedSearchQuery]);
+
+  // Deduplicate and window items for fast, incremental list rendering
+  const paginatedWords = useMemo(() => {
+    const seenIds = new Set<string>();
+    const uniqueItems: SavedWord[] = [];
+    for (const item of filteredWords) {
+      if (item?.question?.id && !seenIds.has(item.question.id)) {
+        seenIds.add(item.question.id);
+        uniqueItems.push(item);
+      }
     }
+    return uniqueItems.slice(0, visibleLimit);
+  }, [filteredWords, visibleLimit]);
 
-    return true;
-  });
+  const hasMore = visibleLimit < filteredWords.length;
+
+  const handleLoadMore = () => {
+    if (isLoadingMore || !hasMore) return;
+    setIsLoadingMore(true);
+    setLoadError(null);
+
+    // Controlled micro-tick to ensure responsive UI and smooth card rendering
+    setTimeout(() => {
+      try {
+        setVisibleLimit(prev => Math.min(filteredWords.length, prev + PAGE_SIZE));
+        setIsLoadingMore(false);
+      } catch (err) {
+        console.error('[Mistake Vault Pagination Error]', err);
+        setLoadError('Failed to load next records. Please try again.');
+        setIsLoadingMore(false);
+      }
+    }, 120);
+  };
 
   // Calculate category count under current origin filter
   const getCategoryCount = (cat: string) => {
@@ -659,27 +720,70 @@ export const MistakeVault: React.FC<MistakeVaultProps> = ({
               </div>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
-              {filteredWords.map((item) => (
-                <MistakeVaultRevisionCard
-                  key={item.question.id}
-                  item={item}
-                  onToggleBookmark={(id) => {
-                    soundManager.playTap();
-                    if (onToggleUserSaved) {
-                      onToggleUserSaved(id, item.question);
-                    }
-                  }}
-                  onDelete={(id) => {
-                    soundManager.playTap();
-                    onRemoveWord(id, filterOrigin);
-                  }}
-                  onReport={(q) => {
-                    soundManager.playTap();
-                    setReportingQuestion(q);
-                  }}
-                />
-              ))}
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
+                {paginatedWords.map((item) => (
+                  <MistakeVaultRevisionCard
+                    key={item.question.id}
+                    item={item}
+                    onToggleBookmark={(id) => {
+                      soundManager.playTap();
+                      if (onToggleUserSaved) {
+                        onToggleUserSaved(id, item.question);
+                      }
+                    }}
+                    onDelete={(id) => {
+                      soundManager.playTap();
+                      onRemoveWord(id, filterOrigin);
+                    }}
+                    onReport={(q) => {
+                      soundManager.playTap();
+                      setReportingQuestion(q);
+                    }}
+                  />
+                ))}
+              </div>
+
+              {/* Incremental Load More Trigger */}
+              {hasMore && (
+                <div className="pt-2 pb-2 flex flex-col items-center justify-center gap-2">
+                  <button
+                    onClick={() => {
+                      soundManager.playTap();
+                      handleLoadMore();
+                    }}
+                    disabled={isLoadingMore}
+                    className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl bg-slate-800/90 hover:bg-slate-750 text-slate-200 border border-slate-700/80 text-xs font-bold shadow-md active:scale-95 disabled:opacity-60 transition-all cursor-pointer"
+                  >
+                    {isLoadingMore ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
+                        <span>Loading next batch...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Load more</span>
+                        <span className="text-[10px] text-slate-400 font-mono bg-slate-900/80 px-2 py-0.5 rounded-md border border-slate-700/50">
+                          {paginatedWords.length} of {filteredWords.length}
+                        </span>
+                      </>
+                    )}
+                  </button>
+
+                  {loadError && (
+                    <div className="flex items-center gap-2 text-xs text-rose-400 bg-rose-950/40 border border-rose-800/40 px-3 py-1.5 rounded-lg">
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                      <span>{loadError}</span>
+                      <button
+                        onClick={handleLoadMore}
+                        className="underline font-bold hover:text-rose-300 ml-1 cursor-pointer"
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
