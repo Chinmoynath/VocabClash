@@ -494,6 +494,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
   const [showAllOptionBreakdown, setShowAllOptionBreakdown] = useState<boolean>(true);
   const [showReportModal, setShowReportModal] = useState<boolean>(false);
   const [showSupportModal, setShowSupportModal] = useState<boolean>(false);
+  const [showSrsInfoModal, setShowSrsInfoModal] = useState<boolean>(false);
   const [isFilterOpen, setIsFilterOpen] = useState<boolean>(false);
   const [pendingCategory, setPendingCategory] = useState<QuestionCategory | 'mixed'>(category);
   const [pendingExam, setPendingExam] = useState<ExamType>(exam);
@@ -1629,25 +1630,41 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
           {/* Mastery & Session Bar */}
           <div className="bg-slate-850 border border-slate-800 rounded-xl px-3 py-2 flex items-center justify-between text-xs text-slate-300">
             <div className="flex items-center gap-2">
-              <span className="text-sky-400 font-bold flex items-center gap-1">
+              <span className="text-sky-400 font-bold flex items-center gap-1 whitespace-nowrap">
                 <BookOpen className="w-3.5 h-3.5" />
                 Question #{questionNumber}
               </span>
               <span className="text-slate-600">•</span>
-              <span className="text-slate-400 text-[11px]">
-                Session: <b className="text-slate-200">{sessionSolvedCount} solved</b>
+              <span className="text-slate-300 font-medium text-[11px] whitespace-nowrap">
+                {sessionSolvedCount} solved
               </span>
             </div>
             <div className="flex items-center gap-3 text-[11px]">
-              <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => {
+                  soundManager.playTap();
+                  setShowSrsInfoModal(true);
+                }}
+                className="flex items-center gap-1 hover:opacity-80 transition-opacity cursor-pointer whitespace-nowrap bg-transparent p-0 border-0"
+                title="Tap to learn how Due & Mastered work"
+              >
                 <span className="text-slate-400">Due:</span>
                 <span className="font-bold text-sky-400">{schedulerStats.dueCount}</span>
-              </div>
-              <div className="flex items-center gap-1">
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  soundManager.playTap();
+                  setShowSrsInfoModal(true);
+                }}
+                className="flex items-center gap-1 hover:opacity-80 transition-opacity cursor-pointer whitespace-nowrap bg-transparent p-0 border-0"
+                title="Tap to learn how Due & Mastered work"
+              >
                 <Award className="w-3.5 h-3.5 text-amber-400" />
                 <span className="text-slate-400">Mastered:</span>
                 <span className="font-bold text-amber-400">{schedulerStats.masteredCount}</span>
-              </div>
+              </button>
             </div>
           </div>
 
@@ -2121,6 +2138,102 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
       {ADS_ENABLED && !isPremium && (
         <div className="pt-2">
           <AdSenseUnit slotId={ADSENSE_BANNER_SLOT} format="horizontal" isPremium={isPremium} />
+        </div>
+      )}
+
+      {/* Spaced Repetition System (SRS) Due & Mastered Info Modal */}
+      {showSrsInfoModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-2xl p-5 shadow-2xl text-slate-200 relative overflow-hidden max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded-lg bg-sky-500/10 text-sky-400">
+                  <BookOpen className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm sm:text-base text-white">How Due & Mastered Work</h3>
+                  <p className="text-[11px] text-slate-400">Scientifically optimized Spaced Repetition (SRS)</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSrsInfoModal(false)}
+                className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="py-3.5 space-y-3 overflow-y-auto text-xs leading-relaxed text-slate-300">
+              {/* Due Explanation */}
+              <div className="bg-sky-950/30 border border-sky-800/40 rounded-xl p-3">
+                <div className="flex items-center gap-1.5 font-bold text-sky-400 mb-1">
+                  <Timer className="w-4 h-4" />
+                  <span>Due ({schedulerStats.dueCount} words)</span>
+                </div>
+                <p className="text-slate-300 text-[11px]">
+                  Words or questions you have practiced previously whose memory retention interval has elapsed. Practicing them right when they are <b>Due</b> cements them into your long-term memory just before you forget them.
+                </p>
+                <div className="mt-2 text-[10px] text-sky-300/80 bg-sky-900/30 rounded-lg p-2 font-mono">
+                  • Mistakes repeat in ~20-30 questions & next day<br/>
+                  • Correct answers space out: 3d → 7d → 14d → 30d
+                </div>
+              </div>
+
+              {/* Mastered Explanation */}
+              <div className="bg-amber-950/30 border border-amber-800/40 rounded-xl p-3">
+                <div className="flex items-center gap-1.5 font-bold text-amber-400 mb-1">
+                  <Award className="w-4 h-4" />
+                  <span>Mastered ({schedulerStats.masteredCount} words)</span>
+                </div>
+                <p className="text-slate-300 text-[11px]">
+                  Words you have successfully answered correctly <b>4+ consecutive times</b> across <b>multiple distinct days</b> with zero active lapses.
+                </p>
+                <p className="text-slate-400 text-[10px] mt-1.5">
+                  Mastered words are locked in your permanent memory and scheduled at long 30–60 day intervals so you focus more time on unmastered or tricky questions.
+                </p>
+              </div>
+
+              {/* Memory Stages Breakdown */}
+              <div className="bg-slate-800/40 border border-slate-700/50 rounded-xl p-3">
+                <h4 className="font-bold text-white text-xs mb-2">Memory Retention Stages</h4>
+                <div className="space-y-1.5 text-[11px]">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">1. New</span>
+                    <span className="text-slate-300">Unseen PYQ questions</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-amber-400/90">2. Learning</span>
+                    <span className="text-slate-300">1 review or recent mistake</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sky-400">3. Familiar</span>
+                    <span className="text-slate-300">2 correct in a row (3d interval)</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-indigo-400">4. Strong</span>
+                    <span className="text-slate-300">3 correct in a row (7-14d interval)</span>
+                  </div>
+                  <div className="flex items-center justify-between font-bold">
+                    <span className="text-amber-400 flex items-center gap-1">
+                      <Award className="w-3 h-3" /> 5. Mastered
+                    </span>
+                    <span className="text-amber-300">4+ correct across 2+ days</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowSrsInfoModal(false)}
+                className="w-full py-2.5 bg-sky-600 hover:bg-sky-500 active:scale-98 text-white font-bold rounded-xl text-xs transition-all cursor-pointer"
+              >
+                Got It, Keep Practicing
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

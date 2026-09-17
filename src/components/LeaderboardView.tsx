@@ -152,7 +152,7 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ player, isPrem
           </div>
 
           <div className="text-right">
-            <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Leaderboard Rank</div>
+            <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Rank</div>
             <div className="text-base font-black text-amber-400 font-mono leading-none mt-0.5">
               #{userRank.toLocaleString()}
             </div>
