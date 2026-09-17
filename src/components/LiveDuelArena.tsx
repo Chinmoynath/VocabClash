@@ -8,7 +8,10 @@ import {
 import { 
   calculateScore, 
   simulateOpponentAnswer, 
-  generateRandomOpponentEmote 
+  generateRandomOpponentEmote,
+  createBotMatchSession,
+  getEventDrivenOpponentEmote,
+  BotMatchSession,
 } from '../services/matchmakingService';
 import { 
   subscribeToLiveRoom, 
@@ -137,6 +140,7 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
   const opponentTimerRef = useRef<NodeJS.Timeout | null>(null);
   const advanceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const opponentAnswerResultRef = useRef<{ selectedIndex: number; timeTakenMs: number; isCorrect: boolean } | null>(null);
+  const botSessionRef = useRef<BotMatchSession | null>(null);
   const processedEmoteTimestampsRef = useRef<Set<number>>(new Set());
   const hasCompletedRef = useRef<boolean>(false);
   const isRoundAdvancingRef = useRef<boolean>(false);
@@ -538,10 +542,31 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
       scoreGained: oppScoreGained,
     };
 
-    // Chance of opponent sending a friendly reaction
-    if (Math.random() < 0.35) {
-      const randEmote = generateRandomOpponentEmote();
-      triggerFloatingEmote('opponent', randEmote.emoji, randEmote.text);
+    // Update session streak tracking
+    if (botSessionRef.current) {
+      if (oppResult.isCorrect) {
+        botSessionRef.current.recentBotStreak += 1;
+        botSessionRef.current.lastMissedCount = 0;
+      } else {
+        botSessionRef.current.recentBotStreak = 0;
+        botSessionRef.current.lastMissedCount += 1;
+      }
+
+      // Contextual event-driven emote with strict cooldown & match limits
+      const eventEmote = getEventDrivenOpponentEmote(botSessionRef.current, {
+        roundIndex: currentQIndex,
+        totalRounds: matchState.questions.length,
+        timeTakenMs: oppResult.timeTakenMs,
+        isCorrect: oppResult.isCorrect,
+        questionDifficulty: currentQuestion.difficulty,
+        playerScore: currentLiveScoresRef.current.playerScore,
+        opponentScore: newOppScore,
+        opponentStreak: nextOppCombo,
+      });
+
+      if (eventEmote) {
+        triggerFloatingEmote('opponent', eventEmote.emoji, eventEmote.text);
+      }
     }
 
     // If player has also already answered, schedule round advance
@@ -571,10 +596,27 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
 
     // Prepare opponent simulated answer ONLY IF IT'S A BOT MATCH
     if (!isRealMatch && currentQuestion) {
+      if (!botSessionRef.current) {
+        botSessionRef.current = createBotMatchSession(
+          matchState.opponent,
+          player.rankPoints,
+          {
+            accuracyRate: player.accuracyRate,
+            matchesPlayed: player.matchesPlayed,
+            pyqScore: player.pyqScore,
+          }
+        );
+      }
+
+      // Pre-compute and lock round decision at round start
       const oppResult = simulateOpponentAnswer(
         currentQuestion,
-        matchState.opponent.accuracyRate,
-        ROUND_TIME_SEC
+        botSessionRef.current,
+        ROUND_TIME_SEC,
+        {
+          recentBotStreak: botSessionRef.current.recentBotStreak,
+          lastMissedCount: botSessionRef.current.lastMissedCount,
+        }
       );
       opponentAnswerResultRef.current = oppResult;
 

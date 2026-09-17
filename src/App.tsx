@@ -1619,7 +1619,11 @@ export default function App() {
       return;
     }
     setMatchMode(mode);
-    const opp = generateMatchedOpponent(player.rankPoints, selectedExam);
+    const opp = generateMatchedOpponent(player.rankPoints, selectedExam, {
+      accuracyRate: player.accuracyRate,
+      matchesPlayed: player.matchesPlayed,
+      pyqScore: player.pyqScore,
+    });
     setMatchedOpponent(opp);
     setIsMatchmaking(true);
   };
@@ -2883,7 +2887,11 @@ export default function App() {
       {isMatchmaking && (
         <MatchmakingModal
           player={player}
-          initialBotOpponent={matchedOpponent || generateMatchedOpponent(player.rankPoints, selectedExam)}
+          initialBotOpponent={matchedOpponent || generateMatchedOpponent(player.rankPoints, selectedExam, {
+            accuracyRate: player.accuracyRate,
+            matchesPlayed: player.matchesPlayed,
+            pyqScore: player.pyqScore,
+          })}
           mode={matchMode}
           category={selectedCategory}
           exam={selectedExam}
