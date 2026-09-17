@@ -50,7 +50,6 @@ export const OnboardingTourModal: React.FC<OnboardingTourModalProps> = ({
   const markSeenAndDismiss = () => {
     if (typeof window !== 'undefined') {
       try {
-        sessionStorage.setItem('vocabclash_tour_session_seen', 'true');
         localStorage.setItem('vocabclash_onboarding_seen_v1', 'true');
       } catch {
         // ignore storage errors
