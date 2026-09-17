@@ -1,6 +1,7 @@
 import { Question, QuestionCategory } from '../types';
 import { db, auth } from './firebaseService';
-import { collection, doc, writeBatch, getDocs, query, limit } from 'firebase/firestore';
+import { collection, doc, writeBatch, getDocs, query, orderBy, limit, startAfter, DocumentData, QueryDocumentSnapshot } from 'firebase/firestore';
+import { syncHistoryWithReviewStates, setHistoryAuthUid } from '../utils/questionHistoryManager';
 
 export type ReviewLevel = 'new' | 'learning' | 'familiar' | 'strong' | 'mastered';
 export type ReviewGrade = 'again' | 'hard' | 'good' | 'easy';
@@ -11,6 +12,7 @@ export interface ReviewState {
   conceptDisplay: string;
   firstSeenAt: number;
   lastSeenAt: number;
+  lastReviewedAt?: number;
   seenCount: number;
   correctCount: number;
   wrongCount: number;
@@ -19,16 +21,19 @@ export interface ReviewState {
   lastResult: ReviewGrade;
   lastSeenOrdinal: number;
   dueAt: number;
+  nextReviewAt?: number; // Alias/synonym for dueAt to ensure full cross-service compatibility
   dueAfterOrdinal: number | null;
   level: ReviewLevel;
+  easeFactor?: number;
   averageResponseMs?: number;
   recentQuestionIds: string[];
   distinctDaysCount: number;
   lastDayStr: string;
   isSaved?: boolean;
+  updatedAt?: number;
 }
 
-const STORAGE_KEY_REVIEWS = 'vocabclash_review_states_v3';
+const STORAGE_KEY_REVIEWS_PREFIX = 'vocabclash_review_states_v3';
 const STORAGE_KEY_MIGRATION = 'vocabclash_v3_migration_done';
 
 function getTodayStr(): string {
@@ -49,12 +54,57 @@ class QuestionReviewScheduler {
   private pendingSyncKeys: Set<string> = new Set();
   private syncTimer: any = null;
   private initialized: boolean = false;
+  private currentAuthUid: string | null = null;
+  private lastReconcileTime: number = 0;
+  private isReconciling: boolean = false;
+  private listenersAttached: boolean = false;
 
   public init() {
     if (this.initialized) return;
     this.loadFromLocalStorage();
     this.performLegacyMigration();
+    this.setupLifecycleListeners();
     this.initialized = true;
+  }
+
+  private getStorageKey(): string {
+    return this.currentAuthUid ? `${STORAGE_KEY_REVIEWS_PREFIX}_${this.currentAuthUid}` : STORAGE_KEY_REVIEWS_PREFIX;
+  }
+
+  private setupLifecycleListeners() {
+    if (this.listenersAttached || typeof window === 'undefined') return;
+    this.listenersAttached = true;
+
+    // 1. Visibility change: flush pending on hide, throttled reconcile on show
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') {
+        this.flushCloudSync().catch(() => {});
+      } else if (document.visibilityState === 'visible') {
+        if (this.currentAuthUid) {
+          this.reconcileWithCloud(this.currentAuthUid).catch(() => {});
+        }
+      }
+    });
+
+    // 2. Page / App hide
+    window.addEventListener('pagehide', () => {
+      this.flushCloudSync().catch(() => {});
+    });
+
+    // 3. Window focus (returning to tab)
+    window.addEventListener('focus', () => {
+      if (this.currentAuthUid) {
+        this.reconcileWithCloud(this.currentAuthUid).catch(() => {});
+      }
+    });
+
+    // 4. Online event (network reconnection)
+    window.addEventListener('online', () => {
+      this.flushCloudSync().catch(() => {});
+      if (this.currentAuthUid) {
+        this.reconcileWithCloud(this.currentAuthUid, true).catch(() => {});
+      }
+    });
   }
 
   // Current session ordinal for relative in-session spacing
@@ -95,8 +145,9 @@ class QuestionReviewScheduler {
       return true;
     }
 
-    // 2. Long-term timestamp check
-    if (state.dueAt && state.dueAt <= now) {
+    // 2. Long-term timestamp check (using dueAt or nextReviewAt)
+    const effectiveDueAt = state.nextReviewAt || state.dueAt;
+    if (effectiveDueAt && effectiveDueAt <= now) {
       return true;
     }
 
@@ -138,12 +189,13 @@ class QuestionReviewScheduler {
       ].slice(-80);
     }
 
-    const existing = this.reviewStates.get(memoryKey) || {
+    const existing: ReviewState = this.reviewStates.get(memoryKey) || {
       memoryKey,
       category,
       conceptDisplay: question.wordOrPhrase,
       firstSeenAt: now,
       lastSeenAt: now,
+      lastReviewedAt: now,
       seenCount: 0,
       correctCount: 0,
       wrongCount: 0,
@@ -152,20 +204,25 @@ class QuestionReviewScheduler {
       lastResult: 'good' as ReviewGrade,
       lastSeenOrdinal: this.sessionOrdinal,
       dueAt: now,
+      nextReviewAt: now,
       dueAfterOrdinal: null,
       level: 'new' as ReviewLevel,
+      easeFactor: 2.5,
       averageResponseMs: responseTimeMs || 4000,
       recentQuestionIds: [],
       distinctDaysCount: 1,
       lastDayStr: today,
+      updatedAt: now,
     };
 
     const grade = this.inferGrade(isCorrect, responseTimeMs, existing.consecutiveCorrect);
 
     existing.seenCount += 1;
     existing.lastSeenAt = now;
+    existing.lastReviewedAt = now;
     existing.lastSeenOrdinal = this.sessionOrdinal;
     existing.lastResult = grade;
+    existing.updatedAt = now;
 
     if (existing.lastDayStr !== today) {
       existing.distinctDaysCount += 1;
@@ -182,6 +239,17 @@ class QuestionReviewScheduler {
       existing.recentQuestionIds = [...existing.recentQuestionIds.slice(-4), question.id];
     }
 
+    // Dynamic ease factor adjustment (SM-2 inspired)
+    let ease = existing.easeFactor || 2.5;
+    if (grade === 'again') {
+      ease = Math.max(1.3, ease - 0.2);
+    } else if (grade === 'hard') {
+      ease = Math.max(1.3, ease - 0.15);
+    } else if (grade === 'easy') {
+      ease = Math.min(3.0, ease + 0.15);
+    }
+    existing.easeFactor = Number(ease.toFixed(2));
+
     if (!isCorrect) {
       // WRONG ANSWER: again
       existing.wrongCount += 1;
@@ -194,7 +262,9 @@ class QuestionReviewScheduler {
 
       // High-priority next day calendar retry (~1 day ± 15% jitter)
       const dueDays = applyFuzz(1.0, 0.15);
-      existing.dueAt = now + Math.round(dueDays * 86400000);
+      const computedDue = now + Math.round(dueDays * 86400000);
+      existing.dueAt = computedDue;
+      existing.nextReviewAt = computedDue;
       existing.level = 'learning';
     } else {
       // CORRECT ANSWER: good / easy / hard
@@ -225,7 +295,9 @@ class QuestionReviewScheduler {
 
       // Light jitter (12%) so items don't clump on the exact same second
       const fuzzedDays = applyFuzz(baseIntervalDays, 0.12);
-      existing.dueAt = now + Math.round(fuzzedDays * 86400000);
+      const computedDue = now + Math.round(fuzzedDays * 86400000);
+      existing.dueAt = computedDue;
+      existing.nextReviewAt = computedDue;
 
       // Mastery: ~4 successful reviews across separate sessions/days with no active lapses
       if (
@@ -247,6 +319,7 @@ class QuestionReviewScheduler {
     this.pendingSyncKeys.add(memoryKey);
 
     this.saveToLocalStorage();
+    syncHistoryWithReviewStates([existing]);
     this.scheduleCloudSync();
 
     return existing;
@@ -259,6 +332,7 @@ class QuestionReviewScheduler {
     const state = this.reviewStates.get(key);
     if (state) {
       state.isSaved = isSaved;
+      state.updatedAt = Date.now();
       this.pendingSyncKeys.add(key);
       this.saveToLocalStorage();
       this.scheduleCloudSync();
@@ -313,16 +387,32 @@ class QuestionReviewScheduler {
   private loadFromLocalStorage() {
     if (typeof window === 'undefined' || !window.localStorage) return;
     try {
-      const raw = localStorage.getItem(STORAGE_KEY_REVIEWS);
+      const storageKey = this.getStorageKey();
+      let raw = localStorage.getItem(storageKey);
+      
+      // Migration fallback from global storage key if user-scoped key is empty
+      if (!raw && this.currentAuthUid) {
+        raw = localStorage.getItem(STORAGE_KEY_REVIEWS_PREFIX);
+      }
+
       if (raw) {
         const parsed: ReviewState[] = JSON.parse(raw);
         if (Array.isArray(parsed)) {
           for (const item of parsed) {
             if (item && item.memoryKey) {
-              this.reviewStates.set(item.memoryKey.toLowerCase().trim(), item);
+              const normalizedKey = item.memoryKey.toLowerCase().trim();
+              if (!item.nextReviewAt && item.dueAt) {
+                item.nextReviewAt = item.dueAt;
+              }
+              this.reviewStates.set(normalizedKey, item);
             }
           }
         }
+      }
+
+      // Reconcile questionHistoryManager with all existing review states
+      if (this.reviewStates.size > 0) {
+        syncHistoryWithReviewStates(Array.from(this.reviewStates.values()));
       }
     } catch (e) {
       console.warn('Failed to load review states from localStorage:', e);
@@ -333,7 +423,7 @@ class QuestionReviewScheduler {
     if (typeof window === 'undefined' || !window.localStorage) return;
     try {
       const array = Array.from(this.reviewStates.values());
-      localStorage.setItem(STORAGE_KEY_REVIEWS, JSON.stringify(array));
+      localStorage.setItem(this.getStorageKey(), JSON.stringify(array));
     } catch (e) {
       console.warn('Failed to save review states to localStorage:', e);
     }
@@ -363,12 +453,14 @@ class QuestionReviewScheduler {
             if (correct >= 4 && consecutive >= 2) initialLevel = 'familiar';
             if (correct >= 7 && consecutive >= 3) initialLevel = 'strong';
 
+            const due = now + (correct >= 3 ? 86400000 * 2 : 86400000);
             const migratedState: ReviewState = {
               memoryKey,
               category: 'synonyms',
               conceptDisplay: key,
               firstSeenAt: oldRecord.lastAttemptTimestamp || now - 86400000 * 3,
               lastSeenAt: oldRecord.lastAttemptTimestamp || now,
+              lastReviewedAt: oldRecord.lastAttemptTimestamp || now,
               seenCount: correct + incorrect,
               correctCount: correct,
               wrongCount: incorrect,
@@ -376,12 +468,15 @@ class QuestionReviewScheduler {
               lapseCount: incorrect > 0 ? 1 : 0,
               lastResult: incorrect > 0 ? 'hard' : 'good',
               lastSeenOrdinal: 0,
-              dueAt: now + (correct >= 3 ? 86400000 * 2 : 86400000),
+              dueAt: due,
+              nextReviewAt: due,
               dueAfterOrdinal: null,
               level: initialLevel,
+              easeFactor: 2.5,
               recentQuestionIds: [],
               distinctDaysCount: correct >= 3 ? 2 : 1,
               lastDayStr: today,
+              updatedAt: now,
             };
 
             this.reviewStates.set(memoryKey, migratedState);
@@ -408,12 +503,18 @@ class QuestionReviewScheduler {
     const user = auth.currentUser;
     if (!user || this.pendingSyncKeys.size === 0) return;
 
+    if (this.syncTimer) {
+      clearTimeout(this.syncTimer);
+      this.syncTimer = null;
+    }
+
     const keysToSync = Array.from(this.pendingSyncKeys);
     this.pendingSyncKeys.clear();
 
     try {
       const batch = writeBatch(db);
       let opCount = 0;
+      const now = Date.now();
 
       for (const key of keysToSync) {
         const state = this.reviewStates.get(key);
@@ -421,7 +522,13 @@ class QuestionReviewScheduler {
           // Sanitize key for Firestore doc ID
           const safeDocId = encodeURIComponent(key).replace(/\./g, '_').slice(0, 100);
           const docRef = doc(db, 'users', user.uid, 'review_progress', safeDocId);
-          batch.set(docRef, { ...state, updatedAt: Date.now() }, { merge: true });
+          const payload = {
+            ...state,
+            dueAt: state.dueAt || state.nextReviewAt || now,
+            nextReviewAt: state.nextReviewAt || state.dueAt || now,
+            updatedAt: state.updatedAt || now,
+          };
+          batch.set(docRef, payload, { merge: true });
           opCount++;
           if (opCount >= 400) break; // Firestore batch write cap
         }
@@ -432,12 +539,10 @@ class QuestionReviewScheduler {
       }
     } catch (err) {
       console.warn('Error syncing review progress to Firestore:', err);
-      // Re-add unsynced keys on failure
+      // Re-add unsynced keys on failure so they are retried on next sync/lifecycle
       for (const k of keysToSync) this.pendingSyncKeys.add(k);
     }
   }
-
-  private currentAuthUid: string | null = null;
 
   /**
    * Resets all in-memory review states and clears local storage on logout
@@ -454,17 +559,19 @@ class QuestionReviewScheduler {
     this.recentQuestionIds = [];
     this.currentAuthUid = null;
     this.initialized = false;
+    this.lastReconcileTime = 0;
     if (typeof window !== 'undefined' && window.localStorage) {
       try {
-        localStorage.removeItem(STORAGE_KEY_REVIEWS);
+        localStorage.removeItem(STORAGE_KEY_REVIEWS_PREFIX);
       } catch (e) {
         console.warn('Failed to clear review states from localStorage:', e);
       }
     }
   }
 
-  // Hydrate user progress from Firestore subcollection on login
+  // Hydrate user progress from Firestore subcollection on login or user switch
   public setAuthUser(uid: string | null) {
+    setHistoryAuthUid(uid);
     if (this.currentAuthUid && !uid) {
       // Authenticated user logged out: clean memory and localStorage
       this.reset();
@@ -476,38 +583,134 @@ class QuestionReviewScheduler {
     }
     this.currentAuthUid = uid;
     if (uid) {
+      this.loadFromLocalStorage();
       this.hydrateUserProgressFromCloud(uid).catch(err => console.warn('Hydrate review progress error:', err));
     }
   }
 
+  /**
+   * Comprehensive cloud hydration supporting >1000 records using pagination.
+   * Merges authoritative cloud review state into local Map deterministically.
+   */
   public async hydrateUserProgressFromCloud(uid: string): Promise<number> {
     try {
       const colRef = collection(db, 'users', uid, 'review_progress');
-      const q = query(colRef, limit(1000));
-      const snap = await getDocs(q);
       let count = 0;
+      let lastDoc: QueryDocumentSnapshot<DocumentData> | null = null;
+      let hasMore = true;
+      const PAGE_SIZE = 500;
 
-      snap.forEach(docSnap => {
-        const data = docSnap.data() as ReviewState;
-        if (data && data.memoryKey) {
-          const key = data.memoryKey.toLowerCase().trim();
-          const existing = this.reviewStates.get(key);
-          if (!existing || (data.lastSeenAt || 0) > (existing.lastSeenAt || 0)) {
-            this.reviewStates.set(key, data);
-            count++;
-          }
+      while (hasMore) {
+        const q = lastDoc
+          ? query(colRef, orderBy('updatedAt', 'desc'), startAfter(lastDoc), limit(PAGE_SIZE))
+          : query(colRef, orderBy('updatedAt', 'desc'), limit(PAGE_SIZE));
+
+        const snap = await getDocs(q);
+        if (snap.empty) {
+          hasMore = false;
+          break;
         }
-      });
+
+        snap.forEach(docSnap => {
+          const data = docSnap.data() as ReviewState;
+          if (data && data.memoryKey) {
+            const key = data.memoryKey.toLowerCase().trim();
+            const existing = this.reviewStates.get(key);
+            const isPending = this.pendingSyncKeys.has(key);
+
+            const cloudTime = data.updatedAt || data.lastSeenAt || 0;
+            const localTime = existing ? (existing.updatedAt || existing.lastSeenAt || 0) : 0;
+
+            if (!existing) {
+              const normalizedData: ReviewState = {
+                ...data,
+                dueAt: data.dueAt || data.nextReviewAt || cloudTime,
+                nextReviewAt: data.nextReviewAt || data.dueAt || cloudTime,
+              };
+              this.reviewStates.set(key, normalizedData);
+              count++;
+            } else if (!isPending && cloudTime >= localTime) {
+              const normalizedData: ReviewState = {
+                ...existing,
+                ...data,
+                dueAt: data.dueAt || data.nextReviewAt || cloudTime,
+                nextReviewAt: data.nextReviewAt || data.dueAt || cloudTime,
+              };
+              this.reviewStates.set(key, normalizedData);
+              count++;
+            } else if (isPending) {
+              // Local has pending changes: merge metrics conservatively
+              const merged: ReviewState = {
+                ...data,
+                ...existing,
+                seenCount: Math.max(existing.seenCount || 0, data.seenCount || 0),
+                correctCount: Math.max(existing.correctCount || 0, data.correctCount || 0),
+                wrongCount: Math.max(existing.wrongCount || 0, data.wrongCount || 0),
+                dueAt: localTime >= cloudTime ? (existing.dueAt || existing.nextReviewAt || localTime) : (data.dueAt || data.nextReviewAt || cloudTime),
+                nextReviewAt: localTime >= cloudTime ? (existing.nextReviewAt || existing.dueAt || localTime) : (data.nextReviewAt || data.dueAt || cloudTime),
+                level: localTime >= cloudTime ? existing.level : data.level,
+                consecutiveCorrect: localTime >= cloudTime ? existing.consecutiveCorrect : data.consecutiveCorrect,
+                lastSeenAt: Math.max(existing.lastSeenAt || 0, data.lastSeenAt || 0),
+                lastReviewedAt: Math.max(existing.lastReviewedAt || 0, data.lastReviewedAt || 0),
+                updatedAt: Math.max(existing.updatedAt || 0, data.updatedAt || 0),
+              };
+              this.reviewStates.set(key, merged);
+              count++;
+            }
+          }
+        });
+
+        if (snap.size < PAGE_SIZE) {
+          hasMore = false;
+        } else {
+          lastDoc = snap.docs[snap.docs.length - 1];
+        }
+      }
 
       if (count > 0) {
         this.saveToLocalStorage();
+        syncHistoryWithReviewStates(Array.from(this.reviewStates.values()));
       }
+      this.lastReconcileTime = Date.now();
       return count;
     } catch (err) {
       console.warn('Failed to hydrate review progress from cloud:', err);
       return 0;
     }
   }
+
+  /**
+   * Lightweight reconciliation when app resumes, receives focus, or reconnects.
+   * Throttled to at most once per 30 seconds unless force=true.
+   */
+  public async reconcileWithCloud(uid?: string, force: boolean = false): Promise<boolean> {
+    const targetUid = uid || this.currentAuthUid;
+    if (!targetUid || this.isReconciling) return false;
+
+    const now = Date.now();
+    if (!force && now - this.lastReconcileTime < 30000) {
+      return false; // Throttled
+    }
+
+    this.isReconciling = true;
+    try {
+      // First flush any local pending changes so cloud gets them
+      await this.flushCloudSync();
+      // Then rehydrate updated records from cloud
+      const updatedCount = await this.hydrateUserProgressFromCloud(targetUid);
+      this.lastReconcileTime = Date.now();
+
+      if (updatedCount > 0 && typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('vocabclash:review-states-synced', {
+          detail: { updatedCount, stats: this.getStats() }
+        }));
+      }
+      return updatedCount > 0;
+    } finally {
+      this.isReconciling = false;
+    }
+  }
 }
 
 export const questionReviewScheduler = new QuestionReviewScheduler();
+

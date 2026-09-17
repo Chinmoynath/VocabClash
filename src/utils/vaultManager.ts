@@ -256,3 +256,33 @@ export function removeVaultItem(
   // Default: remove completely
   return vault.filter(item => item.question.id !== questionId);
 }
+
+/**
+ * Records a flashcard / review attempt on a vault item, updating its review timestamps and counts.
+ */
+export function recordMistakeReviewInVault(
+  vault: SavedWord[],
+  questionId: string,
+  isCorrect: boolean
+): SavedWord[] {
+  if (!questionId) return vault;
+  const existingIndex = vault.findIndex(item => item.question.id === questionId);
+  if (existingIndex < 0) return vault;
+
+  const existing = vault[existingIndex];
+  const now = Date.now();
+  const nextCorrect = (existing.correctCount || 0) + (isCorrect ? 1 : 0);
+  const nextMistakes = isCorrect ? Math.max(0, (existing.mistakeCount || 1) - 1) : (existing.mistakeCount || 0) + 1;
+
+  const updated: SavedWord = {
+    ...existing,
+    lastReviewedAt: now,
+    correctCount: nextCorrect,
+    mistakeCount: nextMistakes,
+    isMistake: nextMistakes > 0,
+  };
+
+  const nextVault = [...vault];
+  nextVault[existingIndex] = updated;
+  return nextVault;
+}

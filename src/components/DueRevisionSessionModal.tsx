@@ -130,6 +130,7 @@ export const DueRevisionSessionModal: React.FC<DueRevisionSessionModalProps> = (
       if (onSessionFinished) {
         onSessionFinished();
       }
+      questionReviewScheduler.flushCloudSync().catch(() => {});
     }
   };
 

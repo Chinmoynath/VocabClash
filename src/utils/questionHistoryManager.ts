@@ -3,16 +3,35 @@
  * 
  * Guarantees that:
  * 1. Questions/words seen yesterday or in recent sessions are NEVER immediately repeated.
- * 2. An LRU history of 1,000+ solved questions is maintained persistently in localStorage.
+ * 2. An LRU history of 1,000+ solved questions is maintained persistently in localStorage, scoped to user UID.
  * 3. Daily seen set is tracked so every new day feels 100% fresh and randomized.
  * 4. High-entropy shuffling ensures no deterministic sequence repetition.
+ * 5. Reconciles seamlessly with authoritative Firestore ReviewState so cross-device activity is recognized immediately.
  */
 
-const STORAGE_KEY_SEEN_HISTORY = 'vocabclash_seen_history_v2';
-const STORAGE_KEY_DAILY_SEEN = 'vocabclash_daily_seen_v2';
-const STORAGE_KEY_SPEED_BLITZ_RECENT = 'vocabclash_speed_blitz_recent_ids_v1';
-const MAX_HISTORY_SIZE = 1200;
+const STORAGE_KEY_SEEN_HISTORY_PREFIX = 'vocabclash_seen_history_v2';
+const STORAGE_KEY_DAILY_SEEN_PREFIX = 'vocabclash_daily_seen_v2';
+const STORAGE_KEY_SPEED_BLITZ_RECENT_PREFIX = 'vocabclash_speed_blitz_recent_ids_v1';
+const MAX_HISTORY_SIZE = 1500;
 const MAX_SPEED_BLITZ_RECENT_SIZE = 250;
+
+let currentHistoryUid: string | null = null;
+
+export function setHistoryAuthUid(uid: string | null): void {
+  currentHistoryUid = uid;
+}
+
+function getSeenHistoryKey(): string {
+  return currentHistoryUid ? `${STORAGE_KEY_SEEN_HISTORY_PREFIX}_${currentHistoryUid}` : STORAGE_KEY_SEEN_HISTORY_PREFIX;
+}
+
+function getDailySeenKey(): string {
+  return currentHistoryUid ? `${STORAGE_KEY_DAILY_SEEN_PREFIX}_${currentHistoryUid}` : STORAGE_KEY_DAILY_SEEN_PREFIX;
+}
+
+function getSpeedBlitzKey(): string {
+  return currentHistoryUid ? `${STORAGE_KEY_SPEED_BLITZ_RECENT_PREFIX}_${currentHistoryUid}` : STORAGE_KEY_SPEED_BLITZ_RECENT_PREFIX;
+}
 
 interface DailySeenRecord {
   dateStr: string; // YYYY-MM-DD
@@ -33,7 +52,12 @@ function getTodayString(): string {
 export function getPersistentSeenWords(): string[] {
   if (typeof window === 'undefined' || !window.localStorage) return [];
   try {
-    const raw = localStorage.getItem(STORAGE_KEY_SEEN_HISTORY);
+    const key = getSeenHistoryKey();
+    let raw = localStorage.getItem(key);
+    // Fallback to unscoped key if scoped is not yet initialized for existing users
+    if (!raw && currentHistoryUid) {
+      raw = localStorage.getItem(STORAGE_KEY_SEEN_HISTORY_PREFIX);
+    }
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
@@ -48,7 +72,11 @@ export function getPersistentSeenWords(): string[] {
 export function getTodaySeenWords(): Set<string> {
   if (typeof window === 'undefined' || !window.localStorage) return new Set();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY_DAILY_SEEN);
+    const key = getDailySeenKey();
+    let raw = localStorage.getItem(key);
+    if (!raw && currentHistoryUid) {
+      raw = localStorage.getItem(STORAGE_KEY_DAILY_SEEN_PREFIX);
+    }
     if (!raw) return new Set();
     const record: DailySeenRecord = JSON.parse(raw);
     const today = getTodayString();
@@ -77,12 +105,12 @@ export function recordQuestionSeen(wordOrPhrase: string, questionId?: string): v
 
     // Keep within capacity limit
     const trimmed = filtered.slice(-MAX_HISTORY_SIZE);
-    localStorage.setItem(STORAGE_KEY_SEEN_HISTORY, JSON.stringify(trimmed));
+    localStorage.setItem(getSeenHistoryKey(), JSON.stringify(trimmed));
 
     // 2. Update daily seen record
     const today = getTodayString();
     let currentDaily: string[] = [];
-    const rawDaily = localStorage.getItem(STORAGE_KEY_DAILY_SEEN);
+    const rawDaily = localStorage.getItem(getDailySeenKey()) || (currentHistoryUid ? localStorage.getItem(STORAGE_KEY_DAILY_SEEN_PREFIX) : null);
     if (rawDaily) {
       try {
         const parsed: DailySeenRecord = JSON.parse(rawDaily);
@@ -97,7 +125,7 @@ export function recordQuestionSeen(wordOrPhrase: string, questionId?: string): v
     if (!currentDaily.includes(cleanWord)) {
       currentDaily.push(cleanWord);
       localStorage.setItem(
-        STORAGE_KEY_DAILY_SEEN,
+        getDailySeenKey(),
         JSON.stringify({ dateStr: today, wordSet: currentDaily.slice(-600) })
       );
     }
@@ -115,13 +143,62 @@ export function recordBatchQuestionsSeen(wordsOrIds: string[]): void {
 }
 
 /**
+ * Reconciles local seen history with authoritative ReviewState array from Firestore.
+ * Ensures questions/concepts solved on any device are instantly marked as seen on this device.
+ */
+export function syncHistoryWithReviewStates(reviewStates: Array<{ conceptDisplay?: string; memoryKey?: string; recentQuestionIds?: string[]; seenCount?: number }>): void {
+  if (typeof window === 'undefined' || !window.localStorage || !Array.isArray(reviewStates) || reviewStates.length === 0) return;
+  try {
+    const existing = new Set(getPersistentSeenWords());
+    let modified = false;
+
+    for (const r of reviewStates) {
+      if (r.seenCount && r.seenCount > 0) {
+        if (r.conceptDisplay) {
+          const upper = r.conceptDisplay.trim().toUpperCase();
+          if (!existing.has(upper)) {
+            existing.add(upper);
+            modified = true;
+          }
+        }
+        if (r.memoryKey) {
+          const mem = r.memoryKey.trim().toLowerCase();
+          if (!existing.has(mem)) {
+            existing.add(mem);
+            modified = true;
+          }
+        }
+        if (Array.isArray(r.recentQuestionIds)) {
+          for (const qid of r.recentQuestionIds) {
+            if (qid && !existing.has(qid)) {
+              existing.add(qid);
+              modified = true;
+            }
+          }
+        }
+      }
+    }
+
+    if (modified) {
+      const mergedList = Array.from(existing).slice(-MAX_HISTORY_SIZE);
+      localStorage.setItem(getSeenHistoryKey(), JSON.stringify(mergedList));
+    }
+  } catch (err) {
+    console.warn('Failed to sync history with review states:', err);
+  }
+}
+
+/**
  * Clears history for testing/reset if requested
  */
 export function resetQuestionHistory(): void {
   if (typeof window === 'undefined' || !window.localStorage) return;
-  localStorage.removeItem(STORAGE_KEY_SEEN_HISTORY);
-  localStorage.removeItem(STORAGE_KEY_DAILY_SEEN);
-  localStorage.removeItem(STORAGE_KEY_SPEED_BLITZ_RECENT);
+  localStorage.removeItem(getSeenHistoryKey());
+  localStorage.removeItem(getDailySeenKey());
+  localStorage.removeItem(getSpeedBlitzKey());
+  localStorage.removeItem(STORAGE_KEY_SEEN_HISTORY_PREFIX);
+  localStorage.removeItem(STORAGE_KEY_DAILY_SEEN_PREFIX);
+  localStorage.removeItem(STORAGE_KEY_SPEED_BLITZ_RECENT_PREFIX);
 }
 
 /**
@@ -130,7 +207,7 @@ export function resetQuestionHistory(): void {
 export function getRecentSpeedBlitzQuestionIds(): string[] {
   if (typeof window === 'undefined' || !window.localStorage) return [];
   try {
-    const raw = localStorage.getItem(STORAGE_KEY_SPEED_BLITZ_RECENT);
+    const raw = localStorage.getItem(getSpeedBlitzKey()) || (currentHistoryUid ? localStorage.getItem(STORAGE_KEY_SPEED_BLITZ_RECENT_PREFIX) : null);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed.map(String).filter(Boolean) : [];
@@ -148,12 +225,11 @@ export function recordSpeedBlitzQuestionsShown(questionIds: string[]): void {
   try {
     const existing = getRecentSpeedBlitzQuestionIds();
     const newIdsSet = new Set(questionIds.map(String).filter(Boolean));
-    // Filter out previous occurrences of the new IDs to maintain LRU order at the tail
     const filtered = existing.filter(id => !newIdsSet.has(id));
     filtered.push(...Array.from(newIdsSet));
 
     const trimmed = filtered.slice(-MAX_SPEED_BLITZ_RECENT_SIZE);
-    localStorage.setItem(STORAGE_KEY_SPEED_BLITZ_RECENT, JSON.stringify(trimmed));
+    localStorage.setItem(getSpeedBlitzKey(), JSON.stringify(trimmed));
   } catch (err) {
     console.warn('Failed to record Speed Blitz recent question IDs:', err);
   }
@@ -164,7 +240,8 @@ export function recordSpeedBlitzQuestionsShown(questionIds: string[]): void {
  */
 export function clearSpeedBlitzRecentHistory(): void {
   if (typeof window === 'undefined' || !window.localStorage) return;
-  localStorage.removeItem(STORAGE_KEY_SPEED_BLITZ_RECENT);
+  localStorage.removeItem(getSpeedBlitzKey());
+  localStorage.removeItem(STORAGE_KEY_SPEED_BLITZ_RECENT_PREFIX);
 }
 
 /**
@@ -173,9 +250,13 @@ export function clearSpeedBlitzRecentHistory(): void {
 export function clearSeenHistory(): void {
   if (typeof window === 'undefined' || !window.localStorage) return;
   try {
-    localStorage.removeItem(STORAGE_KEY_SEEN_HISTORY);
-    localStorage.removeItem(STORAGE_KEY_DAILY_SEEN);
-    localStorage.removeItem(STORAGE_KEY_SPEED_BLITZ_RECENT);
+    localStorage.removeItem(getSeenHistoryKey());
+    localStorage.removeItem(getDailySeenKey());
+    localStorage.removeItem(getSpeedBlitzKey());
+    localStorage.removeItem(STORAGE_KEY_SEEN_HISTORY_PREFIX);
+    localStorage.removeItem(STORAGE_KEY_DAILY_SEEN_PREFIX);
+    localStorage.removeItem(STORAGE_KEY_SPEED_BLITZ_RECENT_PREFIX);
+    currentHistoryUid = null;
   } catch (err) {
     console.warn('Failed to clear question history:', err);
   }

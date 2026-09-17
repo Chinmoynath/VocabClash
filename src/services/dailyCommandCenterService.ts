@@ -196,6 +196,38 @@ export function getDailyStudySummary(
     }
   }
 
+  // Sort due items strictly adhering to spaced-repetition priority:
+  // 1. Most Overdue items first (largest gap past dueAt)
+  // 2. Weaker / higher-error items (high wrong count, active lapses, low mastery)
+  // 3. Older last review date
+  dueSavedWords.sort((a, b) => {
+    const memA = (a.question.memoryKey || a.question.wordOrPhrase || '').toLowerCase().trim();
+    const memB = (b.question.memoryKey || b.question.wordOrPhrase || '').toLowerCase().trim();
+    const stateA = questionReviewScheduler.getReviewState(memA);
+    const stateB = questionReviewScheduler.getReviewState(memB);
+
+    const dueAtA = stateA?.nextReviewAt || stateA?.dueAt || a.savedAt || 0;
+    const dueAtB = stateB?.nextReviewAt || stateB?.dueAt || b.savedAt || 0;
+    const overdueDiff = (now - dueAtA) - (now - dueAtB); // Positive = A is more overdue
+
+    // If significant overdue difference (> 1 hour difference), prioritize more overdue
+    if (Math.abs(overdueDiff) > 3600000) {
+      return dueAtA - dueAtB; // Smaller timestamp = more overdue
+    }
+
+    // 2. Weakness / error weight
+    const errorsA = (stateA?.wrongCount || 0) * 2 + (stateA?.lapseCount || 0) * 3 + (a.mistakeCount || 0);
+    const errorsB = (stateB?.wrongCount || 0) * 2 + (stateB?.lapseCount || 0) * 3 + (b.mistakeCount || 0);
+    if (errorsA !== errorsB) {
+      return errorsB - errorsA; // Higher error count first
+    }
+
+    // 3. Older last review date
+    const lastReviewedA = stateA?.lastReviewedAt || stateA?.lastSeenAt || a.lastReviewedAt || a.savedAt || 0;
+    const lastReviewedB = stateB?.lastReviewedAt || stateB?.lastSeenAt || b.lastReviewedAt || b.savedAt || 0;
+    return lastReviewedA - lastReviewedB;
+  });
+
   // Only actual saved words with full question metadata in the vault can be reviewed
   const dueMistakesCount = dueSavedWords.length;
 

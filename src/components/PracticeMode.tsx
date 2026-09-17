@@ -1911,17 +1911,6 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
                       <Bookmark className={`w-3 h-3 ${isBookmarked ? 'fill-amber-400' : ''}`} />
                       <span>{isBookmarked ? 'Saved' : 'Save'}</span>
                     </button>
-
-                    <button
-                      onClick={() => {
-                        soundManager.playTap();
-                        onOpenAiTutor(currentQ);
-                      }}
-                      className="px-2 py-1 rounded-lg bg-purple-950/90 border border-purple-800 text-purple-300 text-[11px] flex items-center gap-1 font-bold hover:bg-purple-900"
-                    >
-                      <Sparkles className="w-3 h-3" />
-                      AI Deep Dive
-                    </button>
                   </div>
                 </div>
 
