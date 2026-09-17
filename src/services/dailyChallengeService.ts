@@ -49,7 +49,7 @@ export function isChinmoyAccount(email?: string | null, name?: string | null): b
 }
 
 /**
- * Strips any leaked attempts that belong to another account (e.g. Chinmoy's leaked 9/20 attempt appearing in Suraj's profile)
+ * Strips any leaked attempts that belong to another account without deleting genuine user history
  */
 export function sanitizeDailyChallengeHistory(
   history: DailyChallengeAttempt[],
@@ -67,26 +67,19 @@ export function sanitizeDailyChallengeHistory(
     // Chinmoy's genuine attempts are preserved
     if (isChinmoy) return true;
 
-    // For any non-Chinmoy user (like Suraj Kumar):
-    // Purge Chinmoy's leaked attempt from today (date "2026-09-16", score 9, 20 max marks, 45% accuracy, 48s time)
-    const isLeakedChinmoyAttempt = 
-      attempt.score === 9 && 
-      attempt.maxMarks === 20 && 
-      attempt.percentage === 45 && 
-      attempt.timeTakenSeconds === 48;
-
-    if (isLeakedChinmoyAttempt) {
-      console.warn('[Daily Challenge] Filtered leaked attempt from non-Chinmoy account:', userId || effectiveEmail);
-      return false;
-    }
-
-    // Filter attempts explicitly belonging to Chinmoy
+    // Filter attempts explicitly tagged with Chinmoy's email if viewing on another account
     if (attempt.userEmail && isChinmoyAccount(attempt.userEmail)) {
       return false;
     }
 
-    // Filter attempts with mismatching user IDs if explicitly tagged
-    if (attempt.userId && userId && attempt.userId !== userId && !attempt.userId.startsWith('guest_')) {
+    // Filter attempts with mismatching user IDs if explicitly tagged with another authenticated user
+    if (
+      attempt.userId && 
+      userId && 
+      attempt.userId !== userId && 
+      !attempt.userId.startsWith('guest_') && 
+      !userId.startsWith('guest_')
+    ) {
       return false;
     }
 
@@ -95,13 +88,24 @@ export function sanitizeDailyChallengeHistory(
 }
 
 /**
- * Returns today's date formatted as YYYY-MM-DD in local time
+ * Returns today's date formatted as YYYY-MM-DD in India Standard Time (Asia/Kolkata).
+ * Ensures a single synchronized calendar date for all users worldwide.
  */
 export function getTodayDateString(date: Date = new Date()): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  try {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    return formatter.format(date);
+  } catch {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
 }
 
 /**
@@ -208,7 +212,7 @@ export function clearDailyChallengeLocalCache(userId?: string | null): void {
 }
 
 /**
- * Merges external cloud attempts with local user attempts
+ * Merges external cloud attempts with local user attempts, preserving all unique dates
  */
 export function mergeDailyChallengeHistory(cloudAttempts: DailyChallengeAttempt[], userId?: string | null): DailyChallengeAttempt[] {
   const local = getDailyChallengeHistory(userId);
@@ -219,14 +223,16 @@ export function mergeDailyChallengeHistory(cloudAttempts: DailyChallengeAttempt[
   const sanitizedCloud = sanitizeDailyChallengeHistory(cloudAttempts, userId);
   const map = new Map<string, DailyChallengeAttempt>();
 
+  // 1. Ingest local records
   local.forEach(item => {
     if (item && item.date) map.set(item.date, item);
   });
 
+  // 2. Ingest cloud records, keeping best/most recent for each date
   sanitizedCloud.forEach(item => {
     if (item && item.date) {
       const existing = map.get(item.date);
-      if (!existing || (item.score || 0) >= (existing.score || 0)) {
+      if (!existing || (item.score ?? 0) >= (existing.score ?? 0)) {
         map.set(item.date, item);
       }
     }
@@ -255,6 +261,7 @@ export function hasCompletedTodayChallenge(userId?: string | null): boolean {
 
 /**
  * Saves a completed daily challenge attempt both locally, to Firestore (cloud), and to backend.
+ * Only awards LP on the FIRST official attempt of the day (idempotent LP safety).
  */
 export function saveDailyChallengeAttempt(
   attempt: DailyChallengeAttempt,
@@ -263,26 +270,30 @@ export function saveDailyChallengeAttempt(
   const effectiveUid = auth.currentUser?.uid || (player?.id && !player.id.startsWith('guest_') ? player.id : null);
   const effectiveEmail = auth.currentUser?.email || player?.email;
 
-  const history = getDailyChallengeHistory(effectiveUid).filter(a => a.date !== attempt.date);
-  
-  // Calculate bonus LP for the daily challenge
-  const rankPointsGained = 25 + attempt.correctCount * 2;
+  const existingHistory = getDailyChallengeHistory(effectiveUid);
+  const existingTodayAttempt = existingHistory.find(a => a.date === attempt.date);
+
+  // LP is awarded exactly once per day on the first official completion
+  const isFirstAttemptToday = !existingTodayAttempt;
+  const rankPointsGained = isFirstAttemptToday ? (25 + attempt.correctCount * 2) : 0;
+
   const finalizedAttempt: DailyChallengeAttempt = {
     ...attempt,
-    rankPointsAwarded: rankPointsGained,
+    rankPointsAwarded: isFirstAttemptToday ? rankPointsGained : (existingTodayAttempt?.rankPointsAwarded || 0),
     userId: effectiveUid || undefined,
     userEmail: effectiveEmail || undefined,
   };
-  
-  history.push(finalizedAttempt);
-  history.sort((a, b) => a.date.localeCompare(b.date));
-  
+
+  // Replace any existing attempt for today while keeping all other dates intact
+  const filteredHistory = existingHistory.filter(a => a.date !== attempt.date);
+  const updatedHistory = [...filteredHistory, finalizedAttempt].sort((a, b) => a.date.localeCompare(b.date));
+
   // 1. User-scoped Local Storage persistence
-  setDailyChallengeHistoryForUser(effectiveUid, history);
+  setDailyChallengeHistoryForUser(effectiveUid, updatedHistory);
 
   // 2. Persistent Firestore Synchronization (Cross-device phone & laptop sync)
   if (effectiveUid) {
-    saveDailyChallengeToFirestore(effectiveUid, finalizedAttempt, history).catch(err => {
+    saveDailyChallengeToFirestore(effectiveUid, finalizedAttempt, updatedHistory).catch(err => {
       console.warn('[Daily Challenge] Firestore persistence notice:', err);
     });
   }
@@ -306,12 +317,12 @@ export function saveDailyChallengeAttempt(
     window.dispatchEvent(new CustomEvent('daily-challenge-updated'));
   }
 
-  return { history, rankPointsGained };
+  return { history: updatedHistory, rankPointsGained };
 }
 
 /**
- * Fetches Firestore history and syncs with user-scoped client local history.
- * Automatically purges any contaminated records from cloud and local storage.
+ * Fetches Firestore history and merges with user-scoped client local history.
+ * Ensures local history is NEVER wiped if cloud returns empty.
  */
 export async function syncDailyChallengeWithBackend(
   userId?: string | null,
@@ -320,21 +331,23 @@ export async function syncDailyChallengeWithBackend(
   const effectiveUid = auth.currentUser?.uid || (userId && userId !== 'default_user' && !userId.startsWith('guest_') ? userId : null);
   const effectiveEmail = userEmail || auth.currentUser?.email;
 
+  const localBefore = getDailyChallengeHistory(effectiveUid);
+
   // 1. First priority: Firestore Cloud Sync (user-scoped)
   if (effectiveUid) {
     try {
       const rawCloud = await fetchDailyChallengeHistoryFromFirestore(effectiveUid);
       const cleanCloud = sanitizeDailyChallengeHistory(rawCloud, effectiveUid, effectiveEmail);
 
-      // If contaminated records existed in cloud, immediately purge them from Firestore document and subcollection
-      if (cleanCloud.length !== rawCloud.length) {
-        console.log('[Daily Challenge] Purged contaminated cloud attempts for', effectiveUid);
-        await saveDailyChallengeToFirestore(effectiveUid, null, cleanCloud);
-        await deleteDailyChallengeDayFromFirestore(effectiveUid, getTodayDateString());
+      // Merge cloud attempts with local attempts so neither is lost
+      const merged = mergeDailyChallengeHistory(cleanCloud, effectiveUid);
+
+      // If local had records that cloud lacked, sync merged state up to Firestore
+      if (merged.length > cleanCloud.length) {
+        saveDailyChallengeToFirestore(effectiveUid, null, merged).catch(() => {});
       }
 
-      setDailyChallengeHistoryForUser(effectiveUid, cleanCloud);
-      return cleanCloud;
+      return merged;
     } catch (err) {
       console.warn('[Daily Challenge] Firestore sync notice:', err);
     }
@@ -348,8 +361,8 @@ export async function syncDailyChallengeWithBackend(
         const data = await res.json();
         if (data && data.success && Array.isArray(data.history)) {
           const cleanBackend = sanitizeDailyChallengeHistory(data.history, effectiveUid, effectiveEmail);
-          setDailyChallengeHistoryForUser(effectiveUid, cleanBackend);
-          return cleanBackend;
+          const merged = mergeDailyChallengeHistory(cleanBackend, effectiveUid);
+          return merged;
         }
       }
     } catch (err) {
@@ -357,7 +370,7 @@ export async function syncDailyChallengeWithBackend(
     }
   }
 
-  return getDailyChallengeHistory(effectiveUid);
+  return localBefore;
 }
 
 /**
@@ -371,18 +384,41 @@ export function formatDuration(seconds: number): string {
 }
 
 /**
- * Returns remaining time until midnight (next daily reset)
+ * Returns remaining time until midnight in India Standard Time (Asia/Kolkata)
  */
 export function getTimeUntilNextReset(): { hours: number; minutes: number; seconds: number; formatted: string } {
-  const now = new Date();
-  const midnight = new Date(now);
-  midnight.setHours(24, 0, 0, 0);
-  
-  const diffMs = Math.max(0, midnight.getTime() - now.getTime());
-  const hours = Math.floor(diffMs / (1000 * 60 * 60));
-  const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
-  const seconds = Math.floor((diffMs % (1000 * 60)) / 1000);
-  
-  const formatted = `${hours}h ${minutes}m ${seconds}s`;
-  return { hours, minutes, seconds, formatted };
+  try {
+    const now = new Date();
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Kolkata',
+      hour: 'numeric',
+      minute: 'numeric',
+      second: 'numeric',
+      hour12: false,
+    });
+    const parts = formatter.formatToParts(now);
+    let h = 0, m = 0, s = 0;
+    for (const p of parts) {
+      if (p.type === 'hour') h = parseInt(p.value, 10) % 24;
+      if (p.type === 'minute') m = parseInt(p.value, 10);
+      if (p.type === 'second') s = parseInt(p.value, 10);
+    }
+    const currentSecondsInDay = h * 3600 + m * 60 + s;
+    const remainingSeconds = Math.max(0, 86400 - currentSecondsInDay);
+    const hours = Math.floor(remainingSeconds / 3600);
+    const minutes = Math.floor((remainingSeconds % 3600) / 60);
+    const seconds = remainingSeconds % 60;
+    const formatted = `${hours}h ${minutes}m ${seconds}s`;
+    return { hours, minutes, seconds, formatted };
+  } catch {
+    const now = new Date();
+    const midnight = new Date(now);
+    midnight.setHours(24, 0, 0, 0);
+    const diffMs = Math.max(0, midnight.getTime() - now.getTime());
+    const hours = Math.floor(diffMs / (1000 * 60 * 60));
+    const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+    const seconds = Math.floor((diffMs % (1000 * 60)) / 1000);
+    const formatted = `${hours}h ${minutes}m ${seconds}s`;
+    return { hours, minutes, seconds, formatted };
+  }
 }

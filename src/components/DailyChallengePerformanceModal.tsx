@@ -516,48 +516,54 @@ export const DailyChallengePerformanceModal: React.FC<DailyChallengePerformanceM
               Recent Challenge Attempts
             </div>
             <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-              {[...chartData].reverse().map((att, idx) => {
-                const isToday = att.date === getTodayDateString();
-                return (
-                  <div 
-                    key={idx}
-                    className={`p-2.5 rounded-xl border flex items-center justify-between text-xs transition-all ${
-                      isToday 
-                        ? 'bg-slate-800/90 border-emerald-500/40 text-slate-100' 
-                        : 'bg-slate-900/60 border-slate-800/80 text-slate-300'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="w-2 h-2 rounded-full bg-emerald-400" />
-                      <div>
-                        <div className="font-bold text-slate-200 flex items-center gap-1.5">
-                          <span>{formatDisplayDate(att.date)}</span>
-                          {isToday && (
-                            <span className="text-[9px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.2 rounded font-bold">
-                              TODAY
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-[10px] text-slate-400 flex items-center gap-1">
-                          <Clock className="w-3 h-3" />
-                          <span>{formatDuration(att.timeTakenSeconds)}</span>
-                          <span>•</span>
-                          <span>{att.correctCount} correct / {att.wrongCount} wrong</span>
+              {history && history.length > 0 ? (
+                [...history].reverse().map((att, idx) => {
+                  const isToday = att.date === getTodayDateString();
+                  return (
+                    <div 
+                      key={idx}
+                      className={`p-2.5 rounded-xl border flex items-center justify-between text-xs transition-all ${
+                        isToday 
+                          ? 'bg-slate-800/90 border-emerald-500/40 text-slate-100' 
+                          : 'bg-slate-900/60 border-slate-800/80 text-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-2 h-2 rounded-full bg-emerald-400" />
+                        <div>
+                          <div className="font-bold text-slate-200 flex items-center gap-1.5">
+                            <span>{formatDisplayDate(att.date)}</span>
+                            {isToday && (
+                              <span className="text-[9px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.2 rounded font-bold">
+                                TODAY
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[10px] text-slate-400 flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            <span>{formatDuration(att.timeTakenSeconds)}</span>
+                            <span>•</span>
+                            <span>{att.correctCount} correct / {att.wrongCount} wrong</span>
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div className="text-right shrink-0">
-                      <div className="font-mono font-black text-amber-400 text-xs">
-                        {att.score} / {att.maxMarks} ({att.percentage}%)
-                      </div>
-                      <div className="text-[10px] text-emerald-400 font-mono">
-                        +{att.rankPointsAwarded || 65} LP
+                      <div className="text-right shrink-0">
+                        <div className="font-mono font-black text-amber-400 text-xs">
+                          {att.score} / {att.maxMarks} ({att.percentage}%)
+                        </div>
+                        <div className="text-[10px] text-emerald-400 font-mono">
+                          +{att.rankPointsAwarded || 65} LP
+                        </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              ) : (
+                <div className="p-4 rounded-xl bg-slate-900/40 border border-slate-800/80 text-center text-xs text-slate-400">
+                  No challenge attempts recorded yet. Complete today's drill to start your graph!
+                </div>
+              )}
             </div>
           </div>
         </div>

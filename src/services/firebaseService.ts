@@ -33,7 +33,9 @@ import {
   setDoc,
   deleteDoc,
   getDocFromServer,
-  onSnapshot
+  onSnapshot,
+  collection,
+  getDocs
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { PlayerProfile, UserSubscription, DailyStreakState, SavedWord, QuestionCategory, ExamType } from '../types';
@@ -756,23 +758,50 @@ export async function deleteDailyChallengeDayFromFirestore(uid: string, date: st
 }
 
 /**
- * Fetches daily challenge history from Firestore for cross-device sync
+ * Fetches daily challenge history from Firestore for cross-device sync.
+ * Reads both the root document array and the daily_challenges subcollection,
+ * merging and deduplicating by date so no historical attempts are ever lost.
  */
 export async function fetchDailyChallengeHistoryFromFirestore(uid: string): Promise<any[]> {
   if (!uid || uid === 'default_user') return [];
+  const map = new Map<string, any>();
+
   try {
+    // 1. Fetch array from users/{uid} root document
     const userDocRef = doc(db, 'users', uid);
-    const snap = await withTimeout(getDoc(userDocRef), 2200, null);
+    const snap = await withTimeout(getDoc(userDocRef), 2500, null);
     if (snap && snap.exists()) {
       const data = snap.data();
       if (Array.isArray(data?.dailyChallengeHistory)) {
-        return data.dailyChallengeHistory;
+        data.dailyChallengeHistory.forEach((item: any) => {
+          if (item && item.date) {
+            map.set(item.date, item);
+          }
+        });
       }
+    }
+
+    // 2. Fetch all day documents from users/{uid}/daily_challenges subcollection
+    const subColRef = collection(db, 'users', uid, 'daily_challenges');
+    const subSnap = await withTimeout(getDocs(subColRef), 2500, null);
+    if (subSnap && !subSnap.empty) {
+      subSnap.forEach((docItem) => {
+        const item = docItem.data();
+        if (item && (item.date || docItem.id)) {
+          const dateKey = item.date || docItem.id;
+          const existing = map.get(dateKey);
+          if (!existing || (item.score ?? 0) >= (existing.score ?? 0)) {
+            map.set(dateKey, { ...item, date: dateKey });
+          }
+        }
+      });
     }
   } catch (err) {
     console.warn('[DAILY CHALLENGE FIRESTORE] Notice fetching history:', err);
   }
-  return [];
+
+  const merged = Array.from(map.values()).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  return merged;
 }
 
 /**

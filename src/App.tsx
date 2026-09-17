@@ -1289,30 +1289,19 @@ export default function App() {
                 saveDailyTargetState(cloudData.dailyTarget);
               }
             }
-            if (cloudData.dailyChallengeHistory && Array.isArray(cloudData.dailyChallengeHistory)) {
-              const sanitizedHistory = sanitizeDailyChallengeHistory(cloudData.dailyChallengeHistory, user.uid, user.email);
+            // Safely merge cloud challenge history with user local records without ever wiping
+            const cloudHistory = Array.isArray(cloudData.dailyChallengeHistory) ? cloudData.dailyChallengeHistory : [];
+            const mergedHistory = mergeDailyChallengeHistory(cloudHistory, user.uid);
 
-              // If contaminated records existed in cloud (e.g. Chinmoy attempt leaked to Suraj), purge them from Firestore
-              if (sanitizedHistory.length !== cloudData.dailyChallengeHistory.length) {
-                console.log('[Daily Challenge] Purged contaminated cloud records for', user.uid);
-                saveDailyChallengeToFirestore(user.uid, null, sanitizedHistory).catch(() => {});
-                deleteDailyChallengeDayFromFirestore(user.uid, getTodayDateString()).catch(() => {});
+            // Ingest all completed genuine challenge dates into streak history to ensure streak integrity
+            for (const attempt of mergedHistory) {
+              if (attempt?.date) {
+                mergedStreak.history[attempt.date] = true;
               }
-
-              setDailyChallengeHistoryForUser(user.uid, sanitizedHistory);
-
-              // Ingest all completed genuine challenge dates into streak history to ensure streak integrity
-              for (const attempt of sanitizedHistory) {
-                if (attempt?.date) {
-                  mergedStreak.history[attempt.date] = true;
-                }
-              }
-              const recalc = calculateStreakFromHistory(mergedStreak.history);
-              mergedStreak.currentStreak = Math.max(mergedStreak.currentStreak, recalc.currentStreak);
-              mergedStreak.longestStreak = Math.max(mergedStreak.longestStreak, recalc.longestStreak);
-            } else {
-              setDailyChallengeHistoryForUser(user.uid, []);
             }
+            const recalc = calculateStreakFromHistory(mergedStreak.history);
+            mergedStreak.currentStreak = Math.max(mergedStreak.currentStreak, recalc.currentStreak);
+            mergedStreak.longestStreak = Math.max(mergedStreak.longestStreak, recalc.longestStreak);
 
             if (isChinmoyUser) {
               mergedStreak.history['2026-09-15'] = true;
@@ -1408,7 +1397,8 @@ export default function App() {
               practiceFilters: localPlayer.practiceFilters || practiceFilters,
             };
 
-            setDailyChallengeHistoryForUser(user.uid, []);
+            const existingGuestHistory = getDailyChallengeHistory(null);
+            const userHistory = mergeDailyChallengeHistory(existingGuestHistory, user.uid);
             setPlayer(newPlayer);
             rankStore.handleAuthChange(user, newPlayer);
             try {
@@ -1423,7 +1413,7 @@ export default function App() {
                 streak, 
                 savedWords, 
                 dailyTarget: getDailyTargetState(),
-                dailyChallengeHistory: [],
+                dailyChallengeHistory: userHistory,
               },
               user
             ).catch((err) => console.warn('Initial save notice:', err));

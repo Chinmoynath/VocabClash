@@ -72,14 +72,14 @@ export const DailyChallengeQuizModal: React.FC<DailyChallengeQuizModalProps> = (
     setRankPointsGained(0);
     startTimeRef.current = Date.now();
 
-    // Fetch 20 high-yield deterministic questions for today's daily challenge
+    // Fetch 20 high-yield deterministic questions for today's daily challenge (universal set for all users)
     const todayStr = getTodayDateString();
     const pool = questionBankEngine.getDailyChallengeQuestions(
       todayStr,
-      (player.targetExam as any) || 'ALL'
+      'ALL'
     );
     setQuestions(pool);
-  }, [isOpen, player.targetExam]);
+  }, [isOpen]);
 
   // Handle countdown timer
   useEffect(() => {
