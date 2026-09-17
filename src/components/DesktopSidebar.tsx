@@ -41,6 +41,7 @@ interface DesktopSidebarProps {
   onOpenAdminArticles?: () => void;
   onOpenAdminImporter?: () => void;
   onOpenBattleAnalytics?: () => void;
+  isLoadingProfile?: boolean;
 }
 
 export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
@@ -63,6 +64,7 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
   onOpenAdminArticles,
   onOpenAdminImporter,
   onOpenBattleAnalytics,
+  isLoadingProfile = false,
 }) => {
   const navItems = [
     {
@@ -363,49 +365,70 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
         )}
 
         {/* User Card */}
-        <div
-          onClick={() => {
-            soundManager.playTap();
-            onOpenProfile();
-          }}
-          className="bg-slate-900/90 hover:bg-slate-850 border border-slate-800/80 hover:border-slate-700 p-2.5 rounded-2xl flex items-center justify-between cursor-pointer transition-all group"
-        >
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="relative shrink-0">
-              {player.photoURL ? (
-                <img
-                  src={player.photoURL}
-                  alt={player.name}
-                  className="w-8 h-8 rounded-full object-cover shadow-sm border border-amber-400/50"
-                  referrerPolicy="no-referrer"
-                />
-              ) : (
-                <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-amber-600 to-amber-400 flex items-center justify-center text-sm shadow-sm border border-amber-300/40">
-                  {player.avatar}
+        {isLoadingProfile ? (
+          <div
+            id="desktop-sidebar-profile-skeleton"
+            className="bg-slate-900/90 border border-slate-800/80 p-2.5 rounded-2xl flex items-center justify-between animate-pulse select-none"
+            aria-busy="true"
+            aria-label="Loading profile..."
+          >
+            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+              <div className="relative shrink-0">
+                <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700/80" />
+                <div className="absolute -bottom-1 -right-1 bg-slate-800 border border-slate-700 w-6 h-3 rounded-full" />
+              </div>
+              <div className="min-w-0 flex-1 space-y-1.5">
+                <div className="h-3 w-20 bg-slate-800/90 rounded" />
+                <div className="h-2.5 w-14 bg-slate-800/60 rounded" />
+              </div>
+            </div>
+            <div className="w-3.5 h-3.5 rounded bg-slate-800/60 shrink-0" />
+          </div>
+        ) : (
+          <div
+            onClick={() => {
+              soundManager.playTap();
+              onOpenProfile();
+            }}
+            className="bg-slate-900/90 hover:bg-slate-850 border border-slate-800/80 hover:border-slate-700 p-2.5 rounded-2xl flex items-center justify-between cursor-pointer transition-all group"
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="relative shrink-0">
+                {player.photoURL ? (
+                  <img
+                    src={player.photoURL}
+                    alt={player.name}
+                    className="w-8 h-8 rounded-full object-cover shadow-sm border border-amber-400/50"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-amber-600 to-amber-400 flex items-center justify-center text-sm shadow-sm border border-amber-300/40">
+                    {player.avatar}
+                  </div>
+                )}
+                <div className="absolute -bottom-1 -right-1 bg-indigo-600 text-[8px] font-bold px-1 rounded-full border border-indigo-400">
+                  Lv.{player.level}
                 </div>
-              )}
-              <div className="absolute -bottom-1 -right-1 bg-indigo-600 text-[8px] font-bold px-1 rounded-full border border-indigo-400">
-                Lv.{player.level}
+              </div>
+
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-bold text-slate-100 group-hover:text-amber-400 transition-colors truncate">
+                  {extractCleanUserName(player.name, player.email)}
+                </div>
+                <div className="text-[10px] text-amber-400/90 font-mono flex items-center gap-1">
+                  <Shield className="w-3 h-3 text-amber-400 shrink-0" />
+                  <span>{player.rankPoints} LP</span>
+                  <span className="text-slate-500">•</span>
+                  <span className="text-slate-400 truncate">{player.tierTitle.replace(/[^\w\s]/gi, '')}</span>
+                </div>
               </div>
             </div>
 
-            <div className="min-w-0 flex-1">
-              <div className="text-xs font-bold text-slate-100 group-hover:text-amber-400 transition-colors truncate">
-                {extractCleanUserName(player.name, player.email)}
-              </div>
-              <div className="text-[10px] text-amber-400/90 font-mono flex items-center gap-1">
-                <Shield className="w-3 h-3 text-amber-400 shrink-0" />
-                <span>{player.rankPoints} LP</span>
-                <span className="text-slate-500">•</span>
-                <span className="text-slate-400 truncate">{player.tierTitle.replace(/[^\w\s]/gi, '')}</span>
-              </div>
+            <div className="text-[10px] text-slate-400 group-hover:text-white transition-colors">
+              {currentUser ? '⚙️' : <LogIn className="w-3.5 h-3.5 text-indigo-400" />}
             </div>
           </div>
-
-          <div className="text-[10px] text-slate-400 group-hover:text-white transition-colors">
-            {currentUser ? '⚙️' : <LogIn className="w-3.5 h-3.5 text-indigo-400" />}
-          </div>
-        </div>
+        )}
 
       </div>
       </div>

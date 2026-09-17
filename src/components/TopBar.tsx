@@ -19,6 +19,7 @@ interface TopBarProps {
   onOpenAdminImporter?: () => void;
   onOpenAdminArticles?: () => void;
   isAdmin?: boolean;
+  isLoadingProfile?: boolean;
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -35,47 +36,109 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenAdminImporter,
   onOpenAdminArticles,
   isAdmin = false,
+  isLoadingProfile = false,
 }) => {
+  // Preload and track photo URL load state to avoid generic avatar flash
+  const [photoLoaded, setPhotoLoaded] = React.useState<boolean>(false);
+
+  React.useEffect(() => {
+    if (!player.photoURL) {
+      setPhotoLoaded(false);
+      return;
+    }
+
+    let isSubscribed = true;
+    const img = new Image();
+    img.src = player.photoURL;
+
+    if (img.complete) {
+      setPhotoLoaded(true);
+    } else {
+      setPhotoLoaded(false);
+      img.onload = () => {
+        if (isSubscribed) setPhotoLoaded(true);
+      };
+      img.onerror = () => {
+        if (isSubscribed) setPhotoLoaded(false);
+      };
+    }
+
+    return () => {
+      isSubscribed = false;
+    };
+  }, [player.photoURL]);
+
   return (
     <header className="w-full bg-slate-950/95 backdrop-blur-xl px-3 sm:px-4 py-2.5 sm:py-3.5 pt-[max(0.65rem,env(safe-area-inset-top))] border-b border-slate-800/80 flex items-center justify-between z-30 shrink-0 shadow-lg shadow-black/20 min-h-[3.75rem] sm:min-h-[4.25rem]">
       {/* User Rank & Avatar */}
-      <button
-        onClick={onOpenProfile}
-        className="flex items-center gap-2.5 sm:gap-3 text-left group hover:opacity-95 transition-all min-w-0 flex-1 max-w-[52%] sm:max-w-[280px] md:max-w-none mr-1.5"
-      >
-        <div className="relative shrink-0 flex items-center justify-center">
-          {player.photoURL ? (
-            <img
-              src={player.photoURL}
-              alt={player.name}
-              className="w-10 h-10 sm:w-11 sm:h-11 rounded-full object-cover shadow-md border-2 border-amber-400/80 ring-1 ring-amber-400/30"
-              referrerPolicy="no-referrer"
-            />
-          ) : (
-            <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-gradient-to-tr from-amber-600 via-amber-500 to-yellow-400 flex items-center justify-center text-xl shadow-md border-2 border-amber-300/70 ring-1 ring-amber-400/30">
-              {player.avatar}
-            </div>
-          )}
-          <div className="absolute -bottom-0.5 -right-1 bg-gradient-to-r from-indigo-600 to-indigo-500 text-[9px] sm:text-[10px] font-black px-1.5 py-0.5 rounded-full border border-indigo-300/70 shadow-sm leading-none text-white tracking-tight z-10">
-            Lv.{player.level}
+      {isLoadingProfile ? (
+        <div
+          id="topbar-profile-skeleton"
+          className="flex items-center gap-2.5 sm:gap-3 text-left min-w-0 flex-1 max-w-[52%] sm:max-w-[280px] md:max-w-none mr-1.5 animate-pulse select-none"
+          aria-busy="true"
+          aria-label="Loading profile..."
+        >
+          <div className="relative shrink-0 flex items-center justify-center">
+            <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-slate-800/90 border border-slate-700/60 shadow-md" />
+            <div className="absolute -bottom-0.5 -right-1 bg-slate-800 border border-slate-700/70 w-7 sm:w-8 h-3.5 rounded-full" />
           </div>
-        </div>
 
-        <div className="min-w-0 flex-1 flex flex-col justify-center">
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className="font-bold text-xs sm:text-sm text-slate-100 group-hover:text-amber-400 transition-colors truncate block leading-tight">
-              {extractCleanUserName(player.name, player.email)}
-            </span>
-            <span className="text-[9px] sm:text-[10px] bg-slate-800/90 text-slate-300 px-1 py-0.5 rounded font-mono hidden xs:inline shrink-0 border border-slate-700/60">
-              🇮🇳 IN
-            </span>
-          </div>
-          <div className="flex items-center gap-1 text-[11px] sm:text-xs text-amber-400/95 font-medium leading-tight mt-0.5">
-            <Shield className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-            <span className="font-bold text-amber-300/95 font-mono">{player.rankPoints} LP</span>
+          <div className="min-w-0 flex-1 flex flex-col justify-center space-y-1.5">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <div className="h-3.5 sm:h-4 w-24 sm:w-28 bg-slate-800/90 rounded-md" />
+            </div>
+            <div className="flex items-center gap-1 mt-0.5">
+              <div className="h-3 w-16 bg-slate-800/60 rounded-md" />
+            </div>
           </div>
         </div>
-      </button>
+      ) : (
+        <button
+          onClick={onOpenProfile}
+          id="topbar-profile-button"
+          className="flex items-center gap-2.5 sm:gap-3 text-left group hover:opacity-95 transition-all min-w-0 flex-1 max-w-[52%] sm:max-w-[280px] md:max-w-none mr-1.5 cursor-pointer"
+        >
+          <div className="relative shrink-0 flex items-center justify-center">
+            {player.photoURL ? (
+              <>
+                <img
+                  src={player.photoURL}
+                  alt={player.name}
+                  className={`w-10 h-10 sm:w-11 sm:h-11 rounded-full object-cover shadow-md border-2 border-amber-400/80 ring-1 ring-amber-400/30 transition-opacity duration-200 ${
+                    photoLoaded ? 'opacity-100' : 'opacity-0'
+                  }`}
+                  referrerPolicy="no-referrer"
+                />
+                {!photoLoaded && (
+                  <div className="absolute inset-0 w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-slate-800/90 border border-slate-700/60 animate-pulse" />
+                )}
+              </>
+            ) : (
+              <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-gradient-to-tr from-amber-600 via-amber-500 to-yellow-400 flex items-center justify-center text-xl shadow-md border-2 border-amber-300/70 ring-1 ring-amber-400/30">
+                {player.avatar}
+              </div>
+            )}
+            <div className="absolute -bottom-0.5 -right-1 bg-gradient-to-r from-indigo-600 to-indigo-500 text-[9px] sm:text-[10px] font-black px-1.5 py-0.5 rounded-full border border-indigo-300/70 shadow-sm leading-none text-white tracking-tight z-10">
+              Lv.{player.level}
+            </div>
+          </div>
+
+          <div className="min-w-0 flex-1 flex flex-col justify-center">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="font-bold text-xs sm:text-sm text-slate-100 group-hover:text-amber-400 transition-colors truncate block leading-tight">
+                {extractCleanUserName(player.name, player.email)}
+              </span>
+              <span className="text-[9px] sm:text-[10px] bg-slate-800/90 text-slate-300 px-1 py-0.5 rounded font-mono hidden xs:inline shrink-0 border border-slate-700/60">
+                🇮🇳 IN
+              </span>
+            </div>
+            <div className="flex items-center gap-1 text-[11px] sm:text-xs text-amber-400/95 font-medium leading-tight mt-0.5">
+              <Shield className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span className="font-bold text-amber-300/95 font-mono">{player.rankPoints} LP</span>
+            </div>
+          </div>
+        </button>
+      )}
 
       {/* Center/Right Stats, Streak, Premium Button & Sound Controls */}
       <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">

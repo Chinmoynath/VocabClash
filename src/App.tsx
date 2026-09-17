@@ -151,6 +151,41 @@ export function getPlayerStorageKey(userId?: string | null): string {
   return `vocabclash_player_profile_${userId}`;
 }
 
+export interface HeaderVisualCache {
+  displayName: string;
+  avatar: string;
+  photoURL?: string | null;
+  level: number;
+  rankPoints: number;
+  tierTitle?: string;
+  email?: string;
+}
+
+export function getHeaderCacheKey(uid: string): string {
+  return `vocabclash_header_${uid}`;
+}
+
+export function getHeaderCache(uid: string): HeaderVisualCache | null {
+  if (typeof window === 'undefined' || !uid || uid === 'default_user' || uid.startsWith('guest_')) return null;
+  try {
+    const raw = localStorage.getItem(getHeaderCacheKey(uid));
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed.displayName === 'string' && parsed.displayName !== 'Govt Aspirant') {
+        return parsed;
+      }
+    }
+  } catch {}
+  return null;
+}
+
+export function setHeaderCache(uid: string, data: HeaderVisualCache): void {
+  if (typeof window === 'undefined' || !uid || uid === 'default_user' || uid.startsWith('guest_')) return;
+  try {
+    localStorage.setItem(getHeaderCacheKey(uid), JSON.stringify(data));
+  } catch {}
+}
+
 export function cleanupLegacyUnscopedPlayerStorage(): void {
   if (typeof window === 'undefined') return;
   try {
@@ -1166,6 +1201,7 @@ export default function App() {
 
   // Listen to Firebase Auth state & sync with Google Account
   const [sessionLoaded, setSessionLoaded] = useState<boolean>(false);
+  const [isProfileReady, setIsProfileReady] = useState<boolean>(false);
 
   useEffect(() => {
     // Check if coming back from Google redirect auth
@@ -1182,6 +1218,8 @@ export default function App() {
         if (isSwitchingUser) {
           console.log('[Auth] Account switch detected:', priorUid, '->', user.uid, '- purging previous user local cache');
           clearUserDataOnSignOut();
+          setPlayer({ ...INITIAL_PLAYER });
+          setIsProfileReady(false);
         }
         if (typeof window !== 'undefined') {
           localStorage.setItem('vocabclash_last_active_user_uid', user.uid);
@@ -1189,6 +1227,48 @@ export default function App() {
         previousUserUidRef.current = user.uid;
         setCurrentUser(user);
         questionReviewScheduler.setAuthUser(user.uid);
+
+        // FAST VISUAL RESTORATION: Check if safe UID-scoped visual cache exists for this specific authenticated UID
+        const cachedVisual = !isSwitchingUser ? (getHeaderCache(user.uid) || (() => {
+          try {
+            const raw = localStorage.getItem(getPlayerStorageKey(user.uid));
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              if (parsed && parsed.name && parsed.name !== 'Govt Aspirant') {
+                return {
+                  displayName: extractCleanUserName(parsed.name, parsed.email || user.email),
+                  avatar: parsed.avatar || '👨‍💼',
+                  photoURL: parsed.photoURL || user.photoURL || null,
+                  level: parsed.level || 1,
+                  rankPoints: parsed.rankPoints || 0,
+                  tierTitle: parsed.tierTitle,
+                  email: parsed.email || user.email || undefined,
+                };
+              }
+            }
+          } catch {}
+          return null;
+        })()) : null;
+
+        if (cachedVisual) {
+          // Immediately show the user's cached profile in the UI to prevent any visual delay or flash
+          setPlayer(prev => ({
+            ...prev,
+            id: user.uid,
+            name: cachedVisual.displayName,
+            avatar: cachedVisual.avatar,
+            photoURL: cachedVisual.photoURL === null ? null : (cachedVisual.photoURL || user.photoURL || undefined),
+            level: cachedVisual.level,
+            rankPoints: cachedVisual.rankPoints,
+            tierTitle: cachedVisual.tierTitle || prev.tierTitle,
+            email: cachedVisual.email || user.email || prev.email,
+          }));
+          setIsProfileReady(true);
+        } else {
+          // Keep skeleton active until Firebase data loads if no valid UID cache exists
+          setIsProfileReady(false);
+        }
+
         try {
           recordBattleSignupCompleted(user.uid, user.providerData?.[0]?.providerId || 'google');
         } catch {}
@@ -1255,6 +1335,18 @@ export default function App() {
             try {
               localStorage.setItem(getPlayerStorageKey(user.uid), JSON.stringify(resolvedPlayer));
             } catch {}
+
+            // Update UID-scoped visual header cache for instant render on future reloads
+            setHeaderCache(user.uid, {
+              displayName: extractCleanUserName(resolvedPlayer.name, resolvedPlayer.email),
+              avatar: resolvedPlayer.avatar || '👨‍💼',
+              photoURL: resolvedPlayer.photoURL || null,
+              level: resolvedPlayer.level,
+              rankPoints: resolvedPlayer.rankPoints,
+              tierTitle: resolvedPlayer.tierTitle,
+              email: resolvedPlayer.email,
+            });
+            setIsProfileReady(true);
 
             // If profile was contaminated or exam updated, push repaired stats to Firestore users & leaderboard
             if (wasRepaired || cloudP.targetExam !== resolvedTargetExam) {
@@ -1404,6 +1496,18 @@ export default function App() {
               localStorage.setItem(getPlayerStorageKey(user.uid), JSON.stringify(newPlayer));
             } catch {}
 
+            // Update UID-scoped visual header cache for instant render on future reloads
+            setHeaderCache(user.uid, {
+              displayName: extractCleanUserName(newPlayer.name, newPlayer.email),
+              avatar: newPlayer.avatar || '👨‍💼',
+              photoURL: newPlayer.photoURL || null,
+              level: newPlayer.level,
+              rankPoints: newPlayer.rankPoints,
+              tierTitle: newPlayer.tierTitle,
+              email: newPlayer.email,
+            });
+            setIsProfileReady(true);
+
             saveUserDataToFirestore(
               user.uid,
               { 
@@ -1423,6 +1527,7 @@ export default function App() {
         } finally {
           setIsSyncing(false);
           setSessionLoaded(true);
+          setIsProfileReady(true);
         }
       } else {
         // If transitioning from a logged-in user to null (e.g. sign out occurred or token revoked)
@@ -1439,6 +1544,7 @@ export default function App() {
         questionReviewScheduler.setAuthUser(null);
         setIsSyncing(false);
         setSessionLoaded(true);
+        setIsProfileReady(true);
       }
     });
 
@@ -1455,6 +1561,17 @@ export default function App() {
     try {
       const key = getPlayerStorageKey(currentUser?.uid || (player.id?.startsWith('guest_') ? null : player.id));
       localStorage.setItem(key, JSON.stringify(player));
+      if (currentUser?.uid && player.id === currentUser.uid && player.name && player.name !== 'Govt Aspirant') {
+        setHeaderCache(currentUser.uid, {
+          displayName: extractCleanUserName(player.name, player.email),
+          avatar: player.avatar || '👨‍💼',
+          photoURL: player.photoURL || null,
+          level: player.level || 1,
+          rankPoints: player.rankPoints || 0,
+          tierTitle: player.tierTitle,
+          email: player.email || currentUser.email || undefined,
+        });
+      }
     } catch {}
   }, [player, currentUser]);
 
@@ -1553,6 +1670,19 @@ export default function App() {
     setIsSyncing(false);
     const userToSignOut = currentUser;
 
+    // Immediately clear active user's identity from UI so their avatar/name vanishes instantly
+    setIsProfileReady(false);
+    setPlayer({ ...INITIAL_PLAYER });
+    setSubscription({ ...INITIAL_SUBSCRIPTION });
+    setSavedWords([]);
+    setStreak(getInitialStreak());
+    setCurrentUser(null);
+    previousUserUidRef.current = null;
+    questionReviewScheduler.setAuthUser(null);
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('vocabclash_last_active_user_uid');
+    }
+
     // 1. Immediately save snapshot in background with max 800ms race so UI is never blocked
     if (userToSignOut) {
       try {
@@ -1585,17 +1715,8 @@ export default function App() {
     // 3. Instantly clear all authenticated user session data and return to guest mode
     clearUserDataOnSignOut(userToSignOut?.uid);
     rankStore.handleLogout(userToSignOut?.uid);
-    previousUserUidRef.current = null;
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('vocabclash_last_active_user_uid');
-    }
-    setCurrentUser(null);
-    questionReviewScheduler.setAuthUser(null);
-    setPlayer({ ...INITIAL_PLAYER });
-    setSubscription({ ...INITIAL_SUBSCRIPTION });
-    setSavedWords([]);
-    setStreak(getInitialStreak());
     setIsSyncing(false);
+    setIsProfileReady(true);
   };
 
   // Check 10-minute ad trigger safely (never after first duel to protect new user retention)
@@ -2457,6 +2578,7 @@ export default function App() {
           dailyStreak={streak}
           currentUser={currentUser}
           mistakeCount={activeMistakeCount}
+          isLoadingProfile={!isProfileReady}
           onOpenProfile={() => {
             soundManager.playTap();
             setShowProfileModal(true);
@@ -2516,6 +2638,7 @@ export default function App() {
           subscription={subscription}
           dailyStreak={streak}
           soundEnabled={soundEnabled}
+          isLoadingProfile={!isProfileReady}
           onToggleSound={handleToggleSound}
           onOpenProfile={() => {
             soundManager.playTap();
