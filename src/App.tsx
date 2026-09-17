@@ -658,16 +658,17 @@ export default function App() {
   // Daily Streak state (evaluates day difference and resets to 0 if 1 day missed)
   const [streak, setStreak] = useState<DailyStreakState>(() => getInitialStreak());
 
-  // Navigation & View state
+  // Navigation & View state (Default landing view is PYQ Drill 'practice')
   const [currentTab, setCurrentTab] = useState<TabType>(() => {
     if (typeof window !== 'undefined') {
       const rawPath = window.location.pathname.toLowerCase();
-      if (rawPath.includes('/pyq-drill') || rawPath.includes('/practice')) return 'practice';
+      if (rawPath.includes('/arena') || rawPath.includes('/1v1') || rawPath.includes('/duel')) return 'arena';
       if (rawPath.includes('/mistake-vault') || rawPath.includes('/vault') || rawPath.includes('/mistakes')) return 'mistakes';
       if (rawPath.includes('/ranks') || rawPath.includes('/leaderboard')) return 'leaderboard';
       if (rawPath.includes('/ai-coach') || rawPath.includes('/ai-mentor')) return 'ai_coach';
+      if (rawPath.includes('/pyq-drill') || rawPath.includes('/practice')) return 'practice';
     }
-    return 'arena';
+    return 'practice';
   });
   const [selectedCategory, setSelectedCategory] = useState<QuestionCategory | 'mixed'>('mixed');
   const [selectedExam, setSelectedExam] = useState<ExamType>(() => {
@@ -812,7 +813,6 @@ export default function App() {
           rawPath.startsWith('/admin') ||
           rawPath.startsWith('/articles') ||
           rawHash.includes('admin-') ||
-          rawPath.includes('/pyq-drill') ||
           rawPath.includes('/mistake-vault') ||
           rawPath.includes('/ranks') ||
           rawPath.includes('/ai-coach') ||
@@ -820,8 +820,9 @@ export default function App() {
         ) {
           return false;
         }
-        const tourSeen = localStorage.getItem('vocabclash_onboarding_seen_v1');
-        return !tourSeen;
+        // Show sliding window on initial app launch and whenever the app is completely closed & reopened
+        const sessionSeen = sessionStorage.getItem('vocabclash_tour_session_seen');
+        return !sessionSeen;
       } catch {
         return false;
       }
@@ -1012,8 +1013,10 @@ export default function App() {
           setCurrentTab('leaderboard');
         } else if (rawPath.includes('/ai-coach') || rawPath.includes('/ai-mentor')) {
           setCurrentTab('ai_coach');
-        } else if (rawPath === '/' || rawPath === '/1v1') {
+        } else if (rawPath === '/1v1' || rawPath === '/arena') {
           setCurrentTab('arena');
+        } else if (rawPath === '/' || rawPath === '') {
+          setCurrentTab('practice');
         }
       }
     };
@@ -1083,23 +1086,26 @@ export default function App() {
     }
   }, []);
 
-  // Auto-trigger onboarding tour for first-time visitors (State is initialized synchronously on first mount)
+  // Auto-trigger onboarding sliding window for fresh app opens (sessionStorage resets on full app close)
   useEffect(() => {
     try {
-      const tourSeen = localStorage.getItem('vocabclash_onboarding_seen_v1');
-      if (!tourSeen) {
+      const sessionSeen = sessionStorage.getItem('vocabclash_tour_session_seen');
+      if (!sessionSeen) {
         const rawPath = window.location.pathname.toLowerCase();
         const rawHash = window.location.hash.toLowerCase();
         if (
           !rawPath.startsWith('/admin') &&
           !rawPath.startsWith('/articles') &&
-          !rawHash.includes('admin-')
+          !rawHash.includes('admin-') &&
+          !rawPath.includes('/mistake-vault') &&
+          !rawPath.includes('/ranks') &&
+          !rawPath.includes('/ai-coach')
         ) {
           setShowTourModal(true);
         }
       }
     } catch {
-      // ignore localStorage errors
+      // ignore storage errors
     }
   }, []);
 
@@ -3057,7 +3063,10 @@ export default function App() {
       {/* Interactive App Onboarding Tour Modal */}
       <OnboardingTourModal
         isOpen={showTourModal}
-        onClose={() => setShowTourModal(false)}
+        onClose={() => {
+          setShowTourModal(false);
+          setCurrentTab('practice');
+        }}
         onStartPyq={() => {
           setShowTourModal(false);
           setCurrentTab('practice');
@@ -3082,6 +3091,7 @@ export default function App() {
         }}
         onExploreApp={() => {
           setShowTourModal(false);
+          setCurrentTab('practice');
         }}
       />
 
