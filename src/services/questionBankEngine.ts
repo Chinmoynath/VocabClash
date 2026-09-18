@@ -23,6 +23,7 @@ import {
   normalizeExamFamily,
   normalizeFilterToFamily,
 } from '../utils/examFamilyUtils';
+import { getTodayDateString } from './dailyChallengeService';
 
 interface GeneratedExamTemplate {
   examFamily: string;
@@ -1621,7 +1622,7 @@ export class QuestionBankEngine {
    * in the exact same sequence worldwide.
    */
   public getDailyChallengeQuestions(
-    dateStr: string = new Date().toISOString().slice(0, 10),
+    dateStr: string = getTodayDateString(),
     targetExam: ExamType = 'ALL'
   ): Question[] {
     this.init();

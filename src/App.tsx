@@ -34,13 +34,16 @@ import {
   calculateStreakFromHistory,
   mergeStreakStates,
   getTodayDateString,
+  setActiveStreakUser,
+  clearStreakCacheForUser,
   STORAGE_KEY_STREAK_BONUS_CLAIMED_DATE
 } from './utils/streakManager';
 import { 
   recordQuestionSolvedForDailyTarget,
   getDailyTargetState,
   saveDailyTargetState,
-  resetDailyTargetState
+  resetDailyTargetState,
+  setDailyTargetAuthUid
 } from './utils/dailyTargetManager';
 import { 
   isItemSaved,
@@ -110,7 +113,7 @@ import { SeoGuidesModal } from './components/SeoGuidesModal';
 import { SEO_PAGES } from './data/seoContentData';
 import { updatePageSeo } from './utils/seoMetaManager';
 import { networkManager } from './utils/networkManager';
-import { recordQuestionAttempt, resetUserStats, hydrateStatsFromCloud } from './utils/userStatsManager';
+import { recordQuestionAttempt, resetUserStats, hydrateStatsFromCloud, setUserStatsAuthUid } from './utils/userStatsManager';
 import { resetAuthoritativeAttempts } from './services/attemptTrackingService';
 import { clearSeenHistory } from './utils/questionHistoryManager';
 import { ArticlesDashboard } from './components/admin/ArticlesDashboard';
@@ -140,6 +143,18 @@ import {
   normalizeAnalyticsExamFamily
 } from './services/analyticsService';
 
+import { initOtaUpdateService, checkForOtaUpdate } from './services/otaUpdateService';
+
+import { 
+  initNativeAdMob, 
+  showNativeInterstitialIfDue
+} from './services/adMobService';
+import { isAndroidCapacitor, isNativeCapacitor } from './utils/platform';
+import { App as CapacitorApp } from '@capacitor/app';
+import { SplashScreen } from '@capacitor/splash-screen';
+import { StatusBar, Style } from '@capacitor/status-bar';
+import { Network } from '@capacitor/network';
+
 const STORAGE_KEY_PLAYER = 'vocabclash_player_v5';
 const STORAGE_KEY_VAULT = 'vocabclash_vault_v2';
 const STORAGE_KEY_SUBSCRIPTION = 'vocabclash_subscription_v2';
@@ -149,6 +164,20 @@ export function getPlayerStorageKey(userId?: string | null): string {
     return 'vocabclash_player_profile_guest';
   }
   return `vocabclash_player_profile_${userId}`;
+}
+
+export function getSubscriptionStorageKey(userId?: string | null): string {
+  if (!userId || userId === 'default_user' || userId.startsWith('guest_')) {
+    return 'vocabclash_subscription_v3_guest';
+  }
+  return `vocabclash_subscription_v3_${userId}`;
+}
+
+export function getVaultStorageKey(userId?: string | null): string {
+  if (!userId || userId === 'default_user' || userId.startsWith('guest_')) {
+    return 'vocabclash_vault_v3_guest';
+  }
+  return `vocabclash_vault_v3_${userId}`;
 }
 
 export interface HeaderVisualCache {
@@ -491,17 +520,30 @@ export function clearUserDataOnSignOut(specificUid?: string | null) {
 
     if (specificUid) {
       localStorage.removeItem(getPlayerStorageKey(specificUid));
+      localStorage.removeItem(getSubscriptionStorageKey(specificUid));
+      localStorage.removeItem(getVaultStorageKey(specificUid));
+      localStorage.removeItem(getHeaderCacheKey(specificUid));
       localStorage.removeItem(`vocabclash:user:${specificUid}:stats`);
+      localStorage.removeItem(`vocabclash_cloud_backup_${specificUid}`);
     }
 
     // Clean up any remaining namespaced keys for authenticated user
     const keysToRemove: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
-      if (k && (k.startsWith('vocabclash:user:') || k.startsWith('vocabclash_player_profile_'))) {
+      if (k) {
         if (specificUid && k.includes(specificUid)) {
           keysToRemove.push(k);
-        } else if (!specificUid && !k.endsWith('_guest')) {
+        } else if (!specificUid && (
+          k.startsWith('vocabclash:user:') || 
+          k.startsWith('vocabclash_player_profile_') ||
+          k.startsWith('vocabclash_streak_state_v3_') ||
+          k.startsWith('vocabclash_streak_bonus_v3_') ||
+          k.startsWith('vocabclash_daily_target_') ||
+          k.startsWith('vocabclash_daily_stats_v3_') ||
+          k.startsWith('vocabclash_stats_totals_v3_') ||
+          k.startsWith('vocabclash_header_')
+        ) && !k.endsWith('_guest')) {
           keysToRemove.push(k);
         }
       }
@@ -509,20 +551,20 @@ export function clearUserDataOnSignOut(specificUid?: string | null) {
     keysToRemove.forEach(k => localStorage.removeItem(k));
   } catch {}
 
+  // Reset streak manager active user and cache
+  clearStreakCacheForUser(specificUid);
+  setActiveStreakUser(null);
+
+  // Reset daily target active user and cache
+  setDailyTargetAuthUid(null);
+  resetDailyTargetState(specificUid);
+
+  // Reset user stats active user and cache
+  setUserStatsAuthUid(null);
+  resetUserStats(specificUid);
+
   // Reset global in-memory rank store and unsubscribe Firestore listeners
   rankStore.handleLogout(specificUid);
-
-  // 2. Reset daily target state & config so guest gets fresh 0-progress target
-  resetDailyTargetState();
-
-  // 3. Reset spaced repetition scheduler and reviews
-  questionReviewScheduler.reset();
-
-  // 4. Reset authoritative attempts log
-  resetAuthoritativeAttempts();
-
-  // 5. Reset user stats totals & daily accuracy map
-  resetUserStats();
 
   // 6. Reset SSC Top 100 progress
   sscTop100Service.resetLocalProgress();
@@ -1091,6 +1133,21 @@ export default function App() {
     recordTabForLaunch(currentTab);
   }, [currentTab]);
 
+  // Safe OTA Live-Update Initialization & Background Check
+  useEffect(() => {
+    initOtaUpdateService().then(() => {
+      // Check for OTA updates silently in the background
+      checkForOtaUpdate();
+    });
+  }, []);
+
+  // Initialize Native AdMob on Android Capacitor (interstitials only)
+  useEffect(() => {
+    if (isAndroidCapacitor()) {
+      initNativeAdMob(subscription.isPremium);
+    }
+  }, [subscription.isPremium]);
+
   // Update default SEO meta tags when not on a specific SEO guide page
   useEffect(() => {
     if (!activeSeoSlug) {
@@ -1217,7 +1274,7 @@ export default function App() {
         const isSwitchingUser = !!priorUid && priorUid !== user.uid;
         if (isSwitchingUser) {
           console.log('[Auth] Account switch detected:', priorUid, '->', user.uid, '- purging previous user local cache');
-          clearUserDataOnSignOut();
+          clearUserDataOnSignOut(priorUid);
           setPlayer({ ...INITIAL_PLAYER });
           setIsProfileReady(false);
         }
@@ -1227,6 +1284,9 @@ export default function App() {
         previousUserUidRef.current = user.uid;
         setCurrentUser(user);
         questionReviewScheduler.setAuthUser(user.uid);
+        setActiveStreakUser(user.uid);
+        setDailyTargetAuthUid(user.uid);
+        setUserStatsAuthUid(user.uid);
 
         // FAST VISUAL RESTORATION: Check if safe UID-scoped visual cache exists for this specific authenticated UID
         const cachedVisual = !isSwitchingUser ? (getHeaderCache(user.uid) || (() => {
@@ -1269,6 +1329,8 @@ export default function App() {
           setIsProfileReady(false);
         }
 
+        console.log(`[Sync] User authenticated: ${user.uid} (${user.email || 'no-email'})`);
+
         try {
           recordBattleSignupCompleted(user.uid, user.providerData?.[0]?.providerId || 'google');
         } catch {}
@@ -1288,6 +1350,10 @@ export default function App() {
 
           // Try to load existing cloud data for this user
           const cloudData = await fetchUserDataFromFirestore(user.uid);
+          const cloudLP = cloudData?.player?.rankPoints ?? 0;
+          const localLP = localPlayer?.rankPoints ?? 0;
+          console.log(`[Sync] Cloud LP: ${cloudLP}, Local LP: ${localLP}`);
+
           const pendingRegName = getPendingRegistrationDisplayName();
           const effectiveAuthDisplayName = user.displayName?.trim() || pendingRegName;
           const cleanAuthName = effectiveAuthDisplayName || extractCleanUserName(user.displayName, user.email);
@@ -1332,6 +1398,7 @@ export default function App() {
 
             setPlayer(resolvedPlayer);
             rankStore.handleAuthChange(user, resolvedPlayer);
+            console.log(`[Sync] Reconciled LP -> ${resolvedPlayer.rankPoints}`);
             try {
               localStorage.setItem(getPlayerStorageKey(user.uid), JSON.stringify(resolvedPlayer));
             } catch {}
@@ -1368,21 +1435,26 @@ export default function App() {
               user.email?.toLowerCase().includes('nathchinmoy777');
 
             // Intelligently merge streak states across devices using union of active days
-            const mergedStreak = mergeStreakStates(streak, cloudData.streak, getTodayDateString(), user.email);
+            // CRITICAL ACCOUNT ISOLATION: Local streak MUST be read for this specific user, not from previous user's in-memory streak!
+            const userLocalStreak = !isSwitchingUser ? getInitialStreak(user.uid) : getInitialStreak('guest');
+            const mergedStreak = mergeStreakStates(userLocalStreak, cloudData.streak, getTodayDateString(), user.email, user.uid);
 
             if (cloudData.savedWords && cloudData.savedWords.length > 0) {
               const sanitizedCloud = sanitizeVaultList(cloudData.savedWords);
               setSavedWords(sanitizedCloud);
             }
             if (cloudData.dailyTarget) {
-              const todayStr = new Date().toISOString().slice(0, 10);
+              const todayStr = getTodayDateString();
               if (cloudData.dailyTarget.date === todayStr) {
-                saveDailyTargetState(cloudData.dailyTarget);
+                saveDailyTargetState(cloudData.dailyTarget, user.uid);
               }
             }
             // Safely merge cloud challenge history with user local records without ever wiping
             const cloudHistory = Array.isArray(cloudData.dailyChallengeHistory) ? cloudData.dailyChallengeHistory : [];
             const mergedHistory = mergeDailyChallengeHistory(cloudHistory, user.uid);
+            const todayStr = getTodayDateString();
+            const todayAttempt = mergedHistory.find(a => a.date === todayStr);
+            console.log(`[Sync] Daily Challenge synced: date=${todayStr}, completed=${!!todayAttempt}, score=${todayAttempt?.score ?? 0}`);
 
             // Ingest all completed genuine challenge dates into streak history to ensure streak integrity
             for (const attempt of mergedHistory) {
@@ -1403,7 +1475,7 @@ export default function App() {
             }
 
             setStreak(mergedStreak);
-            saveStreakState(mergedStreak);
+            saveStreakState(mergedStreak, user.uid);
 
             // Asynchronously write clean repaired data back to Firestore in background without blocking UI
             saveUserDataToFirestore(
@@ -1413,7 +1485,7 @@ export default function App() {
                 subscription: cloudData.subscription || subscription, 
                 streak: mergedStreak, 
                 savedWords: (cloudData.savedWords && cloudData.savedWords.length > 0) ? cloudData.savedWords : savedWords,
-                dailyTarget: cloudData.dailyTarget || getDailyTargetState(),
+                dailyTarget: cloudData.dailyTarget || getDailyTargetState(user.uid),
                 dailyChallengeHistory: getDailyChallengeHistory(user.uid),
               },
               user
@@ -1490,6 +1562,10 @@ export default function App() {
 
             const existingGuestHistory = getDailyChallengeHistory(null);
             const userHistory = mergeDailyChallengeHistory(existingGuestHistory, user.uid);
+            const freshUserStreak = !isSwitchingUser ? getInitialStreak(user.uid) : getInitialStreak('guest');
+            setStreak(freshUserStreak);
+            saveStreakState(freshUserStreak, user.uid);
+
             setPlayer(newPlayer);
             rankStore.handleAuthChange(user, newPlayer);
             try {
@@ -1513,9 +1589,9 @@ export default function App() {
               { 
                 player: newPlayer, 
                 subscription, 
-                streak, 
+                streak: freshUserStreak, 
                 savedWords, 
-                dailyTarget: getDailyTargetState(),
+                dailyTarget: getDailyTargetState(user.uid),
                 dailyChallengeHistory: userHistory,
               },
               user
@@ -1531,14 +1607,18 @@ export default function App() {
         }
       } else {
         // If transitioning from a logged-in user to null (e.g. sign out occurred or token revoked)
-        if (previousUserUidRef.current) {
-          clearUserDataOnSignOut(previousUserUidRef.current);
+        const signingOutUid = previousUserUidRef.current;
+        if (signingOutUid) {
+          clearUserDataOnSignOut(signingOutUid);
           setPlayer({ ...INITIAL_PLAYER });
           setSubscription({ ...INITIAL_SUBSCRIPTION });
           setSavedWords([]);
-          setStreak(getInitialStreak());
+          setStreak(getInitialStreak('guest'));
         }
-        rankStore.handleLogout(previousUserUidRef.current);
+        setActiveStreakUser(null);
+        setDailyTargetAuthUid(null);
+        setUserStatsAuthUid(null);
+        rankStore.handleLogout(signingOutUid);
         previousUserUidRef.current = null;
         setCurrentUser(null);
         questionReviewScheduler.setAuthUser(null);
@@ -1576,16 +1656,28 @@ export default function App() {
   }, [player, currentUser]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY_VAULT, JSON.stringify(savedWords));
-  }, [savedWords]);
+    try {
+      const key = getVaultStorageKey(currentUser?.uid);
+      localStorage.setItem(key, JSON.stringify(savedWords));
+      if (currentUser?.uid) {
+        localStorage.removeItem(STORAGE_KEY_VAULT);
+      }
+    } catch {}
+  }, [savedWords, currentUser]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY_SUBSCRIPTION, JSON.stringify(subscription));
-  }, [subscription]);
+    try {
+      const key = getSubscriptionStorageKey(currentUser?.uid);
+      localStorage.setItem(key, JSON.stringify(subscription));
+      if (currentUser?.uid) {
+        localStorage.removeItem(STORAGE_KEY_SUBSCRIPTION);
+      }
+    } catch {}
+  }, [subscription, currentUser]);
 
   useEffect(() => {
-    saveStreakState(streak);
-  }, [streak]);
+    saveStreakState(streak, currentUser?.uid);
+  }, [streak, currentUser]);
 
   // Sync to Firestore when state changes if user is logged in & session is fully loaded
   useEffect(() => {
@@ -1598,7 +1690,7 @@ export default function App() {
             subscription, 
             streak, 
             savedWords,
-            dailyTarget: getDailyTargetState(),
+            dailyTarget: getDailyTargetState(currentUser.uid),
             dailyChallengeHistory: getDailyChallengeHistory(currentUser.uid),
           },
           currentUser
@@ -1614,8 +1706,8 @@ export default function App() {
     const unsubscribe = subscribeToUserCloudData(currentUser.uid, (cloudData) => {
       if (cloudData.streak) {
         setStreak(prev => {
-          const merged = mergeStreakStates(prev, cloudData.streak, getTodayDateString(), currentUser.email);
-          saveStreakState(merged);
+          const merged = mergeStreakStates(prev, cloudData.streak, getTodayDateString(), currentUser.email, currentUser.uid);
+          saveStreakState(merged, currentUser.uid);
           return merged;
         });
       }
@@ -1626,16 +1718,45 @@ export default function App() {
       }
       if (cloudData.player) {
         setPlayer(prev => {
-          if (
-            (cloudData.player.rankPoints && cloudData.player.rankPoints !== prev.rankPoints) ||
-            (cloudData.player.matchesPlayed && cloudData.player.matchesPlayed > prev.matchesPlayed)
-          ) {
-            return {
+          const cloudLp = cloudData.player.rankPoints ?? 0;
+          const localLp = prev.rankPoints ?? 0;
+          const cloudPlayed = cloudData.player.matchesPlayed ?? 0;
+          const localPlayed = prev.matchesPlayed ?? 0;
+
+          if (cloudLp !== localLp || cloudPlayed > localPlayed) {
+            console.log(`[Sync] Cloud LP: ${cloudLp}, Local LP: ${localLp}`);
+            const reconciledLP = Math.max(localLp, cloudLp);
+            const reconciledPlayed = Math.max(localPlayed, cloudPlayed);
+            const reconciledWon = Math.max(prev.matchesWon || 0, cloudData.player.matchesWon || 0);
+            const newTier = getTierFromLP(reconciledLP);
+            const newTierTitle = getTierTitle(newTier);
+
+            const updated: PlayerProfile = {
               ...prev,
-              rankPoints: Math.max(prev.rankPoints, cloudData.player.rankPoints || 0),
-              matchesPlayed: Math.max(prev.matchesPlayed, cloudData.player.matchesPlayed || 0),
-              matchesWon: Math.max(prev.matchesWon, cloudData.player.matchesWon || 0),
+              rankPoints: reconciledLP,
+              matchesPlayed: reconciledPlayed,
+              matchesWon: reconciledWon,
+              tier: newTier,
+              tierTitle: newTierTitle,
             };
+
+            try {
+              localStorage.setItem(getPlayerStorageKey(currentUser.uid), JSON.stringify(updated));
+            } catch {}
+
+            setHeaderCache(currentUser.uid, {
+              displayName: extractCleanUserName(updated.name, updated.email),
+              avatar: updated.avatar || '👨‍💼',
+              photoURL: updated.photoURL || null,
+              level: updated.level,
+              rankPoints: updated.rankPoints,
+              tierTitle: updated.tierTitle,
+              email: updated.email,
+            });
+
+            rankStore.updatePlayer(updated);
+            console.log(`[Sync] Reconciled LP -> ${reconciledLP}`);
+            return updated;
           }
           return prev;
         });
@@ -1643,6 +1764,182 @@ export default function App() {
     });
     return () => unsubscribe();
   }, [currentUser, sessionLoaded]);
+
+  // Cross-device App Resume & Network Reconnection Reconciliation
+  useEffect(() => {
+    if (!currentUser || currentUser.uid === 'default_user') return;
+
+    let lastReconcileTime = 0;
+    const RECONCILE_THROTTLE_MS = 3000; // Throttle to prevent excessive Firestore reads
+
+    const performReconcile = async (force: boolean = false) => {
+      const now = Date.now();
+      if (!force && now - lastReconcileTime < RECONCILE_THROTTLE_MS) {
+        return;
+      }
+      lastReconcileTime = now;
+      console.log('[Sync] Resume trigger detected -> checking cloud state...');
+
+      try {
+        const freshCloud = await fetchUserDataFromFirestore(currentUser.uid, 4500);
+        if (freshCloud) {
+          if (freshCloud.player) {
+            setPlayer(prev => {
+              const cloudLp = freshCloud.player.rankPoints ?? 0;
+              const localLp = prev.rankPoints ?? 0;
+              const cloudPlayed = freshCloud.player.matchesPlayed ?? 0;
+              const localPlayed = prev.matchesPlayed ?? 0;
+
+              if (cloudLp !== localLp || cloudPlayed > localPlayed) {
+                console.log(`[Sync] Cloud LP: ${cloudLp}, Local LP: ${localLp}`);
+                const reconciledLP = Math.max(localLp, cloudLp);
+                const reconciledPlayed = Math.max(localPlayed, cloudPlayed);
+                const reconciledWon = Math.max(prev.matchesWon || 0, freshCloud.player.matchesWon || 0);
+                const newTier = getTierFromLP(reconciledLP);
+                const newTierTitle = getTierTitle(newTier);
+
+                const updated: PlayerProfile = {
+                  ...prev,
+                  rankPoints: reconciledLP,
+                  matchesPlayed: reconciledPlayed,
+                  matchesWon: reconciledWon,
+                  tier: newTier,
+                  tierTitle: newTierTitle,
+                };
+
+                try {
+                  localStorage.setItem(getPlayerStorageKey(currentUser.uid), JSON.stringify(updated));
+                } catch {}
+
+                setHeaderCache(currentUser.uid, {
+                  displayName: extractCleanUserName(updated.name, updated.email),
+                  avatar: updated.avatar || '👨‍💼',
+                  photoURL: updated.photoURL || null,
+                  level: updated.level,
+                  rankPoints: updated.rankPoints,
+                  tierTitle: updated.tierTitle,
+                  email: updated.email,
+                });
+
+                rankStore.updatePlayer(updated);
+                console.log(`[Sync] Reconciled LP -> ${reconciledLP}`);
+                return updated;
+              }
+              return prev;
+            });
+          }
+
+          if (freshCloud.dailyChallengeHistory && Array.isArray(freshCloud.dailyChallengeHistory)) {
+            const clean = sanitizeDailyChallengeHistory(freshCloud.dailyChallengeHistory, currentUser.uid, currentUser.email);
+            const merged = mergeDailyChallengeHistory(clean, currentUser.uid);
+            const todayStr = getTodayDateString();
+            const todayAttempt = merged.find(a => a.date === todayStr);
+            console.log(`[Sync] Daily Challenge synced: date=${todayStr}, completed=${!!todayAttempt}, score=${todayAttempt?.score ?? 0}`);
+            window.dispatchEvent(new CustomEvent('daily-challenge-updated'));
+          }
+
+          if (freshCloud.streak) {
+            setStreak(prev => {
+              const merged = mergeStreakStates(prev, freshCloud.streak, getTodayDateString(), currentUser.email, currentUser.uid);
+              saveStreakState(merged, currentUser.uid);
+              return merged;
+            });
+          }
+        }
+      } catch (err) {
+        console.warn('[Sync] Reconcile notice:', err);
+      }
+    };
+
+    // 1. Web visibilitychange
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        performReconcile();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // 2. Window focus
+    const handleFocus = () => performReconcile();
+    window.addEventListener('focus', handleFocus);
+
+    // 3. Online event
+    const handleOnline = () => performReconcile(true);
+    window.addEventListener('online', handleOnline);
+
+    // 4. Capacitor AppState change (for native Android app resume from background)
+    let removeCapacitorListener: (() => void) | null = null;
+    import('@capacitor/app').then(({ App: CapApp }) => {
+      const listenerPromise = CapApp.addListener('appStateChange', (state) => {
+        if (state.isActive) {
+          performReconcile();
+        }
+      });
+      listenerPromise.then(handle => {
+        removeCapacitorListener = () => handle.remove();
+      }).catch(() => {});
+    }).catch(() => {});
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('online', handleOnline);
+      if (removeCapacitorListener) {
+        removeCapacitorListener();
+      }
+    };
+  }, [currentUser]);
+
+  // Daily challenge completion LP awarding and synchronization
+  useEffect(() => {
+    const handleDailyChallengeCompleted = (e: any) => {
+      const { rankPointsGained } = e.detail || {};
+      if (typeof rankPointsGained === 'number' && rankPointsGained > 0) {
+        setPlayer(prev => {
+          const newLP = (prev.rankPoints || 0) + rankPointsGained;
+          const newTier = getTierFromLP(newLP);
+          const newTierTitle = getTierTitle(newTier);
+          const updated: PlayerProfile = {
+            ...prev,
+            rankPoints: newLP,
+            tier: newTier,
+            tierTitle: newTierTitle,
+          };
+          if (currentUser?.uid) {
+            try {
+              localStorage.setItem(getPlayerStorageKey(currentUser.uid), JSON.stringify(updated));
+            } catch {}
+            setHeaderCache(currentUser.uid, {
+              displayName: extractCleanUserName(updated.name, updated.email),
+              avatar: updated.avatar || '👨‍💼',
+              photoURL: updated.photoURL || null,
+              level: updated.level,
+              rankPoints: updated.rankPoints,
+              tierTitle: updated.tierTitle,
+              email: updated.email,
+            });
+            saveUserDataToFirestore(currentUser.uid, {
+              player: updated,
+              subscription,
+              streak,
+              savedWords,
+              dailyTarget: getDailyTargetState(),
+              dailyChallengeHistory: getDailyChallengeHistory(currentUser.uid),
+            }, currentUser).catch(() => {});
+            syncUserToLeaderboard(updated, currentUser.uid).catch(() => {});
+          }
+          rankStore.updatePlayer(updated);
+          console.log(`[Sync] Daily Challenge LP awarded locally: +${rankPointsGained} LP -> new LP ${newLP}`);
+          return updated;
+        });
+      }
+    };
+
+    window.addEventListener('daily-challenge-completed', handleDailyChallengeCompleted);
+    return () => {
+      window.removeEventListener('daily-challenge-completed', handleDailyChallengeCompleted);
+    };
+  }, [currentUser, subscription, streak, savedWords]);
 
   const handleToggleSound = () => {
     const nextVal = !soundEnabled;
@@ -1675,7 +1972,10 @@ export default function App() {
     setPlayer({ ...INITIAL_PLAYER });
     setSubscription({ ...INITIAL_SUBSCRIPTION });
     setSavedWords([]);
-    setStreak(getInitialStreak());
+    setStreak(getInitialStreak('guest'));
+    setActiveStreakUser(null);
+    setDailyTargetAuthUid(null);
+    setUserStatsAuthUid(null);
     setCurrentUser(null);
     previousUserUidRef.current = null;
     questionReviewScheduler.setAuthUser(null);
@@ -1686,7 +1986,7 @@ export default function App() {
     // 1. Immediately save snapshot in background with max 800ms race so UI is never blocked
     if (userToSignOut) {
       try {
-        const currentDailyTarget = getDailyTargetState();
+        const currentDailyTarget = getDailyTargetState(userToSignOut.uid);
         Promise.race([
           saveUserDataToFirestore(
             userToSignOut.uid,
@@ -1715,20 +2015,43 @@ export default function App() {
     // 3. Instantly clear all authenticated user session data and return to guest mode
     clearUserDataOnSignOut(userToSignOut?.uid);
     rankStore.handleLogout(userToSignOut?.uid);
+    setActiveStreakUser(null);
+    setDailyTargetAuthUid(null);
+    setUserStatsAuthUid(null);
     setIsSyncing(false);
     setIsProfileReady(true);
   };
 
-  // Check 10-minute ad trigger safely (never after first duel to protect new user retention)
-  const triggerAdIfDue = () => {
-    if (!ADS_ENABLED) {
+  // Check 10-minute ad trigger safely at natural breaks (never during active play, modals, or offline)
+  const triggerAdIfDue = (overrideMatchesPlayed?: number) => {
+    if (!ADS_ENABLED || subscription.isPremium) {
       return;
     }
-    if (player.matchesPlayed <= 1) {
+    const currentMatches = overrideMatchesPlayed ?? player.matchesPlayed;
+    if (currentMatches <= 1) {
       return;
     }
-    if (isAdDue(subscription.isPremium, player.matchesPlayed)) {
-      setShowAdModal(true);
+    
+    // Strict Natural Break Safety Guards: Never interrupt sensitive states
+    if (!networkManager.isOnline()) {
+      return;
+    }
+    if (isMatchmaking) {
+      return;
+    }
+    if (matchState && !isMatchCompleted) {
+      return;
+    }
+    if (showPremiumModal || showProfileModal || showEditProfileModal || showAiModal || showStatsModal) {
+      return;
+    }
+    
+    if (isAndroidCapacitor()) {
+      showNativeInterstitialIfDue(subscription.isPremium, currentMatches);
+    } else {
+      if (isAdDue(subscription.isPremium, currentMatches)) {
+        setShowAdModal(true);
+      }
     }
   };
 
@@ -1854,8 +2177,8 @@ export default function App() {
   // Immediately persists to both local storage and cloud database to sync with all devices!
   const handleRecordQuestionSolved = useCallback(() => {
     setStreak(prev => {
-      const { updatedStreak } = recordDailyQuestionSolved(prev);
-      saveStreakState(updatedStreak);
+      const { updatedStreak } = recordDailyQuestionSolved(prev, currentUser?.uid);
+      saveStreakState(updatedStreak, currentUser?.uid);
       if (currentUser && currentUser.uid !== 'default_user') {
         saveUserDataToFirestore(
           currentUser.uid,
@@ -1864,8 +2187,8 @@ export default function App() {
             subscription, 
             streak: updatedStreak, 
             savedWords,
-            dailyTarget: getDailyTargetState(),
-            dailyChallengeHistory: getDailyChallengeHistory(),
+            dailyTarget: getDailyTargetState(currentUser.uid),
+            dailyChallengeHistory: getDailyChallengeHistory(currentUser.uid),
           },
           currentUser
         ).catch((err) => console.warn('[Streak Firestore Sync Notice]:', err));
@@ -1873,7 +2196,7 @@ export default function App() {
       return updatedStreak;
     });
     // Also track towards user's daily question target
-    recordQuestionSolvedForDailyTarget(1);
+    recordQuestionSolvedForDailyTarget(1, currentUser?.uid);
   }, [currentUser, player, subscription, savedWords]);
 
   // Global question solved listener: fires whenever a question is answered anywhere in the app
@@ -2086,17 +2409,31 @@ export default function App() {
       ).catch(err => console.warn('Instant cloud save after match completion failed:', err));
     }
 
-    // Trigger 10-min interval ad safely after match completion (only for free tier)
+    // Trigger 10-min interval ad safely after match completion (only for free tier at natural break)
     // NEVER show ad after the user's first duel (to maximize new player retention)
-    if (ADS_ENABLED) {
+    if (ADS_ENABLED && !subscription.isPremium && networkManager.isOnline()) {
       const isFirstDuel = player.matchesPlayed === 0 || nextMatchesPlayed <= 1;
       if (isFirstDuel) {
         // Cleanly start their ad timer cooldown so they get a full grace period going forward
         recordAdShown();
-      } else if (isAdDue(subscription.isPremium, nextMatchesPlayed)) {
-        setTimeout(() => {
-          setShowAdModal(true);
-        }, 700);
+      } else {
+        if (isAndroidCapacitor()) {
+          // Native Capacitor Interstitial: natural break after completed 1v1 match
+          setTimeout(() => {
+            if (!showPremiumModal && !showProfileModal && !showEditProfileModal) {
+              showNativeInterstitialIfDue(subscription.isPremium, nextMatchesPlayed);
+            }
+          }, 700);
+        } else {
+          // Web AdSense Interstitial Mock
+          if (isAdDue(subscription.isPremium, nextMatchesPlayed)) {
+            setTimeout(() => {
+              if (!showPremiumModal && !showProfileModal && !showEditProfileModal) {
+                setShowAdModal(true);
+              }
+            }, 700);
+          }
+        }
       }
     }
   };
@@ -2396,6 +2733,98 @@ export default function App() {
     }
   };
 
+
+  // --- NATIVE ANDROID POLISH ---
+  useEffect(() => {
+    if (!isNativeCapacitor()) return;
+
+    // 1. Hide Splash Screen cleanly
+    SplashScreen.hide().catch(() => {});
+
+    // 2. Set Status Bar to Dark Mode
+    StatusBar.setStyle({ style: Style.Dark }).catch(() => {});
+    StatusBar.setBackgroundColor({ color: '#0f172a' }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!isNativeCapacitor()) return;
+
+    let backListener = null;
+    CapacitorApp.addListener('backButton', () => {
+      // Modals
+      if (showAiModal) { setShowAiModal(false); return; }
+      if (showProfileModal) { setShowProfileModal(false); return; }
+      if (showEditProfileModal) { setShowEditProfileModal(false); return; }
+      if (showPremiumModal) { setShowPremiumModal(false); return; }
+      if (showAdModal) { setShowAdModal(false); return; }
+      if (showStreakModal) { setShowStreakModal(false); return; }
+      if (showStatsModal) { setShowStatsModal(false); return; }
+      if (showAppGuideModal) { setShowAppGuideModal(false); return; }
+      if (showTourModal) { setShowTourModal(false); return; }
+      if (showPlayModeModal) { setShowPlayModeModal(false); return; }
+      if (showFriendLobbyModal) { setShowFriendLobbyModal(false); return; }
+      if (showOfflineWarningModal) { setShowOfflineWarningModal(false); return; }
+      if (showSeoGuidesModal) { setShowSeoGuidesModal(false); return; }
+      if (showDueRevisionModal) { setShowDueRevisionModal(false); return; }
+      if (showAdminArticles) { setShowAdminArticles(false); return; }
+      if (showAdminImporter) { setShowAdminImporter(false); return; }
+      if (showBattleAnalytics) { setShowBattleAnalytics(false); return; }
+      if (showSscTop100CompletionModal) { setShowSscTop100CompletionModal(false); return; }
+
+      // Subscreens
+      if (activeAiQuestion) { setActiveAiQuestion(null); return; }
+      if (activeArticleSlug) { setActiveArticleSlug(null); return; }
+      if (activeSeoSlug) { setActiveSeoSlug(null); return; }
+      if (isViewingArticlesIndex) { setIsViewingArticlesIndex(false); return; }
+
+      // Active Drill
+      if (practiceCustomQueue || activeSscTop100Category) {
+        setPracticeCustomQueue(null);
+        setActiveSscTop100Category(null);
+        setPracticeModeBannerTitle(null);
+        return;
+      }
+
+      // 1v1 Match
+      if (isMatchmaking || matchState) {
+        if (window.confirm("Abandon current battle?")) {
+           if (isMatchmaking) {
+             setIsMatchmaking(false);
+           } else if (matchState) {
+             if (matchState.realRoomId) {
+               forfeitLiveRoom(matchState.realRoomId, player.id);
+             }
+             setMatchState(null);
+           }
+        }
+        return;
+      }
+
+      // Root tabs navigation
+      if (currentTab !== 'arena') {
+        setCurrentTab('arena');
+        return;
+      }
+
+      // Root of roots -> minimize
+      CapacitorApp.minimizeApp();
+    }).then(listener => {
+      backListener = listener;
+    });
+
+    return () => {
+      if (backListener) backListener.remove();
+    };
+  }, [
+    showAiModal, showProfileModal, showEditProfileModal, showPremiumModal, showAdModal,
+    showStreakModal, showStatsModal, showAppGuideModal, showTourModal, showPlayModeModal,
+    showFriendLobbyModal, showOfflineWarningModal, showSeoGuidesModal, showDueRevisionModal,
+    showAdminArticles, showAdminImporter, showBattleAnalytics, showSscTop100CompletionModal,
+    activeAiQuestion, activeArticleSlug, activeSeoSlug, isViewingArticlesIndex,
+    practiceCustomQueue, activeSscTop100Category, isMatchmaking, matchState, currentTab, player.id
+  ]);
+  // --- END NATIVE ANDROID POLISH ---
+
   // 1. Render Admin Article Studio (/admin/articles)
   if (showAdminArticles) {
     if (adminArticleMode === 'editor') {
@@ -2568,9 +2997,6 @@ export default function App() {
         <DesktopSidebar
           currentTab={currentTab}
           onSelectTab={(tab) => {
-            if (currentTab === 'practice' && tab !== 'practice') {
-              triggerAdIfDue();
-            }
             setCurrentTab(tab);
           }}
           player={player}
@@ -2755,6 +3181,7 @@ export default function App() {
                 isPremium={subscription.isPremium}
                 currentUser={currentUser}
                 onUserChange={user => setCurrentUser(user)}
+                onOpenPremium={() => setShowPremiumModal(true)}
               />
             </ErrorBoundary>
           )
@@ -2867,6 +3294,9 @@ export default function App() {
                       totalSolved: 100,
                     });
                     setShowSscTop100CompletionModal(true);
+                  } else {
+                    // Natural break after completing custom drill (e.g., Weak Areas Drill)
+                    triggerAdIfDue();
                   }
                 }}
                 onRestartCustomDrill={async () => {
@@ -2920,7 +3350,20 @@ export default function App() {
             </div>
 
             {currentTab === 'leaderboard' && (
-              <LeaderboardView player={player} isPremium={subscription.isPremium} />
+              <LeaderboardView
+                player={player}
+                isPremium={subscription.isPremium}
+                onLpUpdated={() => {
+                  if (currentUser?.uid) {
+                    fetchUserDataFromFirestore(currentUser.uid, 3000).then(fresh => {
+                      if (fresh?.player?.rankPoints && fresh.player.rankPoints !== player.rankPoints) {
+                        const newLp = Math.max(player.rankPoints, fresh.player.rankPoints);
+                        setPlayer(prev => ({ ...prev, rankPoints: newLp }));
+                      }
+                    }).catch(() => {});
+                  }
+                }}
+              />
             )}
 
             {currentTab === 'mistakes' && (
@@ -3143,6 +3586,7 @@ export default function App() {
             setActiveSscTop100Category(null);
             setSscTop100InitialIndex(0);
             setCurrentTab('arena');
+            triggerAdIfDue();
           }}
           onRestartCategory={async () => {
             setShowSscTop100CompletionModal(false);
@@ -3256,6 +3700,7 @@ export default function App() {
       {showStreakModal && (
         <StreakModal
           streak={streak}
+          uid={currentUser?.uid}
           onClose={() => setShowStreakModal(false)}
           onUpdateStreak={updated => setStreak(updated)}
           onAddLP={handleAddLP}
@@ -3362,10 +3807,6 @@ export default function App() {
         <BottomNavBar
           currentTab={currentTab}
           onSelectTab={(tab) => {
-            // Trigger ad if leaving practice or completed session
-            if (currentTab === 'practice' && tab !== 'practice') {
-              triggerAdIfDue();
-            }
             setCurrentTab(tab);
           }}
           mistakeCount={activeMistakeCount}

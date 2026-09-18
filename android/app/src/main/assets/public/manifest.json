@@ -1,0 +1,193 @@
+{
+  "id": "/",
+  "name": "VocabClash - Govt Exam English Arena",
+  "short_name": "VocabClash",
+  "description": "Head-to-head real-time competitive English vocabulary battle arena for SSC CGL, CHSL, CPO, MTS & Railway exams.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": [
+    "window-controls-overlay",
+    "standalone",
+    "minimal-ui"
+  ],
+  "background_color": "#020617",
+  "theme_color": "#020617",
+  "orientation": "portrait-primary",
+  "categories": [
+    "education",
+    "games",
+    "productivity"
+  ],
+  "lang": "en-US",
+  "dir": "ltr",
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/favicon.png",
+      "sizes": "48x48",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/screenshot-mobile.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "VocabClash 1v1 Arena Mobile View"
+    },
+    {
+      "src": "/screenshot-wide.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "VocabClash 1v1 Arena Desktop View"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Play 1v1 Arena",
+      "short_name": "1v1 Battle",
+      "description": "Instant 1v1 live multiplayer vocab duel",
+      "url": "/?mode=duel",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Daily Exam Quiz",
+      "short_name": "Daily Quiz",
+      "description": "Daily streak and speed vocab challenge",
+      "url": "/?mode=daily",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "AI Vocab Mentor",
+      "short_name": "AI Mentor",
+      "description": "Hinglish mnemonics, roots & exam trap tips",
+      "url": "/?tab=tutor",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Vocab Vault & Bookmarks",
+      "short_name": "Vault",
+      "description": "Saved mistakes, PYQ notes and flashcards",
+      "url": "/?tab=vault",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ],
+  "share_target": {
+    "action": "/?shared=1",
+    "method": "GET",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  },
+  "file_handlers": [
+    {
+      "action": "/?import=pyq",
+      "name": "PYQ Question Document",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192"
+        }
+      ],
+      "accept": {
+        "text/plain": [".txt"],
+        "application/pdf": [".pdf"],
+        "application/json": [".json"]
+      }
+    }
+  ],
+  "launch_handler": {
+    "client_mode": [
+      "focus-existing",
+      "auto"
+    ]
+  },
+  "protocol_handlers": [
+    {
+      "protocol": "web+vocabclash",
+      "url": "/?duel=%s"
+    }
+  ],
+  "edge_side_panel": {
+    "preferred_width": 420
+  },
+  "note_taking": {
+    "new_note_url": "/?tab=vault&new=1"
+  },
+  "widgets": [
+    {
+      "name": "VocabClash Daily Word",
+      "description": "Daily exam vocabulary & quick battle status",
+      "tag": "vocabclash-daily",
+      "template": "widget",
+      "ms_ac_template": "widget.json",
+      "data": "widget-data.json",
+      "type": "application/json",
+      "screenshots": [
+        {
+          "src": "/screenshot-mobile.png",
+          "sizes": "512x512",
+          "label": "Daily Vocab Widget"
+        }
+      ],
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192"
+        }
+      ],
+      "auth": false,
+      "update": 86400
+    }
+  ]
+}

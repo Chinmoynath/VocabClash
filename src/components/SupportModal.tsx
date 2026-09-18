@@ -16,6 +16,7 @@ import {
   Send
 } from 'lucide-react';
 import { PlayerProfile, UserSubscription } from '../types';
+import { openMailto } from '../utils/externalLinks';
 
 interface SupportModalProps {
   onClose: () => void;
@@ -78,10 +79,9 @@ Date: ${new Date().toLocaleDateString('en-IN')}
 
   const handleSendEmail = () => {
     soundManager.playTap();
-    const subject = encodeURIComponent(getSubject());
-    const body = encodeURIComponent(getBody());
-    const mailtoUrl = `mailto:${SUPPORT_EMAIL}?subject=${subject}&body=${body}`;
-    window.open(mailtoUrl, '_blank');
+    const subject = getSubject();
+    const body = getBody();
+    openMailto(SUPPORT_EMAIL, subject, body);
     setSentToast(true);
     setTimeout(() => setSentToast(false), 3000);
   };

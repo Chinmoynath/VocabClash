@@ -1,5 +1,7 @@
 import { SubscriptionPlan, UserSubscription } from '../types';
 import { mapPlanToGooglePlay, PLAY_PRODUCTS, PlayPlanMapping } from '../config/playProducts';
+import { isAndroidCapacitor } from '../utils/platform';
+import { restoreCapacitorPlayPurchases } from './capacitorPlayBillingService';
 
 const PLAY_BILLING_METHOD = 'https://play.google.com/billing';
 
@@ -283,6 +285,11 @@ export async function restoreGooglePlayPurchases(
   userId?: string,
   userEmail?: string
 ): Promise<UserSubscription | null> {
+  if (isAndroidCapacitor()) {
+    console.log('[Payments] Restoring purchases via Native Capacitor Google Play Billing...');
+    return restoreCapacitorPlayPurchases(userId, userEmail);
+  }
+
   const service = await getPlayDigitalGoodsService();
   if (!service) {
     throw new Error('Google Play Billing is not available on this device.');

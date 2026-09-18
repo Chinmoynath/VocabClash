@@ -1,0 +1,38 @@
+{
+  "type": "AdaptiveCard",
+  "version": "1.5",
+  "body": [
+    {
+      "type": "TextBlock",
+      "text": "VocabClash Daily Word",
+      "weight": "Bolder",
+      "size": "Medium",
+      "color": "Accent"
+    },
+    {
+      "type": "TextBlock",
+      "text": "${word}",
+      "weight": "Bolder",
+      "size": "Large"
+    },
+    {
+      "type": "TextBlock",
+      "text": "${meaning}",
+      "wrap": true
+    },
+    {
+      "type": "TextBlock",
+      "text": "${mnemonic}",
+      "wrap": true,
+      "color": "Warning",
+      "size": "Small"
+    }
+  ],
+  "actions": [
+    {
+      "type": "Action.OpenUrl",
+      "title": "Practice Now",
+      "url": "https://vocabclash.in/?mode=daily"
+    }
+  ]
+}

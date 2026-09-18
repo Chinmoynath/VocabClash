@@ -134,17 +134,25 @@
       }
     </style>
     <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', function() {
-          navigator.serviceWorker.register('/sw.js', { scope: '/' })
-            .then(function(reg) {
-              console.log('[PWA] Service Worker successfully registered with scope:', reg.scope);
-            })
-            .catch(function(err) {
-              console.warn('[PWA] Service Worker registration note:', err);
-            });
-        });
-      }
+      (function() {
+        // Prevent service worker registration inside native Capacitor shell
+        var isCapacitorNative = typeof window !== 'undefined' && 
+          window.Capacitor && 
+          typeof window.Capacitor.isNativePlatform === 'function' && 
+          window.Capacitor.isNativePlatform();
+
+        if (!isCapacitorNative && 'serviceWorker' in navigator) {
+          window.addEventListener('load', function() {
+            navigator.serviceWorker.register('/sw.js', { scope: '/' })
+              .then(function(reg) {
+                console.log('[PWA] Service Worker successfully registered with scope:', reg.scope);
+              })
+              .catch(function(err) {
+                console.warn('[PWA] Service Worker registration note:', err);
+              });
+          });
+        }
+      })();
     </script>
     <meta property="og:title" content="VocabClash – SSC Vocabulary, English PYQs & 1v1 Battles" />
     <meta property="og:description" content="Practice SSC CGL, CHSL, CPO and government exam English vocabulary with 24,000+ PYQs, synonyms, antonyms, idioms, one-word substitutions and real-time 1v1 battles on VocabClash." />

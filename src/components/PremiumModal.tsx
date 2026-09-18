@@ -13,6 +13,11 @@ import {
   PaymentProvider 
 } from '../services/paymentProviderService';
 import { restoreGooglePlayPurchases } from '../services/googlePlayBillingService';
+import { 
+  openCapacitorPlaySubscriptionManagement, 
+  loadCapacitorPlayProducts 
+} from '../services/capacitorPlayBillingService';
+import { isAndroidCapacitor } from '../utils/platform';
 import { mapPlanToGooglePlay } from '../config/playProducts';
 import { GoogleAuthCard } from './GoogleAuthCard';
 import { VocabClashLogo } from './VocabClashLogo';
@@ -118,6 +123,7 @@ export const PremiumModal: React.FC<PremiumModalProps> = ({
   const [isRestoring, setIsRestoring] = useState<boolean>(false);
   const [paymentProvider, setPaymentProvider] = useState<PaymentProvider>('razorpay');
   const [isDetectingProvider, setIsDetectingProvider] = useState<boolean>(true);
+  const [availablePlans, setAvailablePlans] = useState<SubscriptionPlan[]>(SUBSCRIPTION_PLANS);
   const [statusMessage, setStatusMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
 
   useEffect(() => {
@@ -136,6 +142,28 @@ export const PremiumModal: React.FC<PremiumModalProps> = ({
         }
       });
 
+    if (isAndroidCapacitor()) {
+      loadCapacitorPlayProducts()
+        .then((loadedProducts) => {
+          if (isMounted && loadedProducts && loadedProducts.size > 0) {
+            setAvailablePlans(prevPlans =>
+              prevPlans.map(plan => {
+                const playMapping = mapPlanToGooglePlay(plan.id);
+                const nativeInfo = loadedProducts.get(playMapping.productId);
+                if (nativeInfo?.priceString) {
+                  return {
+                    ...plan,
+                    displayPrice: nativeInfo.priceString,
+                  };
+                }
+                return plan;
+              })
+            );
+          }
+        })
+        .catch(() => {});
+    }
+
     return () => {
       isMounted = false;
     };
@@ -144,7 +172,13 @@ export const PremiumModal: React.FC<PremiumModalProps> = ({
   const effectiveEmail = currentUser?.email || currentUserEmail || player?.email;
   const effectiveName = extractCleanUserName(currentUser?.displayName || player?.name, effectiveEmail);
 
-  const selectedPlan = SUBSCRIPTION_PLANS.find(p => p.id === selectedPlanId) || SUBSCRIPTION_PLANS[1];
+  const isGooglePlay = paymentProvider === 'google_play' || 
+    paymentProvider === 'capacitor_google_play' || 
+    paymentProvider === 'capacitor_google_play_unavailable';
+
+  const isCapacitorUnavailable = paymentProvider === 'capacitor_google_play_unavailable';
+
+  const selectedPlan = availablePlans.find(p => p.id === selectedPlanId) || availablePlans[1];
 
   const featurePills = [
     { label: 'Always Ad-Free', highlight: true },
@@ -303,7 +337,7 @@ export const PremiumModal: React.FC<PremiumModalProps> = ({
           <div className="text-[10px] uppercase font-mono tracking-widest text-purple-400 font-bold bg-purple-950/60 border border-purple-800/50 px-2.5 py-0.5 rounded-full flex items-center gap-1.5">
             <Lock className="w-2.5 h-2.5" />
             <span>
-              {paymentProvider === 'google_play' ? 'GOOGLE PLAY VIP' : 'RAZORPAY SECURE VIP'}
+              {isGooglePlay ? 'GOOGLE PLAY VIP' : 'RAZORPAY SECURE VIP'}
             </span>
           </div>
 
@@ -463,7 +497,7 @@ export const PremiumModal: React.FC<PremiumModalProps> = ({
               </div>
 
               <div className="space-y-2">
-                {SUBSCRIPTION_PLANS.map(plan => {
+                {availablePlans.map(plan => {
                   const isSelected = selectedPlanId === plan.id;
                   const isCurrentActive = subscription.isPremium && subscription.planId === plan.id;
 
@@ -572,7 +606,20 @@ export const PremiumModal: React.FC<PremiumModalProps> = ({
                   </button>
                 </div>
 
-                {paymentProvider === 'google_play' && (
+                {isGooglePlay && isAndroidCapacitor() && (
+                  <button
+                    onClick={() => {
+                      soundManager.playTap();
+                      openCapacitorPlaySubscriptionManagement();
+                    }}
+                    className="w-full bg-purple-900/60 hover:bg-purple-800 border border-purple-600/60 text-purple-200 font-bold py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5 text-purple-300" />
+                    <span>Manage on Google Play Store</span>
+                  </button>
+                )}
+
+                {isGooglePlay && (
                   <button
                     disabled={isRestoring}
                     onClick={handleRestorePurchases}
@@ -600,22 +647,27 @@ export const PremiumModal: React.FC<PremiumModalProps> = ({
                 </button>
               ) : (
                 <button
-                  disabled={isProcessing || isDetectingProvider}
+                  disabled={isProcessing || isDetectingProvider || isCapacitorUnavailable}
                   onClick={handlePurchase}
                   className="w-full bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-600 hover:from-purple-500 hover:to-indigo-500 active:scale-[0.98] text-white font-extrabold py-3.5 px-6 rounded-full shadow-[0_0_25px_rgba(147,51,234,0.4)] text-sm flex items-center justify-center gap-2 border border-purple-400/30 transition-all disabled:opacity-50 cursor-pointer"
                 >
-                  {isProcessing ? (
+                  {isCapacitorUnavailable ? (
+                    <span className="flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 text-amber-400" />
+                      <span>Google Play Billing Unavailable</span>
+                    </span>
+                  ) : isProcessing ? (
                     <>
                       <RefreshCw className="w-4 h-4 animate-spin" />
                       <span>
-                        {paymentProvider === 'google_play' ? 'Connecting to Google Play...' : 'Connecting to Razorpay...'}
+                        {isGooglePlay ? 'Connecting to Google Play...' : 'Connecting to Razorpay...'}
                       </span>
                     </>
                   ) : (
                     <>
                       <CreditCard className="w-4 h-4" />
                       <span>
-                        {paymentProvider === 'google_play' 
+                        {isGooglePlay 
                           ? `Upgrade with Google Play • ${selectedPlan.displayPrice}` 
                           : `Pay via Razorpay • ${selectedPlan.displayPrice}`}
                       </span>
@@ -629,13 +681,17 @@ export const PremiumModal: React.FC<PremiumModalProps> = ({
                 <div className="flex items-center justify-center gap-2">
                   <span className="flex items-center gap-1">
                     <Lock className="w-3 h-3 text-emerald-500" />
-                    {paymentProvider === 'google_play' ? 'Secure payment via Google Play' : 'Secure payment via Razorpay'}
+                    {isCapacitorUnavailable
+                      ? 'Google Play Services unavailable on this device'
+                      : isGooglePlay 
+                      ? 'Secure payment via Google Play' 
+                      : 'Secure payment via Razorpay'}
                   </span>
                   <span>•</span>
                   <span>Instant VIP Unlock</span>
                 </div>
 
-                {paymentProvider === 'google_play' && !subscription.isPremium && (
+                {isGooglePlay && !subscription.isPremium && (
                   <button
                     disabled={isRestoring}
                     onClick={handleRestorePurchases}

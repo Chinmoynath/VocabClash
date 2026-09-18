@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { isNativeCapacitor } from '../utils/platform';
 import { 
   ADS_ENABLED,
   ADSENSE_CLIENT_ID, 
@@ -22,8 +23,8 @@ export const AdSenseUnit: React.FC<AdSenseUnitProps> = ({
   responsive = true,
   isPremium = false,
 }) => {
-  // If ads are disabled globally or the user is Premium, render nothing (zero DOM footprint)
-  if (!ADS_ENABLED || isPremium) {
+  // Suppress AdSense completely in native Capacitor shells and for Premium users
+  if (isNativeCapacitor() || !ADS_ENABLED || isPremium) {
     return null;
   }
 

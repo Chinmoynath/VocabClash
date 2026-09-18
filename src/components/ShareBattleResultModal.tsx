@@ -22,6 +22,7 @@ import {
   getBattleShareCta
 } from '../utils/shareCardGenerator';
 import { soundManager } from '../utils/audio';
+import { openExternalUrl } from '../utils/externalLinks';
 
 interface ShareBattleResultModalProps {
   data: BattleShareData;
@@ -84,21 +85,21 @@ export const ShareBattleResultModal: React.FC<ShareBattleResultModalProps> = ({
   const handleWhatsAppShare = () => {
     soundManager.playTap();
     const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
-    window.open(waUrl, '_blank', 'noopener,noreferrer');
+    openExternalUrl(waUrl);
   };
 
   // Handle Telegram Share
   const handleTelegramShare = () => {
     soundManager.playTap();
     const tgUrl = `https://t.me/share/url?url=${encodeURIComponent('https://vocabclash.in')}&text=${encodeURIComponent(shareText)}`;
-    window.open(tgUrl, '_blank', 'noopener,noreferrer');
+    openExternalUrl(tgUrl);
   };
 
   // Handle X (Twitter) Share
   const handleTwitterShare = () => {
     soundManager.playTap();
     const twUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}`;
-    window.open(twUrl, '_blank', 'noopener,noreferrer');
+    openExternalUrl(twUrl);
   };
 
   // Handle Download Image PNG

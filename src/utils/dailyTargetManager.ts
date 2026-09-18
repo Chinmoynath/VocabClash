@@ -12,8 +12,36 @@ export interface DailyTargetState {
   lastUpdated: number;
 }
 
-const STORAGE_KEY_DAILY_TARGET_CONFIG = 'vocabclash_daily_target_config_v2';
-const STORAGE_KEY_DAILY_TARGET_STATE = 'vocabclash_daily_target_state_v2';
+const STORAGE_KEY_CONFIG_PREFIX = 'vocabclash_daily_target_config_v3_';
+const STORAGE_KEY_STATE_PREFIX = 'vocabclash_daily_target_state_v3_';
+export const LEGACY_STORAGE_KEY_DAILY_TARGET_CONFIG = 'vocabclash_daily_target_config_v2';
+export const LEGACY_STORAGE_KEY_DAILY_TARGET_STATE = 'vocabclash_daily_target_state_v2';
+
+let activeDailyTargetUid: string | null = null;
+
+export function setDailyTargetAuthUid(uid: string | null): void {
+  activeDailyTargetUid = uid;
+}
+
+export function getDailyTargetAuthUid(): string | null {
+  return activeDailyTargetUid;
+}
+
+export function getDailyTargetConfigStorageKey(uid?: string | null): string {
+  const target = uid !== undefined ? uid : activeDailyTargetUid;
+  if (target && target !== 'guest' && target !== 'default_user') {
+    return `${STORAGE_KEY_CONFIG_PREFIX}${target}`;
+  }
+  return `${STORAGE_KEY_CONFIG_PREFIX}guest`;
+}
+
+export function getDailyTargetStateStorageKey(uid?: string | null): string {
+  const target = uid !== undefined ? uid : activeDailyTargetUid;
+  if (target && target !== 'guest' && target !== 'default_user') {
+    return `${STORAGE_KEY_STATE_PREFIX}${target}`;
+  }
+  return `${STORAGE_KEY_STATE_PREFIX}guest`;
+}
 
 export const MIN_DAILY_TARGET = 20;
 export const MAX_DAILY_TARGET = 500;
@@ -27,9 +55,10 @@ function getTodayDateString(): string {
   return `${year}-${month}-${day}`;
 }
 
-export function getDailyTargetConfig(): DailyTargetConfig {
+export function getDailyTargetConfig(uid?: string | null): DailyTargetConfig {
+  const targetUid = uid !== undefined ? uid : activeDailyTargetUid;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY_DAILY_TARGET_CONFIG);
+    const raw = localStorage.getItem(getDailyTargetConfigStorageKey(targetUid));
     if (raw) {
       const parsed = JSON.parse(raw);
       const target = Math.max(MIN_DAILY_TARGET, Math.min(MAX_DAILY_TARGET, Number(parsed.targetQuestions) || DEFAULT_DAILY_TARGET));
@@ -41,25 +70,30 @@ export function getDailyTargetConfig(): DailyTargetConfig {
   return { targetQuestions: DEFAULT_DAILY_TARGET };
 }
 
-export function saveDailyTargetConfig(config: DailyTargetConfig): void {
+export function saveDailyTargetConfig(config: DailyTargetConfig, uid?: string | null): void {
+  const targetUid = uid !== undefined ? uid : activeDailyTargetUid;
   const sanitizedTarget = Math.max(MIN_DAILY_TARGET, Math.min(MAX_DAILY_TARGET, Math.round(config.targetQuestions)));
   try {
-    localStorage.setItem(STORAGE_KEY_DAILY_TARGET_CONFIG, JSON.stringify({ targetQuestions: sanitizedTarget }));
+    localStorage.setItem(getDailyTargetConfigStorageKey(targetUid), JSON.stringify({ targetQuestions: sanitizedTarget }));
     // Also update today's state target
-    const state = getDailyTargetState();
+    const state = getDailyTargetState(targetUid);
     state.targetQuestions = sanitizedTarget;
-    saveDailyTargetState(state);
+    saveDailyTargetState(state, targetUid);
+    if (targetUid && targetUid !== 'guest') {
+      localStorage.removeItem(LEGACY_STORAGE_KEY_DAILY_TARGET_CONFIG);
+    }
   } catch {
     // ignore
   }
 }
 
-export function getDailyTargetState(): DailyTargetState {
+export function getDailyTargetState(uid?: string | null): DailyTargetState {
   const today = getTodayDateString();
-  const config = getDailyTargetConfig();
+  const targetUid = uid !== undefined ? uid : activeDailyTargetUid;
+  const config = getDailyTargetConfig(targetUid);
 
   try {
-    const raw = localStorage.getItem(STORAGE_KEY_DAILY_TARGET_STATE);
+    const raw = localStorage.getItem(getDailyTargetStateStorageKey(targetUid));
     if (raw) {
       const parsed: DailyTargetState = JSON.parse(raw);
       if (parsed.date === today) {
@@ -72,7 +106,7 @@ export function getDailyTargetState(): DailyTargetState {
     // fallback
   }
 
-  // New day or first run
+  // New day or first run for this user
   const fresh: DailyTargetState = {
     date: today,
     targetQuestions: config.targetQuestions,
@@ -81,13 +115,17 @@ export function getDailyTargetState(): DailyTargetState {
     lastUpdated: Date.now(),
   };
 
-  saveDailyTargetState(fresh);
+  saveDailyTargetState(fresh, targetUid);
   return fresh;
 }
 
-export function saveDailyTargetState(state: DailyTargetState): void {
+export function saveDailyTargetState(state: DailyTargetState, uid?: string | null): void {
+  const targetUid = uid !== undefined ? uid : activeDailyTargetUid;
   try {
-    localStorage.setItem(STORAGE_KEY_DAILY_TARGET_STATE, JSON.stringify(state));
+    localStorage.setItem(getDailyTargetStateStorageKey(targetUid), JSON.stringify(state));
+    if (targetUid && targetUid !== 'guest') {
+      localStorage.removeItem(LEGACY_STORAGE_KEY_DAILY_TARGET_STATE);
+    }
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('daily-target-updated', { detail: state }));
     }
@@ -96,12 +134,13 @@ export function saveDailyTargetState(state: DailyTargetState): void {
   }
 }
 
-export function recordQuestionSolvedForDailyTarget(count: number = 1): DailyTargetState {
-  const state = getDailyTargetState();
+export function recordQuestionSolvedForDailyTarget(count: number = 1, uid?: string | null): DailyTargetState {
+  const targetUid = uid !== undefined ? uid : activeDailyTargetUid;
+  const state = getDailyTargetState(targetUid);
   const prevSolved = state.questionsSolvedToday;
   state.questionsSolvedToday += count;
   state.lastUpdated = Date.now();
-  saveDailyTargetState(state);
+  saveDailyTargetState(state, targetUid);
 
   // GA4 Tracking: 10 legitimate questions answered milestone (once per day)
   checkAndTrackQuestion10(state.questionsSolvedToday);
@@ -114,8 +153,9 @@ export function recordQuestionSolvedForDailyTarget(count: number = 1): DailyTarg
   return state;
 }
 
-export function claimDailyTargetReward(): { success: boolean; rewardLP: number; state: DailyTargetState } {
-  const state = getDailyTargetState();
+export function claimDailyTargetReward(uid?: string | null): { success: boolean; rewardLP: number; state: DailyTargetState } {
+  const targetUid = uid !== undefined ? uid : activeDailyTargetUid;
+  const state = getDailyTargetState(targetUid);
   const isReached = state.questionsSolvedToday >= state.targetQuestions;
 
   if (!isReached || state.isRewardClaimed) {
@@ -124,7 +164,7 @@ export function claimDailyTargetReward(): { success: boolean; rewardLP: number; 
 
   state.isRewardClaimed = true;
   state.lastUpdated = Date.now();
-  saveDailyTargetState(state);
+  saveDailyTargetState(state, targetUid);
 
   // Scaled LP reward based on target size (e.g., 30 questions = 60 LP, 100 questions = 150 LP)
   const baseLP = 50;
@@ -154,10 +194,17 @@ export function getTimeUntilMidnight(): { hours: number; minutes: number; second
 /**
  * Resets daily target state and config upon sign out so guest starts fresh
  */
-export function resetDailyTargetState(): void {
+export function resetDailyTargetState(uid?: string | null): void {
   try {
-    localStorage.removeItem(STORAGE_KEY_DAILY_TARGET_STATE);
-    localStorage.removeItem(STORAGE_KEY_DAILY_TARGET_CONFIG);
+    if (uid) {
+      localStorage.removeItem(getDailyTargetStateStorageKey(uid));
+      localStorage.removeItem(getDailyTargetConfigStorageKey(uid));
+    } else {
+      localStorage.removeItem(getDailyTargetStateStorageKey('guest'));
+      localStorage.removeItem(getDailyTargetConfigStorageKey('guest'));
+    }
+    localStorage.removeItem(LEGACY_STORAGE_KEY_DAILY_TARGET_STATE);
+    localStorage.removeItem(LEGACY_STORAGE_KEY_DAILY_TARGET_CONFIG);
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('daily-target-updated'));
     }

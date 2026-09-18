@@ -28,7 +28,8 @@ import {
   Eye,
   Share2,
   Info,
-  Lightbulb
+  Lightbulb,
+  Crown
 } from 'lucide-react';
 import { MatchState, PlayerProfile, Question } from '../types';
 import { soundManager } from '../utils/audio';
@@ -72,6 +73,7 @@ interface MatchSummaryProps {
   isPremium?: boolean;
   currentUser?: FirebaseUser | null;
   onUserChange?: (user: FirebaseUser | null) => void;
+  onOpenPremium?: () => void;
 }
 
 interface MatchQuestionReviewCardProps {
@@ -519,6 +521,7 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
   isPremium = false,
   currentUser = null,
   onUserChange,
+  onOpenPremium,
 }) => {
   const [reportingQuestion, setReportingQuestion] = useState<Question | null>(null);
   const [showGuestReviewModal, setShowGuestReviewModal] = useState<boolean>(false);
@@ -901,6 +904,61 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
+
+            {/* VocabClash VIP / Premium Promotional Card (Non-premium users only; never shown to active VIP members) */}
+            {!isPremium && onOpenPremium && (
+              <div className="max-w-xl mx-auto w-full pt-1">
+                <button
+                  type="button"
+                  id="result-screen-vip-upgrade-card"
+                  onClick={() => {
+                    soundManager.playTap();
+                    onOpenPremium();
+                  }}
+                  className="w-full text-left bg-gradient-to-r from-purple-950/50 via-slate-900/90 to-indigo-950/50 hover:from-purple-900/60 hover:to-indigo-900/60 border border-purple-500/30 hover:border-purple-400/60 rounded-2xl p-3 sm:p-3.5 transition-all duration-200 shadow-md group cursor-pointer active:scale-[0.99] flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="w-8 h-8 rounded-xl bg-purple-900/60 border border-purple-500/40 text-amber-300 flex items-center justify-center shrink-0 shadow-inner mt-0.5 sm:mt-0">
+                      <Crown className="w-4 h-4 fill-amber-300/40" />
+                    </div>
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs sm:text-sm font-black text-white group-hover:text-purple-200 transition-colors">
+                          VocabClash VIP
+                        </span>
+                        <span className="text-[10px] text-amber-300/90 font-semibold bg-amber-400/10 border border-amber-400/25 px-1.5 py-0.5 rounded-md">
+                          Starting at ₹19/month
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-300 font-medium leading-snug">
+                        Study without interruptions
+                      </p>
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] sm:text-[11px] text-purple-200/90 font-medium pt-0.5">
+                        <span className="flex items-center gap-1">
+                          <span className="w-1 h-1 rounded-full bg-amber-400"></span>
+                          Ad-Free
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <span className="w-1 h-1 rounded-full bg-amber-400"></span>
+                          Unlimited PYQ Practice
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <span className="w-1 h-1 rounded-full bg-amber-400"></span>
+                          Full 1v1 Access
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="self-end sm:self-center shrink-0">
+                    <span className="inline-flex items-center gap-1 bg-purple-600/80 group-hover:bg-purple-500 text-white text-xs font-bold px-3 py-1.5 rounded-xl border border-purple-400/40 shadow-sm transition-colors">
+                      <span>Get VIP</span>
+                      <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+                    </span>
+                  </div>
+                </button>
+              </div>
+            )}
 
             {/* AdSense Unit (Omitted after first duel for clean onboarding & retention, gated by ADS_ENABLED) */}
             {ADS_ENABLED && !isPremium && player.matchesPlayed > 1 && (

@@ -21,6 +21,7 @@ import {
 
 interface StreakModalProps {
   streak: DailyStreakState;
+  uid?: string | null;
   onClose: () => void;
   onUpdateStreak: (updated: DailyStreakState) => void;
   onAddLP?: (amount: number) => void;
@@ -29,6 +30,7 @@ interface StreakModalProps {
 
 export const StreakModal: React.FC<StreakModalProps> = ({
   streak,
+  uid,
   onClose,
   onUpdateStreak,
   onAddLP,
@@ -36,7 +38,7 @@ export const StreakModal: React.FC<StreakModalProps> = ({
 }) => {
   const todayStr = getTodayDateString();
   const isSolvedToday = isDailyQuestionSolvedToday(streak, todayStr);
-  const isBonusAlreadyClaimed = isDailyStreakBonusClaimed(streak, todayStr);
+  const isBonusAlreadyClaimed = isDailyStreakBonusClaimed(streak, todayStr, uid);
 
   const [claimedBonus, setClaimedBonus] = useState<boolean>(() => isBonusAlreadyClaimed);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -96,7 +98,7 @@ export const StreakModal: React.FC<StreakModalProps> = ({
     }
 
     // 3. Atomically claim bonus with verification
-    const result = claimDailyStreakBonus(streak, todayStr);
+    const result = claimDailyStreakBonus(streak, todayStr, uid);
     if (!result.success) {
       if (result.error === 'ALREADY_CLAIMED') {
         setClaimedBonus(true);

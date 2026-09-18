@@ -1,7 +1,77 @@
 import { DailyStreakState } from '../types';
 
-const STORAGE_KEY_STREAK = 'vocabclash_daily_streak_v2';
+const STORAGE_KEY_STREAK_PREFIX = 'vocabclash_streak_state_v3_';
+const STORAGE_KEY_STREAK_BONUS_PREFIX = 'vocabclash_streak_bonus_date_v3_';
+export const LEGACY_STORAGE_KEY_STREAK = 'vocabclash_daily_streak_v2';
 export const STORAGE_KEY_STREAK_BONUS_CLAIMED_DATE = 'vocabclash_streak_daily_bonus_claimed_date';
+
+// Active in-memory UID tracker for currently authenticated session
+let activeStreakUid: string | null = null;
+
+export function setActiveStreakUser(uid: string | null): void {
+  activeStreakUid = uid;
+}
+
+export function getActiveStreakUser(): string | null {
+  return activeStreakUid;
+}
+
+/**
+ * Returns UID-scoped key for daily streak state
+ */
+export function getStreakStorageKey(uid?: string | null): string {
+  const resolved = uid !== undefined ? uid : activeStreakUid;
+  if (resolved && resolved !== 'guest' && resolved !== 'default_user') {
+    return `${STORAGE_KEY_STREAK_PREFIX}${resolved}`;
+  }
+  return `${STORAGE_KEY_STREAK_PREFIX}guest`;
+}
+
+/**
+ * Returns UID-scoped key for daily streak bonus claim date
+ */
+export function getStreakBonusStorageKey(uid?: string | null): string {
+  const resolved = uid !== undefined ? uid : activeStreakUid;
+  if (resolved && resolved !== 'guest' && resolved !== 'default_user') {
+    return `${STORAGE_KEY_STREAK_BONUS_PREFIX}${resolved}`;
+  }
+  return `${STORAGE_KEY_STREAK_BONUS_PREFIX}guest`;
+}
+
+/**
+ * Factory for a brand new, clean, unhydrated streak state
+ */
+export function createFreshStreak(): DailyStreakState {
+  return {
+    currentStreak: 0,
+    longestStreak: 0,
+    lastActiveDate: '',
+    lastActiveTimestamp: 0,
+    claimedToday: false,
+    lastClaimedBonusDate: '',
+    totalDaysActive: 0,
+    history: {},
+    streakBrokenNotice: false,
+  };
+}
+
+/**
+ * Clears streak caches for a specific user or guest
+ */
+export function clearStreakCacheForUser(uid?: string | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (uid) {
+      localStorage.removeItem(getStreakStorageKey(uid));
+      localStorage.removeItem(getStreakBonusStorageKey(uid));
+    } else {
+      localStorage.removeItem(getStreakStorageKey('guest'));
+      localStorage.removeItem(getStreakBonusStorageKey('guest'));
+    }
+    localStorage.removeItem(LEGACY_STORAGE_KEY_STREAK);
+    localStorage.removeItem(STORAGE_KEY_STREAK_BONUS_CLAIMED_DATE);
+  } catch {}
+}
 
 /**
  * Returns YYYY-MM-DD in local time
@@ -115,8 +185,10 @@ export function mergeStreakStates(
   local: DailyStreakState,
   cloud?: DailyStreakState | null,
   today: string = getTodayDateString(),
-  userEmail?: string | null
+  userEmail?: string | null,
+  uid?: string | null
 ): DailyStreakState {
+  const targetUid = uid !== undefined ? uid : activeStreakUid;
   const mergedHistory: Record<string, boolean> = {
     ...(local.history || {}),
     ...(cloud?.history || {}),
@@ -159,8 +231,8 @@ export function mergeStreakStates(
   );
 
   const isClaimedToday = 
-    isDailyStreakBonusClaimed(local, today) || 
-    (cloud ? isDailyStreakBonusClaimed(cloud, today) : false);
+    isDailyStreakBonusClaimed(local, today, targetUid) || 
+    (cloud ? isDailyStreakBonusClaimed(cloud, today, targetUid) : false);
 
   const lastActiveDate = 
     (mergedHistory[today] ? today : (calculated.lastActiveDate || cloud?.lastActiveDate || local.lastActiveDate || today));
@@ -200,14 +272,16 @@ export function triggerGlobalQuestionSolved(): void {
  */
 export function isDailyStreakBonusClaimed(
   state: DailyStreakState,
-  today: string = getTodayDateString()
+  today: string = getTodayDateString(),
+  uid?: string | null
 ): boolean {
   if (state.lastClaimedBonusDate === today) {
     return true;
   }
   if (typeof window !== 'undefined') {
     try {
-      const localClaimedDate = localStorage.getItem(STORAGE_KEY_STREAK_BONUS_CLAIMED_DATE);
+      const bonusKey = getStreakBonusStorageKey(uid);
+      const localClaimedDate = localStorage.getItem(bonusKey);
       if (localClaimedDate === today) {
         return true;
       }
@@ -229,36 +303,29 @@ export function isDailyQuestionSolvedToday(
 }
 
 /**
- * Loads stored streak from localStorage and checks for missed days
+ * Loads stored streak from localStorage for a specific UID and checks for missed days.
+ * Never loads another user's streak.
  */
-export function getInitialStreak(): DailyStreakState {
+export function getInitialStreak(uid?: string | null): DailyStreakState {
   const today = getTodayDateString();
+  const targetUid = uid !== undefined ? uid : activeStreakUid;
 
   if (typeof window !== 'undefined') {
-    const saved = localStorage.getItem(STORAGE_KEY_STREAK);
+    const key = getStreakStorageKey(targetUid);
+    const saved = localStorage.getItem(key);
     if (saved) {
       try {
         const parsed: DailyStreakState = JSON.parse(saved);
-        return evaluateStreakIntegrity(parsed, today);
+        return evaluateStreakIntegrity(parsed, today, targetUid);
       } catch (e) {
         console.error('Failed to parse streak state', e);
       }
     }
   }
 
-  // Brand new user: Starts at 0 days until they solve their first question
-  const initial: DailyStreakState = {
-    currentStreak: 0,
-    longestStreak: 0,
-    lastActiveDate: '',
-    lastActiveTimestamp: 0,
-    claimedToday: false,
-    lastClaimedBonusDate: '',
-    totalDaysActive: 0,
-    history: {},
-    streakBrokenNotice: false,
-  };
-  saveStreakState(initial);
+  // Brand new / unhydrated user: Starts at fresh 0 days until cloud hydrates or question is solved
+  const initial = createFreshStreak();
+  saveStreakState(initial, targetUid);
   return initial;
 }
 
@@ -268,8 +335,13 @@ export function getInitialStreak(): DailyStreakState {
  * - If last active was today: user has already solved a question today.
  * - If last active was >= 2 days ago: user missed a day -> streak resets to 0!
  */
-export function evaluateStreakIntegrity(state: DailyStreakState, today: string = getTodayDateString()): DailyStreakState {
-  const isBonusClaimedToday = isDailyStreakBonusClaimed(state, today);
+export function evaluateStreakIntegrity(
+  state: DailyStreakState, 
+  today: string = getTodayDateString(),
+  uid?: string | null
+): DailyStreakState {
+  const targetUid = uid !== undefined ? uid : activeStreakUid;
+  const isBonusClaimedToday = isDailyStreakBonusClaimed(state, today, targetUid);
   const lastDate = state.lastActiveDate;
   if (!lastDate) {
     return {
@@ -305,21 +377,23 @@ export function evaluateStreakIntegrity(state: DailyStreakState, today: string =
       claimedToday: isBonusClaimedToday,
       streakBrokenNotice: state.currentStreak > 0, // Flag notice if they had an active streak that was broken
     };
-    saveStreakState(updated);
+    saveStreakState(updated, targetUid);
     return updated;
   }
 }
 
 /**
  * Claims the daily streak bonus (+25 LP).
- * STRICT RULE: Can only be claimed ONCE per calendar day!
+ * STRICT RULE: Can only be claimed ONCE per calendar day per UID!
  */
 export function claimDailyStreakBonus(
   state: DailyStreakState,
-  today: string = getTodayDateString()
+  today: string = getTodayDateString(),
+  uid?: string | null
 ): { success: boolean; rewardLP: number; updatedStreak: DailyStreakState; error?: string } {
+  const targetUid = uid !== undefined ? uid : activeStreakUid;
   // 1. Guard against claiming more than once per day
-  if (isDailyStreakBonusClaimed(state, today)) {
+  if (isDailyStreakBonusClaimed(state, today, targetUid)) {
     return {
       success: false,
       rewardLP: 0,
@@ -346,11 +420,14 @@ export function claimDailyStreakBonus(
     lastClaimedBonusDate: today,
   };
 
-  saveStreakState(updated);
+  saveStreakState(updated, targetUid);
 
   if (typeof window !== 'undefined') {
     try {
-      localStorage.setItem(STORAGE_KEY_STREAK_BONUS_CLAIMED_DATE, today);
+      localStorage.setItem(getStreakBonusStorageKey(targetUid), today);
+      if (targetUid && targetUid !== 'guest') {
+        localStorage.removeItem(STORAGE_KEY_STREAK_BONUS_CLAIMED_DATE);
+      }
     } catch {
       // ignore
     }
@@ -371,9 +448,11 @@ export function claimDailyStreakBonus(
  */
 export function recordDailyQuestionSolved(
   state: DailyStreakState,
-  today: string = getTodayDateString()
+  today: string = getTodayDateString(),
+  uid?: string | null
 ): { updatedStreak: DailyStreakState; isNewStreakDay: boolean } {
-  const isBonusClaimed = isDailyStreakBonusClaimed(state, today);
+  const targetUid = uid !== undefined ? uid : activeStreakUid;
+  const isBonusClaimed = isDailyStreakBonusClaimed(state, today, targetUid);
   const isAlreadySolvedToday = Boolean(state.history?.[today] || state.lastActiveDate === today);
 
   const updatedHistory: Record<string, boolean> = {
@@ -411,11 +490,19 @@ export function recordDailyQuestionSolved(
     streakBrokenNotice: false,
   };
 
-  saveStreakState(updated);
+  saveStreakState(updated, targetUid);
   return { updatedStreak: updated, isNewStreakDay: !isAlreadySolvedToday };
 }
 
-export function saveStreakState(state: DailyStreakState): void {
+export function saveStreakState(state: DailyStreakState, uid?: string | null): void {
   if (typeof window === 'undefined') return;
-  localStorage.setItem(STORAGE_KEY_STREAK, JSON.stringify(state));
+  const targetUid = uid !== undefined ? uid : activeStreakUid;
+  const key = getStreakStorageKey(targetUid);
+  try {
+    localStorage.setItem(key, JSON.stringify(state));
+    // Clean up legacy global key if an authenticated user is active
+    if (targetUid && targetUid !== 'guest') {
+      localStorage.removeItem(LEGACY_STORAGE_KEY_STREAK);
+    }
+  } catch {}
 }

@@ -1,0 +1,8 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">VocabClash</string>
+    <string name="title_activity_main">VocabClash</string>
+    <string name="package_name">in.vocabclash.twa</string>
+    <string name="custom_url_scheme">in.vocabclash.twa</string>
+    <string name="default_web_client_id">970204579955-bsbpsu3uj5ic1dg00ks2matsiqoamrij.apps.googleusercontent.com</string>
+</resources>

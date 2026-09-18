@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { Question } from '../types';
 import { submitQuestionReport } from '../services/pyqQualityAuditService';
+import { openMailto } from '../utils/externalLinks';
 
 interface ReportQuestionModalProps {
   question: Question;
@@ -134,10 +135,9 @@ Timestamp: ${new Date().toISOString()}
 
   const handleSendEmail = () => {
     soundManager.playTap();
-    const subject = encodeURIComponent(`[Question Error Report] ID: ${question.id} - Word: "${question.wordOrPhrase}"`);
-    const body = encodeURIComponent(getReportBody());
-    const mailtoUrl = `mailto:${SUPPORT_EMAIL}?subject=${subject}&body=${body}`;
-    window.open(mailtoUrl, '_blank');
+    const subject = `[Question Error Report] ID: ${question.id} - Word: "${question.wordOrPhrase}"`;
+    const body = getReportBody();
+    openMailto(SUPPORT_EMAIL, subject, body);
   };
 
   const handleCopy = () => {

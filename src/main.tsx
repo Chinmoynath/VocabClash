@@ -4,6 +4,7 @@ import {SpeedInsights} from '@vercel/speed-insights/react';
 import {Analytics} from '@vercel/analytics/react';
 import App from './App.tsx';
 import './index.css';
+import { isWebBrowser, cleanupServiceWorkersIfNative } from './utils/platform';
 
 // Guard against benign browser iframe IndexedDB teardown / closing events
 if (typeof window !== 'undefined') {
@@ -37,13 +38,21 @@ if (typeof window !== 'undefined') {
   });
 }
 
-// Register Service Worker for PWA / Google Play TWA
-if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch((err) => {
-      console.warn('Service worker registration non-blocking notice:', err);
-    });
-  });
+// Service Worker handling:
+// - In standard web browser & PWA: ensure service worker is active for offline/caching
+// - In native Capacitor: clean up any legacy SW or caches from prior TWA installs to avoid stale asset lockups
+if (typeof window !== 'undefined') {
+  if (isWebBrowser()) {
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch((err) => {
+          console.warn('Service worker registration non-blocking notice:', err);
+        });
+      });
+    }
+  } else {
+    cleanupServiceWorkersIfNative();
+  }
 }
 
 createRoot(document.getElementById('root')!).render(

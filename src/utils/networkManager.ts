@@ -3,6 +3,8 @@
  * Tracks real-time connectivity status (online/offline events + active ping probe)
  * for 1v1 duels, matchmaking, and offline fallback modes.
  */
+import { Network as CapacitorNetwork } from "@capacitor/network";
+import { isNativeCapacitor } from "./platform";
 
 type NetworkStatusCallback = (status: {
   isOnline: boolean;
@@ -16,19 +18,44 @@ class NetworkManager {
   private subscribers: Set<NetworkStatusCallback> = new Set();
   private pingInterval: NodeJS.Timeout | null = null;
   private isChecking: boolean = false;
+  private capNetListener: any = null;
 
   constructor() {
     if (typeof window !== 'undefined') {
       window.addEventListener('online', this.handleOnlineEvent);
       window.addEventListener('offline', this.handleOfflineEvent);
+      
+      if (isNativeCapacitor()) {
+        this.initCapacitorNetwork();
+      }
+
       // Run initial check
       this.checkLatency();
+
       // Periodic background probe every 15s if online
       this.pingInterval = setInterval(() => {
         if (this.online) {
           this.checkLatency();
         }
       }, 15000);
+    }
+  }
+
+  private async initCapacitorNetwork() {
+    try {
+      const status = await CapacitorNetwork.getStatus();
+      this.online = status.connected;
+      this.capNetListener = await CapacitorNetwork.addListener("networkStatusChange", status => {
+        this.online = status.connected;
+        if (this.online) {
+          this.checkLatency();
+        } else {
+          this.currentPing = null;
+        }
+        this.notifySubscribers();
+      });
+    } catch (err) {
+      console.warn("[NetworkManager] Capacitor Network init failed:", err);
     }
   }
 
@@ -67,7 +94,6 @@ class NetworkManager {
     if (this.isChecking) {
       return { isOnline: this.isOnline(), pingMs: this.currentPing };
     }
-
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       this.online = false;
       this.currentPing = null;
@@ -77,20 +103,16 @@ class NetworkManager {
 
     this.isChecking = true;
     const startTime = Date.now();
-
     try {
-      // Lightweight fetch to health endpoint with cache-busting
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 4000);
-
       const response = await fetch(`/api/health?t=${startTime}`, {
         method: 'GET',
         cache: 'no-store',
         signal: controller.signal,
       });
-
       clearTimeout(timeoutId);
-
+      
       if (response.ok) {
         const ping = Date.now() - startTime;
         this.online = true;
@@ -100,12 +122,10 @@ class NetworkManager {
         this.currentPing = Math.max(50, Date.now() - startTime);
       }
     } catch {
-      // Check if navigator says offline
       if (typeof navigator !== 'undefined' && !navigator.onLine) {
         this.online = false;
         this.currentPing = null;
       } else {
-        // May be sandbox / iframe restricted, but browser considers online
         this.online = typeof navigator !== 'undefined' ? navigator.onLine : true;
         this.currentPing = this.online ? 80 : null;
       }
@@ -113,19 +133,16 @@ class NetworkManager {
       this.isChecking = false;
       this.notifySubscribers();
     }
-
     return { isOnline: this.isOnline(), pingMs: this.currentPing };
   }
 
   public subscribe(callback: NetworkStatusCallback): () => void {
     this.subscribers.add(callback);
-    // Immediately inform new subscriber
     callback({
       isOnline: this.isOnline(),
       pingMs: this.currentPing,
       quality: this.getQuality(),
     });
-
     return () => {
       this.subscribers.delete(callback);
     };
@@ -151,6 +168,7 @@ class NetworkManager {
       window.removeEventListener('online', this.handleOnlineEvent);
       window.removeEventListener('offline', this.handleOfflineEvent);
       if (this.pingInterval) clearInterval(this.pingInterval);
+      if (this.capNetListener) this.capNetListener.remove();
     }
     this.subscribers.clear();
   }

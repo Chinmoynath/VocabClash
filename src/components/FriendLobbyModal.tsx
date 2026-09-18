@@ -38,6 +38,7 @@ import {
 } from '../types';
 import { soundManager } from '../utils/audio';
 import { validateProperEmail } from '../utils/emailValidator';
+import { openExternalUrl } from '../utils/externalLinks';
 import { UserAvatar } from './UserAvatar';
 import { 
   createFriendLobby, 
@@ -365,7 +366,7 @@ export const FriendLobbyModal: React.FC<FriendLobbyModalProps> = ({
     const inviteUrl = `${origin}?lobby=${code}`;
     const message = `⚔️ *VocabClash 1v1 Battle Challenge!*\n\nJoin my private room to duel on SSC & Govt Exam English PYQs in real-time!\n\n🔑 *Room Code:* ${code}\n🔗 *Direct Join Link:* ${inviteUrl}`;
     const whatsappUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`;
-    window.open(whatsappUrl, '_blank');
+    openExternalUrl(whatsappUrl);
   };
 
   // 6-Digit PIN input handling

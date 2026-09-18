@@ -48,12 +48,21 @@ declare global {
   }
 }
 
+import { isNativeCapacitor } from '../utils/platform';
+
 let scriptInjected = false;
 
 /**
  * Ensures the Google AdSense library script is injected into document head.
+ * In native Capacitor shells, AdSense is completely suppressed to comply with Google policies.
  */
 export function initGoogleAdSense(): void {
+  // Completely suppress AdSense in native Capacitor (Google AdSense policy forbids WebViews)
+  if (isNativeCapacitor()) {
+    console.log('[AdSense] Native Capacitor platform detected: suppressing Google AdSense web script.');
+    return;
+  }
+
   // Prevent SDK injection and network loading while ads are disabled
   if (!ADS_ENABLED) return;
   if (typeof window === 'undefined') return;
@@ -88,6 +97,7 @@ export function initGoogleAdSense(): void {
  * Pushes an ad request to window.adsbygoogle queue safely.
  */
 export function pushAdSenseRequest(): boolean {
+  if (isNativeCapacitor()) return false;
   if (!ADS_ENABLED) return false;
   if (typeof window === 'undefined') return false;
   try {

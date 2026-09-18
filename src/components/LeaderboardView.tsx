@@ -26,12 +26,13 @@ import { useRankStore, rankStore } from '../services/rankStore';
 interface LeaderboardViewProps {
   player: PlayerProfile;
   isPremium?: boolean;
+  onLpUpdated?: () => void;
 }
 
-const LeaderboardSkeleton: React.FC<{ player: PlayerProfile }> = ({ player }) => (
+const LeaderboardSkeleton: React.FC<{ player: PlayerProfile; onLpUpdated?: () => void }> = ({ player, onLpUpdated }) => (
   <div className="p-3.5 sm:p-5 lg:p-6 space-y-4 pb-8 max-w-5xl mx-auto w-full animate-pulse">
     {/* Daily Challenge Card */}
-    <DailyChallengeCard player={player} />
+    <DailyChallengeCard player={player} onLpUpdated={onLpUpdated} />
 
     {/* Top Standings Banner Skeleton */}
     <div className="bg-slate-850/80 border border-slate-800 rounded-2xl p-3.5 space-y-2.5">
@@ -76,7 +77,7 @@ const LeaderboardSkeleton: React.FC<{ player: PlayerProfile }> = ({ player }) =>
   </div>
 );
 
-export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ player, isPremium = false }) => {
+export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ player, isPremium = false, onLpUpdated }) => {
   const [activeTab, setActiveTab] = useState<'leaderboard' | 'tiers'>('leaderboard');
 
   // Read instant in-memory data from global rankStore
@@ -119,13 +120,13 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ player, isPrem
 
   // Show loading skeleton strictly on true cold first load before any data/cache exists
   if (isLoading) {
-    return <LeaderboardSkeleton player={player} />;
+    return <LeaderboardSkeleton player={player} onLpUpdated={onLpUpdated} />;
   }
 
   return (
     <div className="p-3.5 sm:p-5 lg:p-6 space-y-4 pb-8 max-w-5xl mx-auto w-full">
       {/* Daily Challenge Card at top of ranks */}
-      <DailyChallengeCard player={player} />
+      <DailyChallengeCard player={player} onLpUpdated={onLpUpdated} />
 
       {/* Top Standings Banner */}
       <div className="bg-slate-850/80 border border-slate-800 rounded-2xl p-3.5 space-y-2.5">

@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { soundManager } from '../utils/audio';
 import { recordAdShown, ADS_ENABLED } from '../utils/adManager';
+import { isNativeCapacitor } from '../utils/platform';
 import { AdSenseUnit } from './AdSenseUnit';
 import { ADSENSE_INTERSTITIAL_SLOT } from '../services/adSenseService';
 
@@ -26,8 +27,8 @@ export const InterstitialAdModal: React.FC<InterstitialAdModalProps> = ({
   onClose,
   onOpenPremium,
 }) => {
-  // Completely dormant when ads are disabled
-  if (!ADS_ENABLED) {
+  // Completely dormant when ads are disabled or running inside native Capacitor
+  if (!ADS_ENABLED || isNativeCapacitor()) {
     return null;
   }
 

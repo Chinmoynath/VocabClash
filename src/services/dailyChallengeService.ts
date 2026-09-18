@@ -315,7 +315,12 @@ export function saveDailyChallengeAttempt(
   // 4. Notify UI components
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('daily-challenge-updated'));
+    if (rankPointsGained > 0) {
+      window.dispatchEvent(new CustomEvent('daily-challenge-completed', { detail: { attempt: finalizedAttempt, rankPointsGained } }));
+    }
   }
+
+  console.log(`[Sync] Daily Challenge saved: date=${finalizedAttempt.date}, lpGained=${rankPointsGained}, score=${finalizedAttempt.score}/${finalizedAttempt.maxMarks}`);
 
   return { history: updatedHistory, rankPointsGained };
 }
@@ -341,6 +346,10 @@ export async function syncDailyChallengeWithBackend(
 
       // Merge cloud attempts with local attempts so neither is lost
       const merged = mergeDailyChallengeHistory(cleanCloud, effectiveUid);
+
+      const todayStr = getTodayDateString();
+      const todayAttempt = merged.find(a => a.date === todayStr);
+      console.log(`[Sync] Daily Challenge synced: date=${todayStr}, completed=${!!todayAttempt}, score=${todayAttempt?.score ?? 0}`);
 
       // If local had records that cloud lacked, sync merged state up to Firestore
       if (merged.length > cleanCloud.length) {

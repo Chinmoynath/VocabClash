@@ -11,8 +11,36 @@ import { recordAttemptEvent, AttemptSource, normalizeCategory } from '../service
 import { auth, db } from '../services/firebaseService';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 
-const STORAGE_KEY_DAILY_STATS = 'vocabclash_daily_stats_v2';
-const STORAGE_KEY_STATS_TOTALS = 'vocabclash_stats_totals_v2';
+const STORAGE_KEY_DAILY_STATS_PREFIX = 'vocabclash_daily_stats_v3_';
+const STORAGE_KEY_STATS_TOTALS_PREFIX = 'vocabclash_stats_totals_v3_';
+export const LEGACY_STORAGE_KEY_DAILY_STATS = 'vocabclash_daily_stats_v2';
+export const LEGACY_STORAGE_KEY_STATS_TOTALS = 'vocabclash_stats_totals_v2';
+
+let activeStatsUid: string | null = null;
+
+export function setUserStatsAuthUid(uid: string | null): void {
+  activeStatsUid = uid;
+}
+
+export function getUserStatsAuthUid(): string | null {
+  return activeStatsUid;
+}
+
+export function getDailyStatsStorageKey(uid?: string | null): string {
+  const target = uid !== undefined ? uid : activeStatsUid;
+  if (target && target !== 'guest' && target !== 'default_user') {
+    return `${STORAGE_KEY_DAILY_STATS_PREFIX}${target}`;
+  }
+  return `${STORAGE_KEY_DAILY_STATS_PREFIX}guest`;
+}
+
+export function getStatsTotalsStorageKey(uid?: string | null): string {
+  const target = uid !== undefined ? uid : activeStatsUid;
+  if (target && target !== 'guest' && target !== 'default_user') {
+    return `${STORAGE_KEY_STATS_TOTALS_PREFIX}${target}`;
+  }
+  return `${STORAGE_KEY_STATS_TOTALS_PREFIX}guest`;
+}
 
 export interface PersistentStatsTotals {
   totalSolved: number;
@@ -49,29 +77,15 @@ function getPreviousMonthKey(currentYearMonth: string): string {
   return `${year}-${String(month).padStart(2, '0')}`;
 }
 
-export function getDailyStatsMap(): Record<string, DailyAccuracyRecord> {
+export function getDailyStatsMap(uid?: string | null): Record<string, DailyAccuracyRecord> {
   if (typeof window === 'undefined' || !window.localStorage) return {};
+  const targetUid = uid !== undefined ? uid : activeStatsUid;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY_DAILY_STATS);
+    const raw = localStorage.getItem(getDailyStatsStorageKey(targetUid));
     if (raw) {
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
         return parsed;
-      }
-    }
-
-    // Check legacy storage keys for historical daily stats
-    const legacyKeys = ['vocabclash_daily_stats', 'vocabclash_daily_stats_v1', 'vocabclash_daily_records'];
-    for (const lk of legacyKeys) {
-      const legRaw = localStorage.getItem(lk);
-      if (legRaw) {
-        try {
-          const parsedLeg = JSON.parse(legRaw);
-          if (parsedLeg && typeof parsedLeg === 'object' && Object.keys(parsedLeg).length > 0) {
-            saveDailyStatsMap(parsedLeg);
-            return parsedLeg;
-          }
-        } catch {}
       }
     }
   } catch {
@@ -80,21 +94,26 @@ export function getDailyStatsMap(): Record<string, DailyAccuracyRecord> {
   return {};
 }
 
-export function saveDailyStatsMap(map: Record<string, DailyAccuracyRecord>): void {
+export function saveDailyStatsMap(map: Record<string, DailyAccuracyRecord>, uid?: string | null): void {
   if (typeof window === 'undefined' || !window.localStorage) return;
+  const targetUid = uid !== undefined ? uid : activeStatsUid;
   try {
-    localStorage.setItem(STORAGE_KEY_DAILY_STATS, JSON.stringify(map));
+    localStorage.setItem(getDailyStatsStorageKey(targetUid), JSON.stringify(map));
+    if (targetUid && targetUid !== 'guest') {
+      localStorage.removeItem(LEGACY_STORAGE_KEY_DAILY_STATS);
+    }
   } catch {
     // ignore
   }
 }
 
-export function getPersistentTotals(): PersistentStatsTotals {
+export function getPersistentTotals(uid?: string | null): PersistentStatsTotals {
   if (typeof window === 'undefined' || !window.localStorage) {
     return createEmptyTotals();
   }
+  const targetUid = uid !== undefined ? uid : activeStatsUid;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY_STATS_TOTALS);
+    const raw = localStorage.getItem(getStatsTotalsStorageKey(targetUid));
     if (raw) {
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed.totalSolved === 'number') {
@@ -124,10 +143,14 @@ function createEmptyTotals(): PersistentStatsTotals {
   };
 }
 
-function savePersistentTotals(totals: PersistentStatsTotals): void {
+function savePersistentTotals(totals: PersistentStatsTotals, uid?: string | null): void {
   if (typeof window === 'undefined' || !window.localStorage) return;
+  const targetUid = uid !== undefined ? uid : activeStatsUid;
   try {
-    localStorage.setItem(STORAGE_KEY_STATS_TOTALS, JSON.stringify(totals));
+    localStorage.setItem(getStatsTotalsStorageKey(targetUid), JSON.stringify(totals));
+    if (targetUid && targetUid !== 'guest') {
+      localStorage.removeItem(LEGACY_STORAGE_KEY_STATS_TOTALS);
+    }
   } catch {
     // ignore
   }
@@ -574,25 +597,26 @@ export function getUserStatsSummary(
  */
 export async function hydrateStatsFromCloud(uid: string): Promise<void> {
   if (!uid) return;
+  setUserStatsAuthUid(uid);
   try {
     const statsDocRef = doc(db, 'users', uid, 'stats_summary', 'main');
     const snap = await getDoc(statsDocRef);
     if (snap.exists()) {
       const data = snap.data();
       if (data?.totals) {
-        const localTotals = getPersistentTotals();
+        const localTotals = getPersistentTotals(uid);
         if (data.totals.totalSolved > localTotals.totalSolved) {
-          savePersistentTotals(data.totals);
+          savePersistentTotals(data.totals, uid);
         }
       }
       if (Array.isArray(data?.recentDays)) {
-        const dailyMap = getDailyStatsMap();
+        const dailyMap = getDailyStatsMap(uid);
         for (const r of data.recentDays) {
           if (r && r.date && (!dailyMap[r.date] || r.solved > dailyMap[r.date].solved)) {
             dailyMap[r.date] = r;
           }
         }
-        saveDailyStatsMap(dailyMap);
+        saveDailyStatsMap(dailyMap, uid);
       }
     }
   } catch (err) {
@@ -603,10 +627,19 @@ export async function hydrateStatsFromCloud(uid: string): Promise<void> {
 /**
  * Resets stats for a fresh start
  */
-export function resetUserStats(): void {
+export function resetUserStats(uid?: string | null): void {
   if (typeof window === 'undefined' || !window.localStorage) return;
-  localStorage.removeItem(STORAGE_KEY_DAILY_STATS);
-  localStorage.removeItem(STORAGE_KEY_STATS_TOTALS);
+  try {
+    if (uid) {
+      localStorage.removeItem(getDailyStatsStorageKey(uid));
+      localStorage.removeItem(getStatsTotalsStorageKey(uid));
+    } else {
+      localStorage.removeItem(getDailyStatsStorageKey('guest'));
+      localStorage.removeItem(getStatsTotalsStorageKey('guest'));
+    }
+    localStorage.removeItem(LEGACY_STORAGE_KEY_DAILY_STATS);
+    localStorage.removeItem(LEGACY_STORAGE_KEY_STATS_TOTALS);
+  } catch {}
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('user-stats-updated'));
   }

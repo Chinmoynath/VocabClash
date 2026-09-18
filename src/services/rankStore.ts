@@ -441,15 +441,9 @@ class RankStore {
    * Performs silent background revalidation without blocking UI or showing skeletons
    */
   public silentRevalidate() {
-    // If we have an active listener, restarting it or touching it pulls latest
+    // If listener was detached or paused, reconnect
     if (!this.unsubscribeFirestore) {
       this.ensureListenerStarted(this.activeUid);
-      return;
-    }
-
-    // Listener is continuous; to ensure fresh sync if connection was paused:
-    if (this.currentPlayer) {
-      syncUserToLeaderboard(this.currentPlayer, this.activeUid).catch(() => {});
     }
   }
 }

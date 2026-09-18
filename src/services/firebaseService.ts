@@ -20,6 +20,7 @@ import {
   deleteUser,
   EmailAuthProvider,
   reauthenticateWithCredential,
+  signInWithCredential,
   getAdditionalUserInfo,
   User as FirebaseUser
 } from 'firebase/auth';
@@ -38,6 +39,7 @@ import {
   getDocs
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
+import { isAndroidCapacitor } from '../utils/platform';
 import { PlayerProfile, UserSubscription, DailyStreakState, SavedWord, QuestionCategory, ExamType } from '../types';
 import { DailyTargetState } from '../utils/dailyTargetManager';
 import { validateProperEmail } from '../utils/emailValidator';
@@ -282,6 +284,10 @@ export function getFriendlyAuthErrorMessage(error: any): string {
   const rawMsg = (error?.message || (typeof error === 'string' ? error : '')).trim();
   const message = rawMsg.toLowerCase();
 
+  if (code.includes('native-google-auth-not-initialized') || message.includes('native_google_auth_not_initialized')) {
+    return 'Native Google Sign-In is initializing for this Android app. Please use Email & Password or try again in the next build.';
+  }
+
   if (code.includes('email-already-in-use') || message.includes('email-already-in-use')) {
     return 'An account with this email already exists. Please sign in instead.';
   }
@@ -395,6 +401,87 @@ export async function verifySignupOtp(email: string, otp: string): Promise<{ suc
 let isGoogleAuthInProgress = false;
 
 export async function signInWithGoogle(forceRedirect = false): Promise<FirebaseUser | null> {
+  // BRANCH 1: NATIVE CAPACITOR ANDROID
+  // Embedded Android WebViews fail Google OAuth with 403: disallowed_useragent.
+  // We use the native Credential Manager / Google Sign-In plugin to retrieve the Google ID token,
+  // then hand it off to the existing Firebase Web SDK via signInWithCredential().
+  // This guarantees the exact same Firebase UID, security rules, and Firestore profile.
+  if (isAndroidCapacitor()) {
+    if (isGoogleAuthInProgress) {
+      console.log('[Native Auth] Google Sign-In is already in progress in Capacitor.');
+      return null;
+    }
+    isGoogleAuthInProgress = true;
+
+    try {
+      console.log('[Native Auth] Requesting native Google credential via @capacitor-firebase/authentication...');
+      const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication');
+      const res = await FirebaseAuthentication.signInWithGoogle();
+
+      const idToken = res.credential?.idToken;
+      if (!idToken) {
+        console.log('[Native Auth] No ID token returned from native selector (user may have dismissed dialog).');
+        return null;
+      }
+
+      console.log('[Native Auth] Native Google ID token obtained. Bridging to Firebase Web SDK...');
+      const credential = GoogleAuthProvider.credential(idToken);
+      const userCredential = await signInWithCredential(auth, credential);
+
+      try {
+        const addInfo = getAdditionalUserInfo(userCredential);
+        if (addInfo?.isNewUser) {
+          trackSignup('google');
+        }
+      } catch {
+        // ignore analytics tracking failure
+      }
+
+      console.log('[Native Auth] Successfully authenticated with Firebase Web SDK. UID:', userCredential.user.uid);
+      return userCredential.user;
+    } catch (error: any) {
+      const msg = String(error?.message || error || '').toLowerCase();
+      const code = String(error?.code || '').toLowerCase();
+
+      // Clean cancellation handling: user dismissed the sheet, tapped outside, or pressed back
+      if (
+        msg.includes('cancel') ||
+        code.includes('cancel') ||
+        msg.includes('16') ||
+        msg.includes('12501') ||
+        msg.includes('getcredentialcancellationexception')
+      ) {
+        console.log('[Native Auth] User cancelled native Google account selector.');
+        return null;
+      }
+
+      // DEVELOPER_ERROR / Code 10 handling (missing SHA-1 or unconfigured OAuth client)
+      if (msg.includes('developer_error') || msg.includes('10:') || code.includes('10')) {
+        console.error(
+          '[Native Auth] Google Sign-In DEVELOPER_ERROR (code 10). ' +
+          'This indicates the Android package (in.vocabclash.twa) and SHA-1 certificate fingerprint ' +
+          'are not registered in the Firebase / Google Cloud Console, or google-services.json is missing.'
+        );
+        const devErr = new Error('Google Sign-In configuration pending: Android SHA-1 certificate must be registered in Firebase Console.');
+        (devErr as any).code = 'auth/developer-error-sha1-unregistered';
+        throw devErr;
+      }
+
+      // Network error
+      if (msg.includes('network') || msg.includes('offline') || msg.includes('7:')) {
+        const netErr = new Error('Unable to connect to Google services. Please check your internet connection.');
+        (netErr as any).code = 'auth/network-request-failed';
+        throw netErr;
+      }
+
+      console.warn('[Native Auth] Native Google Sign-In error:', error);
+      throw error;
+    } finally {
+      isGoogleAuthInProgress = false;
+    }
+  }
+
+  // BRANCH 2: STANDARD WEB BROWSER / TWA (UNCHANGED)
   if (isGoogleAuthInProgress) {
     console.log('Google sign-in is already in progress, avoiding concurrent popup conflict.');
     return null;
@@ -460,12 +547,21 @@ export async function signInWithGoogle(forceRedirect = false): Promise<FirebaseU
 
 // Direct Google Sign-In via Full-Page Redirect
 export async function signInWithGoogleRedirect(): Promise<void> {
+  if (isAndroidCapacitor()) {
+    // In Capacitor Android, redirect OAuth in WebView is disallowed by Google (403).
+    // Delegate directly to the native Google Sign-In flow:
+    await signInWithGoogle();
+    return;
+  }
   const provider = createGoogleProvider();
   await signInWithRedirect(auth, provider, browserPopupRedirectResolver);
 }
 
 // Check for pending redirect sign-in result on page load
 export async function checkRedirectAuthResult(): Promise<FirebaseUser | null> {
+  if (isAndroidCapacitor()) {
+    return null;
+  }
   try {
     const res = await getRedirectResult(auth, browserPopupRedirectResolver);
     if (res?.user) {
@@ -572,6 +668,14 @@ export async function sendPasswordReset(email: string): Promise<void> {
 // Sign out with timeout guard so user is never stuck in infinite loading
 export async function logOut(): Promise<void> {
   try {
+    if (isAndroidCapacitor()) {
+      try {
+        const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication');
+        await withTimeout(FirebaseAuthentication.signOut(), 1000, undefined);
+      } catch (nativeErr) {
+        console.warn('Native signOut notice:', nativeErr);
+      }
+    }
     await withTimeout(fbSignOut(auth), 1200, undefined);
   } catch (e) {
     console.warn('Notice during sign out:', e);
@@ -616,6 +720,10 @@ export async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fal
 // In-memory write tracking to prevent write stream flooding
 const lastSavedPayloadMap = new Map<string, string>();
 let isWritingUserData = false;
+
+// Canonical latest cloud profile tracker to prevent stale local cache overwrites
+export const latestCloudLPMap = new Map<string, { rankPoints: number; matchesPlayed: number; matchesWon: number }>();
+export const latestCloudStreakMap = new Map<string, { currentStreak: number; longestStreak: number; lastActiveDate: string; lastActiveTimestamp: number }>();
 
 // Save complete user state to Firestore
 export async function saveUserDataToFirestore(
@@ -672,6 +780,34 @@ export async function saveUserDataToFirestore(
     };
     
     const cleanPayload = sanitizeForFirestore(rawPayload);
+
+    // ANTI-CONFLICT SAFEGUARD: Stale local cache must NEVER overwrite a higher cloud LP
+    const knownCloud = latestCloudLPMap.get(uid);
+    if (knownCloud && cleanPayload.player) {
+      if (typeof cleanPayload.player.rankPoints === 'number' && cleanPayload.player.rankPoints < knownCloud.rankPoints) {
+        console.log(`[Sync] Prevented stale LP overwrite: incoming local ${cleanPayload.player.rankPoints} < known cloud ${knownCloud.rankPoints}`);
+        cleanPayload.player.rankPoints = knownCloud.rankPoints;
+      }
+      cleanPayload.player.matchesPlayed = Math.max(cleanPayload.player.matchesPlayed || 0, knownCloud.matchesPlayed || 0);
+      cleanPayload.player.matchesWon = Math.max(cleanPayload.player.matchesWon || 0, knownCloud.matchesWon || 0);
+    }
+
+    // ANTI-CONFLICT SAFEGUARD: Stale local cache must NEVER overwrite a legitimate cloud streak with 0
+    const knownStreak = latestCloudStreakMap.get(uid);
+    if (knownStreak && cleanPayload.streak) {
+      if ((cleanPayload.streak.currentStreak || 0) === 0 && knownStreak.currentStreak > 0) {
+        const today = new Date().toISOString().split('T')[0];
+        const lastActive = knownStreak.lastActiveDate || today;
+        const diffDays = Math.round((new Date(today + 'T00:00:00').getTime() - new Date(lastActive + 'T00:00:00').getTime()) / (1000 * 60 * 60 * 24));
+        if (diffDays <= 1) {
+          console.log(`[Sync] Prevented accidental streak wipe for ${uid}: preserving known cloud streak ${knownStreak.currentStreak}`);
+          cleanPayload.streak.currentStreak = knownStreak.currentStreak;
+          cleanPayload.streak.longestStreak = Math.max(cleanPayload.streak.longestStreak || 0, knownStreak.longestStreak);
+          cleanPayload.streak.lastActiveDate = knownStreak.lastActiveDate;
+          cleanPayload.streak.lastActiveTimestamp = Math.max(cleanPayload.streak.lastActiveTimestamp || 0, knownStreak.lastActiveTimestamp);
+        }
+      }
+    }
     
     // Always keep a clean client-side snapshot backup
     if (typeof window !== 'undefined') {
@@ -702,6 +838,21 @@ export async function saveUserDataToFirestore(
     const userDocRef = doc(db, 'users', uid);
     await withTimeout(setDoc(userDocRef, cleanPayload, { merge: true }), 2500, undefined);
     lastSavedPayloadMap.set(uid, serialized);
+    if (cleanPayload.player && typeof cleanPayload.player.rankPoints === 'number') {
+      latestCloudLPMap.set(uid, {
+        rankPoints: cleanPayload.player.rankPoints,
+        matchesPlayed: cleanPayload.player.matchesPlayed || 0,
+        matchesWon: cleanPayload.player.matchesWon || 0,
+      });
+    }
+    if (cleanPayload.streak && typeof cleanPayload.streak.currentStreak === 'number') {
+      latestCloudStreakMap.set(uid, {
+        currentStreak: cleanPayload.streak.currentStreak,
+        longestStreak: cleanPayload.streak.longestStreak || 0,
+        lastActiveDate: cleanPayload.streak.lastActiveDate || '',
+        lastActiveTimestamp: cleanPayload.streak.lastActiveTimestamp || 0,
+      });
+    }
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
   } finally {
@@ -853,7 +1004,7 @@ export async function saveUserProfileFieldsToFirestore(
 }
 
 // Fetch user state from Firestore (with local cloud backup fallback)
-export async function fetchUserDataFromFirestore(uid: string, timeoutMs: number = 2200): Promise<UserCloudData | null> {
+export async function fetchUserDataFromFirestore(uid: string, timeoutMs: number = 4500): Promise<UserCloudData | null> {
   const path = `users/${uid}`;
   try {
     if (isFirestoreQuotaExhausted() && typeof window !== 'undefined') {
@@ -867,6 +1018,22 @@ export async function fetchUserDataFromFirestore(uid: string, timeoutMs: number 
     const docSnap = await withTimeout(getDoc(userDocRef), timeoutMs, null);
     if (docSnap && docSnap.exists()) {
       const data = docSnap.data() as UserCloudData;
+      if (data.player && typeof data.player.rankPoints === 'number') {
+        latestCloudLPMap.set(uid, {
+          rankPoints: data.player.rankPoints,
+          matchesPlayed: data.player.matchesPlayed || 0,
+          matchesWon: data.player.matchesWon || 0,
+        });
+        console.log(`[Sync] Fetched authoritative cloud profile for ${uid}: LP=${data.player.rankPoints}`);
+      }
+      if (data.streak && typeof data.streak.currentStreak === 'number') {
+        latestCloudStreakMap.set(uid, {
+          currentStreak: data.streak.currentStreak,
+          longestStreak: data.streak.longestStreak || 0,
+          lastActiveDate: data.streak.lastActiveDate || '',
+          lastActiveTimestamp: data.streak.lastActiveTimestamp || 0,
+        });
+      }
       if (typeof window !== 'undefined') {
         try {
           localStorage.setItem(`vocabclash_cloud_backup_${uid}`, JSON.stringify(data));
@@ -916,6 +1083,21 @@ export function subscribeToUserCloudData(
       (docSnap) => {
         if (docSnap.exists()) {
           const data = docSnap.data() as UserCloudData;
+          if (data.player && typeof data.player.rankPoints === 'number') {
+            latestCloudLPMap.set(uid, {
+              rankPoints: data.player.rankPoints,
+              matchesPlayed: data.player.matchesPlayed || 0,
+              matchesWon: data.player.matchesWon || 0,
+            });
+          }
+          if (data.streak && typeof data.streak.currentStreak === 'number') {
+            latestCloudStreakMap.set(uid, {
+              currentStreak: data.streak.currentStreak,
+              longestStreak: data.streak.longestStreak || 0,
+              lastActiveDate: data.streak.lastActiveDate || '',
+              lastActiveTimestamp: data.streak.lastActiveTimestamp || 0,
+            });
+          }
           onUpdate(data);
         }
       },
