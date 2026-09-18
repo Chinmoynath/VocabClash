@@ -2027,10 +2027,6 @@ export default function App() {
     if (!ADS_ENABLED || subscription.isPremium) {
       return;
     }
-    const currentMatches = overrideMatchesPlayed ?? player.matchesPlayed;
-    if (currentMatches <= 1) {
-      return;
-    }
     
     // Strict Natural Break Safety Guards: Never interrupt sensitive states
     if (!networkManager.isOnline()) {
@@ -2047,9 +2043,9 @@ export default function App() {
     }
     
     if (isAndroidCapacitor()) {
-      showNativeInterstitialIfDue(subscription.isPremium, currentMatches);
+      showNativeInterstitialIfDue(subscription.isPremium, overrideMatchesPlayed);
     } else {
-      if (isAdDue(subscription.isPremium, currentMatches)) {
+      if (isAdDue(subscription.isPremium, overrideMatchesPlayed)) {
         setShowAdModal(true);
       }
     }
@@ -3367,6 +3363,7 @@ export default function App() {
               <LeaderboardView
                 player={player}
                 isPremium={subscription.isPremium}
+                onChallengeCompleted={triggerAdIfDue}
                 onLpUpdated={() => {
                   if (currentUser?.uid) {
                     fetchUserDataFromFirestore(currentUser.uid, 3000).then(fresh => {

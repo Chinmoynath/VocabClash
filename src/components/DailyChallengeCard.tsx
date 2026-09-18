@@ -26,9 +26,10 @@ import { soundManager } from '../utils/audio';
 interface DailyChallengeCardProps {
   player: PlayerProfile;
   onLpUpdated?: () => void;
+  onChallengeCompleted?: () => void;
 }
 
-export const DailyChallengeCard: React.FC<DailyChallengeCardProps> = ({ player, onLpUpdated }) => {
+export const DailyChallengeCard: React.FC<DailyChallengeCardProps> = ({ player, onLpUpdated, onChallengeCompleted }) => {
   const [history, setHistory] = useState<DailyChallengeAttempt[]>([]);
   const [todayAttempt, setTodayAttempt] = useState<DailyChallengeAttempt | null>(null);
   const [isQuizOpen, setIsQuizOpen] = useState<boolean>(false);
@@ -173,9 +174,16 @@ export const DailyChallengeCard: React.FC<DailyChallengeCardProps> = ({ player, 
       {/* Quiz Modal */}
       <DailyChallengeQuizModal
         isOpen={isQuizOpen}
-        onClose={() => setIsQuizOpen(false)}
+        onClose={() => {
+          setIsQuizOpen(false);
+          if (todayAttempt || getTodayChallengeAttempt(player?.id)) {
+            onChallengeCompleted?.();
+          }
+        }}
         player={player}
-        onChallengeComplete={handleChallengeComplete}
+        onChallengeComplete={(attempt) => {
+          handleChallengeComplete(attempt);
+        }}
         onOpenReport={() => {
           setIsQuizOpen(false);
           setIsReportOpen(true);
@@ -185,7 +193,12 @@ export const DailyChallengeCard: React.FC<DailyChallengeCardProps> = ({ player, 
       {/* Performance Report Line Graph Modal */}
       <DailyChallengePerformanceModal
         isOpen={isReportOpen}
-        onClose={() => setIsReportOpen(false)}
+        onClose={() => {
+          setIsReportOpen(false);
+          if (todayAttempt || getTodayChallengeAttempt(player?.id)) {
+            onChallengeCompleted?.();
+          }
+        }}
         history={history}
         todayAttempt={todayAttempt}
       />

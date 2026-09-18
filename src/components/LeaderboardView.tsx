@@ -27,12 +27,13 @@ interface LeaderboardViewProps {
   player: PlayerProfile;
   isPremium?: boolean;
   onLpUpdated?: () => void;
+  onChallengeCompleted?: () => void;
 }
 
-const LeaderboardSkeleton: React.FC<{ player: PlayerProfile; onLpUpdated?: () => void }> = ({ player, onLpUpdated }) => (
+const LeaderboardSkeleton: React.FC<{ player: PlayerProfile; onLpUpdated?: () => void; onChallengeCompleted?: () => void }> = ({ player, onLpUpdated, onChallengeCompleted }) => (
   <div className="p-3.5 sm:p-5 lg:p-6 space-y-4 pb-8 max-w-5xl mx-auto w-full animate-pulse">
     {/* Daily Challenge Card */}
-    <DailyChallengeCard player={player} onLpUpdated={onLpUpdated} />
+    <DailyChallengeCard player={player} onLpUpdated={onLpUpdated} onChallengeCompleted={onChallengeCompleted} />
 
     {/* Top Standings Banner Skeleton */}
     <div className="bg-slate-850/80 border border-slate-800 rounded-2xl p-3.5 space-y-2.5">
@@ -77,7 +78,7 @@ const LeaderboardSkeleton: React.FC<{ player: PlayerProfile; onLpUpdated?: () =>
   </div>
 );
 
-export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ player, isPremium = false, onLpUpdated }) => {
+export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ player, isPremium = false, onLpUpdated, onChallengeCompleted }) => {
   const [activeTab, setActiveTab] = useState<'leaderboard' | 'tiers'>('leaderboard');
 
   // Read instant in-memory data from global rankStore
@@ -120,13 +121,13 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ player, isPrem
 
   // Show loading skeleton strictly on true cold first load before any data/cache exists
   if (isLoading) {
-    return <LeaderboardSkeleton player={player} onLpUpdated={onLpUpdated} />;
+    return <LeaderboardSkeleton player={player} onLpUpdated={onLpUpdated} onChallengeCompleted={onChallengeCompleted} />;
   }
 
   return (
     <div className="p-3.5 sm:p-5 lg:p-6 space-y-4 pb-8 max-w-5xl mx-auto w-full">
       {/* Daily Challenge Card at top of ranks */}
-      <DailyChallengeCard player={player} onLpUpdated={onLpUpdated} />
+      <DailyChallengeCard player={player} onLpUpdated={onLpUpdated} onChallengeCompleted={onChallengeCompleted} />
 
       {/* Top Standings Banner */}
       <div className="bg-slate-850/80 border border-slate-800 rounded-2xl p-3.5 space-y-2.5">
