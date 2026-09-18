@@ -1,8 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import { doc, updateDoc } from 'firebase/firestore';
-import { db, sanitizeForFirestore } from '../src/services/pyqFirestoreService';
-import { fetchPublishedQuestionBank } from '../src/services/pyqFirestoreService';
+import { db } from '../src/services/firebaseService';
+import { sanitizeForFirestore, fetchPublishedQuestionBank } from '../src/services/pyqFirestoreService';
 import { QuestionOptionDetail } from '../src/types';
 
 const isBadEnglish = (eng?: string) => {

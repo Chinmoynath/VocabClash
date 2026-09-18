@@ -69,7 +69,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   }, [player.photoURL]);
 
   return (
-    <header className="w-full bg-slate-950/95 backdrop-blur-xl px-3 sm:px-4 py-2.5 sm:py-3.5 pt-[max(0.65rem,env(safe-area-inset-top))] border-b border-slate-800/80 flex items-center justify-between z-30 shrink-0 shadow-lg shadow-black/20 min-h-[3.75rem] sm:min-h-[4.25rem]">
+    <header className="w-full bg-slate-950/95 backdrop-blur-xl px-3 sm:px-4 pt-[calc(env(safe-area-inset-top,0px)+0.625rem)] pb-2.5 sm:py-3.5 border-b border-slate-800/80 flex items-center justify-between z-30 shrink-0 shadow-lg shadow-black/20 min-h-[calc(3.75rem+env(safe-area-inset-top,0px))] sm:min-h-[4.25rem]">
       {/* User Rank & Avatar */}
       {isLoadingProfile ? (
         <div

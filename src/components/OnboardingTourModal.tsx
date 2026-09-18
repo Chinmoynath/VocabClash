@@ -224,8 +224,8 @@ export const OnboardingTourModal: React.FC<OnboardingTourModalProps> = ({
       <div className="fixed bottom-0 right-1/4 w-80 lg:w-[34rem] h-80 lg:h-[34rem] bg-amber-500/5 blur-3xl pointer-events-none rounded-full" />
 
       {/* 1. TOP HEADER BAR */}
-      <header className="relative z-20 w-full border-b border-blue-950/40 bg-[#050714]/85 backdrop-blur-md shrink-0">
-        <div className="max-w-xl md:max-w-3xl lg:max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
+      <header className="relative z-20 w-full border-b border-blue-950/40 bg-[#050714]/85 backdrop-blur-md shrink-0 pt-[env(safe-area-inset-top,0px)]">
+        <div className="max-w-xl md:max-w-3xl lg:max-w-6xl mx-auto px-4 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between">
           {/* VocabClash Brand Logo */}
           <div 
             onClick={handleSlideUpDismiss}
