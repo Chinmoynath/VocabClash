@@ -149,7 +149,7 @@ import {
   initNativeAdMob, 
   showNativeInterstitialIfDue
 } from './services/adMobService';
-import { isAndroidCapacitor, isNativeCapacitor } from './utils/platform';
+import { isAndroidCapacitor, isNativeCapacitor, configureNativeStatusBar } from './utils/platform';
 import { App as CapacitorApp } from '@capacitor/app';
 import { SplashScreen } from '@capacitor/splash-screen';
 import { StatusBar, Style } from '@capacitor/status-bar';
@@ -2738,12 +2738,11 @@ export default function App() {
   useEffect(() => {
     if (!isNativeCapacitor()) return;
 
-    // 1. Hide Splash Screen cleanly
-    SplashScreen.hide().catch(() => {});
+    // 1. Ensure WebView starts BELOW the native status bar (no overlay)
+    configureNativeStatusBar().catch(() => {});
 
-    // 2. Set Status Bar to Dark Mode
-    StatusBar.setStyle({ style: Style.Dark }).catch(() => {});
-    StatusBar.setBackgroundColor({ color: '#0f172a' }).catch(() => {});
+    // 2. Hide Splash Screen cleanly
+    SplashScreen.hide().catch(() => {});
   }, []);
 
   useEffect(() => {

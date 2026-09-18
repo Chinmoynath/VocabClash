@@ -4,7 +4,12 @@ import {SpeedInsights} from '@vercel/speed-insights/react';
 import {Analytics} from '@vercel/analytics/react';
 import App from './App.tsx';
 import './index.css';
-import { isWebBrowser, cleanupServiceWorkersIfNative } from './utils/platform';
+import { isWebBrowser, cleanupServiceWorkersIfNative, isNativeCapacitor, configureNativeStatusBar } from './utils/platform';
+
+// Early initialization for native Capacitor Android status bar
+if (typeof window !== 'undefined' && isNativeCapacitor()) {
+  configureNativeStatusBar().catch(() => {});
+}
 
 // Guard against benign browser iframe IndexedDB teardown / closing events
 if (typeof window !== 'undefined') {

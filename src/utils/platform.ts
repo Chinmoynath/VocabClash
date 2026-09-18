@@ -1,4 +1,5 @@
 import { Capacitor } from '@capacitor/core';
+import { StatusBar, Style } from '@capacitor/status-bar';
 
 /**
  * =======================================================================
@@ -102,5 +103,39 @@ export function cleanupServiceWorkersIfNative(): void {
     }
   } catch (err) {
     console.warn('[Platform] Legacy SW cleanup notice:', err);
+  }
+}
+
+/**
+ * Ensures Android WebView content begins strictly below the native system status bar.
+ * Disables WebView overlay and applies Dark style and status bar background.
+ */
+export async function configureNativeStatusBar(): Promise<void> {
+  if (!isNativeCapacitor()) return;
+
+  try {
+    // 1. Critical: Disable WebView overlay so web content starts below the native status bar
+    await StatusBar.setOverlaysWebView({ overlay: false });
+  } catch (err) {
+    console.warn('[Platform] StatusBar.setOverlaysWebView notice:', err);
+  }
+
+  try {
+    // 2. Ensure status bar is visible and formatted in dark theme
+    await StatusBar.setStyle({ style: Style.Dark });
+  } catch (err) {
+    console.warn('[Platform] StatusBar.setStyle notice:', err);
+  }
+
+  try {
+    await StatusBar.setBackgroundColor({ color: '#0f172a' });
+  } catch (err) {
+    console.warn('[Platform] StatusBar.setBackgroundColor notice:', err);
+  }
+
+  try {
+    await StatusBar.show();
+  } catch (err) {
+    console.warn('[Platform] StatusBar.show notice:', err);
   }
 }

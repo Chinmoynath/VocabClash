@@ -59,7 +59,7 @@ export const SeoPublicPage: React.FC<SeoPublicPageProps> = ({
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-amber-500 selection:text-slate-950">
       {/* 1. Header & Navigation */}
-      <header className="sticky top-0 z-40 bg-slate-950/90 backdrop-blur-md border-b border-slate-800/80 px-4 pt-[calc(env(safe-area-inset-top,0px)+0.75rem)] pb-3 sm:py-3 sm:px-6">
+      <header className="sticky top-0 z-40 bg-slate-950/90 backdrop-blur-md border-b border-slate-800/80 px-4 sm:px-6 py-3 pt-[max(0.75rem,env(safe-area-inset-top,0px))]">
         <div className="max-w-6xl mx-auto flex items-center justify-between gap-3">
           {/* Logo & Brand */}
           <div 
