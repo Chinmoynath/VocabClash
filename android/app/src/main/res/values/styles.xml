@@ -20,6 +20,7 @@
         <item name="android:background">@drawable/splash</item>
         <item name="windowSplashScreenBackground">@color/splashBackground</item>
         <item name="windowSplashScreenAnimatedIcon">@drawable/splash</item>
+        <item name="windowSplashScreenIconBackgroundColor">@color/splashBackground</item>
         <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
     </style>
 </resources>
