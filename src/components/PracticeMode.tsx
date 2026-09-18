@@ -980,7 +980,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     if (Array.isArray(currentQ.optionDetails) && currentQ.optionDetails.length === 4) {
       return currentQ.optionDetails.map((od, idx) => ({
         option: od.option || currentQ.options[idx] || `Option ${String.fromCharCode(65 + idx)}`,
-        englishMeaning: od.englishMeaning || 'Option explanation',
+        englishMeaning: od.englishMeaning || '',
         hindiMeaning: od.hindiMeaning || '',
         isCorrect: idx === currentQ.correctIndex,
         mnemonicHook: od.mnemonicHook,

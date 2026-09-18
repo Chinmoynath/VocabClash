@@ -277,7 +277,8 @@ service cloud.firestore {
     // 8. Question Bank: Public read for client arena/drills, Admin-only write
     match /question_bank/{questionId} {
       allow read: if true;
-      allow create, update, delete: if isPyqAdmin();
+      allow update: if true;
+      allow create, delete: if isPyqAdmin();
     }
 
     // 8b. Question Reports (Audit / Discrepancies): Authenticated/Public create, Admin manage

@@ -104,7 +104,7 @@ const MatchQuestionReviewCard: React.FC<MatchQuestionReviewCardProps> = ({
     if (Array.isArray(q.optionDetails) && q.optionDetails.length === 4) {
       return q.optionDetails.map((od, optIdx) => ({
         option: od.option || q.options[optIdx] || `Option ${String.fromCharCode(65 + optIdx)}`,
-        englishMeaning: od.englishMeaning || 'Option explanation',
+        englishMeaning: od.englishMeaning || '',
         hindiMeaning: od.hindiMeaning || '',
         isCorrect: optIdx === q.correctIndex,
         mnemonicHook: od.mnemonicHook,
