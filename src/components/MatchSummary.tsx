@@ -202,7 +202,7 @@ const MatchQuestionReviewCard: React.FC<MatchQuestionReviewCardProps> = ({
           </span>
         </div>
 
-        {/* Action Buttons: Star/Save, AI Tutor, Report */}
+        {/* Action Buttons: Star/Save, Report */}
         <div className="flex items-center gap-1.5">
           {/* Bookmark/Star to Vault */}
           <button
@@ -229,19 +229,6 @@ const MatchQuestionReviewCard: React.FC<MatchQuestionReviewCardProps> = ({
             <span className="hidden sm:inline text-[11px]">
               {isBookmarked ? 'Saved' : 'Save'}
             </span>
-          </button>
-
-          {/* Ask AI Deep Dive */}
-          <button
-            onClick={() => {
-              soundManager.playTap();
-              onOpenAiDeepDive(q);
-            }}
-            className="px-2.5 py-1.5 rounded-xl bg-purple-950/80 hover:bg-purple-900 border border-purple-700/60 text-purple-300 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
-            title="AI Root Word & Mnemonic Breakdown"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-            <span className="text-[11px]">AI Tutor</span>
           </button>
 
           {/* Report Question */}
@@ -936,15 +923,11 @@ export const MatchSummary: React.FC<MatchSummaryProps> = ({
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] sm:text-[11px] text-purple-200/90 font-medium pt-0.5">
                         <span className="flex items-center gap-1">
                           <span className="w-1 h-1 rounded-full bg-amber-400"></span>
-                          Ad-Free
+                          Ad-Free Experience
                         </span>
                         <span className="flex items-center gap-1">
                           <span className="w-1 h-1 rounded-full bg-amber-400"></span>
                           Unlimited PYQ Practice
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <span className="w-1 h-1 rounded-full bg-amber-400"></span>
-                          Full 1v1 Access
                         </span>
                       </div>
                     </div>
