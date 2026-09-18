@@ -1,15 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { isNativeCapacitor } from '../utils/platform';
 
 /**
  * Lightweight, zero-layout-shift splash overlay that smoothly dissolves once
  * the primary VocabClash UI has mounted and completed its initial paint.
- * Matches the inline HTML splash in index.html with exact 1:1 pixel alignment.
+ * On native Capacitor Android, native SplashScreen handles startup seamlessly,
+ * so this overlay is bypassed to avoid duplicate loading screens.
  */
 export const StartupSplashOverlay: React.FC = () => {
-  const [isVisible, setIsVisible] = useState(true);
+  const [isVisible, setIsVisible] = useState(!isNativeCapacitor());
 
   useEffect(() => {
+    if (isNativeCapacitor()) {
+      setIsVisible(false);
+      return;
+    }
+
     // Wait for the primary arena UI and layout to settle on screen
     let raf2: number;
     const raf1 = requestAnimationFrame(() => {
@@ -23,6 +30,10 @@ export const StartupSplashOverlay: React.FC = () => {
       if (raf2) cancelAnimationFrame(raf2);
     };
   }, []);
+
+  if (isNativeCapacitor() || !isVisible) {
+    return null;
+  }
 
   return (
     <AnimatePresence>

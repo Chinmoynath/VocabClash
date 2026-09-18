@@ -2741,8 +2741,23 @@ export default function App() {
     // 1. Ensure WebView starts BELOW the native status bar (no overlay)
     configureNativeStatusBar().catch(() => {});
 
-    // 2. Hide Splash Screen cleanly
-    SplashScreen.hide().catch(() => {});
+    // 2. Hide Native Splash Screen ONLY once initial UI has completed initial paint
+    let raf2: number;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        SplashScreen.hide({ fadeOutDuration: 200 }).catch(() => {});
+      });
+    });
+
+    const fallbackTimer = setTimeout(() => {
+      SplashScreen.hide({ fadeOutDuration: 200 }).catch(() => {});
+    }, 1500);
+
+    return () => {
+      cancelAnimationFrame(raf1);
+      if (raf2) cancelAnimationFrame(raf2);
+      clearTimeout(fallbackTimer);
+    };
   }, []);
 
   useEffect(() => {
