@@ -1,12 +1,31 @@
 import { ADS_ENABLED } from '../services/adSenseService';
 
+/**
+ * =======================================================================
+ * TEMPORARY HOUSE INTERSTITIAL FEATURE FLAG
+ * =======================================================================
+ * Set to `true` to use the shared VocabClash house interstitial across
+ * both Web and Android (Capacitor) as a reliable interruption/promo flow.
+ * 
+ * When set to `false`:
+ *   - House interstitial stops appearing on both Web and Android.
+ *   - The original AdMob (Android) and AdSense (Web) implementations
+ *     remain available for production serving.
+ * =======================================================================
+ */
+export const USE_HOUSE_INTERSTITIAL: boolean = true;
+
 export { ADS_ENABLED };
 
 const STORAGE_KEY_LAST_AD = 'vocabclash_last_ad_ts_v1';
 export const AD_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes (600,000 ms)
 
+export function isAdSystemActive(): boolean {
+  return ADS_ENABLED || USE_HOUSE_INTERSTITIAL;
+}
+
 export function getLastAdTimestamp(): number {
-  if (!ADS_ENABLED) return 0;
+  if (!isAdSystemActive()) return 0;
   if (typeof window === 'undefined') return 0;
   const val = localStorage.getItem(STORAGE_KEY_LAST_AD);
   if (!val) {
@@ -19,20 +38,20 @@ export function getLastAdTimestamp(): number {
 }
 
 export function recordAdShown(): void {
-  if (!ADS_ENABLED) return;
+  if (!isAdSystemActive()) return;
   if (typeof window === 'undefined') return;
   localStorage.setItem(STORAGE_KEY_LAST_AD, Date.now().toString());
 }
 
 export function resetAdTimerForTest(): void {
-  if (!ADS_ENABLED) return;
+  if (!isAdSystemActive()) return;
   if (typeof window === 'undefined') return;
   const tenMinsAgo = Date.now() - AD_INTERVAL_MS - 1000;
   localStorage.setItem(STORAGE_KEY_LAST_AD, tenMinsAgo.toString());
 }
 
 export function isAdDue(isPremium: boolean, matchesPlayed?: number): boolean {
-  if (!ADS_ENABLED) return false;
+  if (!isAdSystemActive()) return false;
   if (isPremium) return false;
   // Never show an ad after or during the first duel to maximize new user retention
   if (typeof matchesPlayed === 'number' && matchesPlayed <= 1) {
@@ -44,7 +63,7 @@ export function isAdDue(isPremium: boolean, matchesPlayed?: number): boolean {
 }
 
 export function getSecondsUntilNextAd(isPremium: boolean): number {
-  if (!ADS_ENABLED || isPremium) return 0;
+  if (!isAdSystemActive() || isPremium) return 0;
   const lastAd = getLastAdTimestamp();
   const elapsed = Date.now() - lastAd;
   const remaining = Math.max(0, AD_INTERVAL_MS - elapsed);

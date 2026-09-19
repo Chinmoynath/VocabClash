@@ -1,7 +1,8 @@
 /**
  * Network Connection & Latency Manager
- * Tracks real-time connectivity status (online/offline events + active ping probe)
- * for 1v1 duels, matchmaking, and offline fallback modes.
+ * Tracks real-time connectivity status via Capacitor Network and browser events.
+ * Performs latency check strictly on-demand (e.g. on manual retry or before 1v1 duels)
+ * without background idle polling loops.
  */
 import { Network as CapacitorNetwork } from "@capacitor/network";
 import { isNativeCapacitor } from "./platform";
@@ -16,9 +17,10 @@ class NetworkManager {
   private online: boolean = typeof navigator !== 'undefined' ? navigator.onLine : true;
   private currentPing: number | null = null;
   private subscribers: Set<NetworkStatusCallback> = new Set();
-  private pingInterval: NodeJS.Timeout | null = null;
   private isChecking: boolean = false;
   private capNetListener: any = null;
+  private lastCheckTime: number = 0;
+  private consecutiveFailures: number = 0;
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -28,16 +30,6 @@ class NetworkManager {
       if (isNativeCapacitor()) {
         this.initCapacitorNetwork();
       }
-
-      // Run initial check
-      this.checkLatency();
-
-      // Periodic background probe every 15s if online
-      this.pingInterval = setInterval(() => {
-        if (this.online) {
-          this.checkLatency();
-        }
-      }, 15000);
     }
   }
 
@@ -47,9 +39,7 @@ class NetworkManager {
       this.online = status.connected;
       this.capNetListener = await CapacitorNetwork.addListener("networkStatusChange", status => {
         this.online = status.connected;
-        if (this.online) {
-          this.checkLatency();
-        } else {
+        if (!this.online) {
           this.currentPing = null;
         }
         this.notifySubscribers();
@@ -61,7 +51,7 @@ class NetworkManager {
 
   private handleOnlineEvent = () => {
     this.online = true;
-    this.checkLatency();
+    this.consecutiveFailures = 0;
     this.notifySubscribers();
   };
 
@@ -90,7 +80,12 @@ class NetworkManager {
     return 'poor';
   }
 
-  public async checkLatency(): Promise<{ isOnline: boolean; pingMs: number | null }> {
+  /**
+   * Performs an on-demand latency probe to check backend reachability.
+   * Only called when requested by a feature (e.g. 1v1 arena check or offline retry),
+   * with exponential backoff on consecutive failures and throttle to prevent spamming.
+   */
+  public async checkLatency(force = false): Promise<{ isOnline: boolean; pingMs: number | null }> {
     if (this.isChecking) {
       return { isOnline: this.isOnline(), pingMs: this.currentPing };
     }
@@ -101,11 +96,18 @@ class NetworkManager {
       return { isOnline: false, pingMs: null };
     }
 
+    const now = Date.now();
+    const backoffMs = Math.min(30000, 2000 * Math.pow(1.5, this.consecutiveFailures));
+    if (!force && (now - this.lastCheckTime) < backoffMs && this.currentPing !== null) {
+      return { isOnline: this.isOnline(), pingMs: this.currentPing };
+    }
+
     this.isChecking = true;
+    this.lastCheckTime = now;
     const startTime = Date.now();
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 4000);
+      const timeoutId = setTimeout(() => controller.abort(), 3500);
       const response = await fetch(`/api/health?t=${startTime}`, {
         method: 'GET',
         cache: 'no-store',
@@ -117,11 +119,14 @@ class NetworkManager {
         const ping = Date.now() - startTime;
         this.online = true;
         this.currentPing = ping;
+        this.consecutiveFailures = 0;
       } else {
         this.online = true;
-        this.currentPing = Math.max(50, Date.now() - startTime);
+        this.currentPing = Math.max(60, Date.now() - startTime);
+        this.consecutiveFailures++;
       }
     } catch {
+      this.consecutiveFailures++;
       if (typeof navigator !== 'undefined' && !navigator.onLine) {
         this.online = false;
         this.currentPing = null;
@@ -167,7 +172,6 @@ class NetworkManager {
     if (typeof window !== 'undefined') {
       window.removeEventListener('online', this.handleOnlineEvent);
       window.removeEventListener('offline', this.handleOfflineEvent);
-      if (this.pingInterval) clearInterval(this.pingInterval);
       if (this.capNetListener) this.capNetListener.remove();
     }
     this.subscribers.clear();

@@ -23,7 +23,7 @@ import {
 import { questionReviewScheduler } from './services/questionReviewScheduler';
 import { LiveRoomFinalResult, forfeitLiveRoom } from './services/realtimeMatchmaking';
 import { soundManager } from './utils/audio';
-import { isAdDue, resetAdTimerForTest, recordAdShown, ADS_ENABLED } from './utils/adManager';
+import { isAdDue, resetAdTimerForTest, recordAdShown, ADS_ENABLED, USE_HOUSE_INTERSTITIAL, isAdSystemActive } from './utils/adManager';
 import { matchesExamFamilyFilter } from './utils/examFamilyUtils';
 import { extractCleanUserName, formatNameFromEmail, resolvePlayerName } from './utils/nameHelper';
 import { 
@@ -99,6 +99,7 @@ import { SscTop100Category, getTop100Questions, SSC_TOP_100_META } from './data/
 import { recordSscTop100Answer, markSscTop100CategoryCompleted, sscTop100Service } from './services/sscTop100Service';
 import { PremiumModal } from './components/PremiumModal';
 import { InterstitialAdModal } from './components/InterstitialAdModal';
+import { HouseInterstitialModal } from './components/HouseInterstitialModal';
 import { StreakModal } from './components/StreakModal';
 import { OnboardingTourModal } from './components/OnboardingTourModal';
 import { AppGuideModal } from './components/AppGuideModal';
@@ -147,7 +148,8 @@ import { initOtaUpdateService, checkForOtaUpdate } from './services/otaUpdateSer
 
 import { 
   initNativeAdMob, 
-  showNativeInterstitialIfDue
+  showNativeInterstitialIfDue,
+  showTestNativeInterstitial
 } from './services/adMobService';
 import { isAndroidCapacitor, isNativeCapacitor, configureNativeStatusBar } from './utils/platform';
 import { App as CapacitorApp } from '@capacitor/app';
@@ -870,6 +872,7 @@ export default function App() {
   const [editProfileReturnToProfile, setEditProfileReturnToProfile] = useState<boolean>(false);
   const [showPremiumModal, setShowPremiumModal] = useState<boolean>(false);
   const [showAdModal, setShowAdModal] = useState<boolean>(false);
+  const [showHouseAdModal, setShowHouseAdModal] = useState<boolean>(false);
   const [showStreakModal, setShowStreakModal] = useState<boolean>(false);
   const [showStatsModal, setShowStatsModal] = useState<boolean>(false);
   const [showAppGuideModal, setShowAppGuideModal] = useState<boolean>(false);
@@ -2024,7 +2027,7 @@ export default function App() {
 
   // Check 10-minute ad trigger safely at natural breaks (never during active play, modals, or offline)
   const triggerAdIfDue = (overrideMatchesPlayed?: number) => {
-    if (!ADS_ENABLED || subscription.isPremium) {
+    if (!isAdSystemActive() || subscription.isPremium) {
       return;
     }
     
@@ -2038,15 +2041,21 @@ export default function App() {
     if (matchState && !isMatchCompleted) {
       return;
     }
-    if (showPremiumModal || showProfileModal || showEditProfileModal || showAiModal || showStatsModal) {
+    if (showPremiumModal || showProfileModal || showEditProfileModal || showAiModal || showStatsModal || showHouseAdModal || showAdModal) {
       return;
     }
     
-    if (isAndroidCapacitor()) {
-      showNativeInterstitialIfDue(subscription.isPremium, overrideMatchesPlayed);
-    } else {
+    if (USE_HOUSE_INTERSTITIAL) {
       if (isAdDue(subscription.isPremium, overrideMatchesPlayed)) {
-        setShowAdModal(true);
+        setShowHouseAdModal(true);
+      }
+    } else {
+      if (isAndroidCapacitor()) {
+        showNativeInterstitialIfDue(subscription.isPremium, overrideMatchesPlayed);
+      } else {
+        if (isAdDue(subscription.isPremium, overrideMatchesPlayed)) {
+          setShowAdModal(true);
+        }
       }
     }
   };
@@ -2407,13 +2416,21 @@ export default function App() {
 
     // Trigger 10-min interval ad safely after match completion (only for free tier at natural break)
     // NEVER show ad after the user's first duel (to maximize new player retention)
-    if (ADS_ENABLED && !subscription.isPremium && networkManager.isOnline()) {
+    if (isAdSystemActive() && !subscription.isPremium && networkManager.isOnline()) {
       const isFirstDuel = player.matchesPlayed === 0 || nextMatchesPlayed <= 1;
       if (isFirstDuel) {
         // Cleanly start their ad timer cooldown so they get a full grace period going forward
         recordAdShown();
       } else {
-        if (isAndroidCapacitor()) {
+        if (USE_HOUSE_INTERSTITIAL) {
+          if (isAdDue(subscription.isPremium, nextMatchesPlayed)) {
+            setTimeout(() => {
+              if (!showPremiumModal && !showProfileModal && !showEditProfileModal && !showHouseAdModal) {
+                setShowHouseAdModal(true);
+              }
+            }, 700);
+          }
+        } else if (isAndroidCapacitor()) {
           // Native Capacitor Interstitial: natural break after completed 1v1 match
           setTimeout(() => {
             if (!showPremiumModal && !showProfileModal && !showEditProfileModal) {
@@ -2592,9 +2609,15 @@ export default function App() {
   };
 
   const handleTriggerTestAd = () => {
-    if (!ADS_ENABLED) return;
+    if (!isAdSystemActive()) return;
     resetAdTimerForTest();
-    setShowAdModal(true);
+    if (USE_HOUSE_INTERSTITIAL) {
+      setShowHouseAdModal(true);
+    } else if (isAndroidCapacitor()) {
+      showTestNativeInterstitial();
+    } else {
+      setShowAdModal(true);
+    }
   };
 
   const handleResetStats = async () => {
@@ -2766,6 +2789,7 @@ export default function App() {
       if (showProfileModal) { setShowProfileModal(false); return; }
       if (showEditProfileModal) { setShowEditProfileModal(false); return; }
       if (showPremiumModal) { setShowPremiumModal(false); return; }
+      if (showHouseAdModal) { return; } // Unskippable timer managed by modal
       if (showAdModal) { setShowAdModal(false); return; }
       if (showStreakModal) { setShowStreakModal(false); return; }
       if (showStatsModal) { setShowStatsModal(false); return; }
@@ -2826,7 +2850,7 @@ export default function App() {
       if (backListener) backListener.remove();
     };
   }, [
-    showAiModal, showProfileModal, showEditProfileModal, showPremiumModal, showAdModal,
+    showAiModal, showProfileModal, showEditProfileModal, showPremiumModal, showAdModal, showHouseAdModal,
     showStreakModal, showStatsModal, showAppGuideModal, showTourModal, showPlayModeModal,
     showFriendLobbyModal, showOfflineWarningModal, showSeoGuidesModal, showDueRevisionModal,
     showAdminArticles, showAdminImporter, showBattleAnalytics, showSscTop100CompletionModal,
@@ -3722,8 +3746,19 @@ export default function App() {
         />
       )}
 
-      {/* 10-Minute Interstitial Ad Modal (for free users after match or back) */}
-      {ADS_ENABLED && showAdModal && (
+      {/* VocabClash House Interstitial (Cross-platform Web & Capacitor Android) */}
+      {USE_HOUSE_INTERSTITIAL && showHouseAdModal && !subscription.isPremium && (
+        <HouseInterstitialModal
+          onClose={() => setShowHouseAdModal(false)}
+          onOpenPremium={() => {
+            setShowHouseAdModal(false);
+            setShowPremiumModal(true);
+          }}
+        />
+      )}
+
+      {/* 10-Minute Interstitial AdSense Modal (Fallback when USE_HOUSE_INTERSTITIAL is false on Web) */}
+      {!USE_HOUSE_INTERSTITIAL && ADS_ENABLED && showAdModal && (
         <InterstitialAdModal
           onClose={() => setShowAdModal(false)}
           onOpenPremium={() => {

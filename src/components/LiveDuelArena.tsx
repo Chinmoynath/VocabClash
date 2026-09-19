@@ -8,9 +8,7 @@ import {
 import { 
   calculateScore, 
   simulateOpponentAnswer, 
-  generateRandomOpponentEmote,
   createBotMatchSession,
-  getEventDrivenOpponentEmote,
   BotMatchSession,
 } from '../services/matchmakingService';
 import { 
@@ -550,22 +548,6 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
       } else {
         botSessionRef.current.recentBotStreak = 0;
         botSessionRef.current.lastMissedCount += 1;
-      }
-
-      // Contextual event-driven emote with strict cooldown & match limits
-      const eventEmote = getEventDrivenOpponentEmote(botSessionRef.current, {
-        roundIndex: currentQIndex,
-        totalRounds: matchState.questions.length,
-        timeTakenMs: oppResult.timeTakenMs,
-        isCorrect: oppResult.isCorrect,
-        questionDifficulty: currentQuestion.difficulty,
-        playerScore: currentLiveScoresRef.current.playerScore,
-        opponentScore: newOppScore,
-        opponentStreak: nextOppCombo,
-      });
-
-      if (eventEmote) {
-        triggerFloatingEmote('opponent', eventEmote.emoji, eventEmote.text);
       }
     }
 

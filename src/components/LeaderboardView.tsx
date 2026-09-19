@@ -97,10 +97,18 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ player, isPrem
   const totalAspirantsCount = leaderboard.totalAspirants;
   const isInTop10 = userRank <= 10;
 
-  // Stale-While-Revalidate check on mount (does not refetch if fresh; silent background revalidation if > 3 min)
+  // Start scoped leaderboard listener on mount and cleanup immediately on unmount
   useEffect(() => {
     rankStore.updatePlayer(player);
-    rankStore.checkAndRevalidateIfStale();
+    rankStore.startLeaderboardSubscription();
+    return () => {
+      rankStore.stopLeaderboardSubscription();
+    };
+  }, []);
+
+  // Synchronize player stats if updated during active viewing
+  useEffect(() => {
+    rankStore.updatePlayer(player);
   }, [player]);
 
   // Category determination

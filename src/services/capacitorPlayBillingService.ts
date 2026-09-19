@@ -2,6 +2,7 @@ import { NativePurchases, PURCHASE_TYPE } from '@capgo/native-purchases';
 import { SubscriptionPlan, UserSubscription } from '../types';
 import { mapPlanToGooglePlay, PLAY_PRODUCTS } from '../config/playProducts';
 import { isAndroidCapacitor } from '../utils/platform';
+import { verifyGooglePlayPurchaseOnBackend } from './googlePlayBillingService';
 
 /**
  * Checks whether native Google Play Billing via Capgo Native Purchases is supported on this device
@@ -20,7 +21,8 @@ export async function isCapacitorPlayBillingSupported(): Promise<boolean> {
 }
 
 /**
- * Initiates a purchase for a given plan via Native Google Play Billing
+ * Initiates a purchase for a given plan via Native Google Play Billing.
+ * Enforces mandatory server-side verification of purchaseToken before granting entitlement.
  */
 export async function purchaseWithCapacitorPlay(
   plan: SubscriptionPlan,
@@ -45,22 +47,45 @@ export async function purchaseWithCapacitorPlay(
     });
 
     if (!transaction || !transaction.purchaseToken) {
-      return { success: false, error: 'Purchase was completed but no purchase token was returned.' };
+      return { success: false, error: 'Purchase was completed but no valid purchase token was returned.' };
     }
 
-    const isLifetime = plan.id === 'lifetime';
-    const expiresAt = isLifetime 
-      ? Date.now() + 100 * 365 * 24 * 60 * 60 * 1000
-      : Date.now() + (plan.periodDurationDays || 30) * 24 * 60 * 60 * 1000;
+    // MANDATORY BACKEND TOKEN VERIFICATION:
+    // Entitlements are NEVER granted solely based on client-side transaction returns.
+    console.log('[CapacitorPlayBilling] Verifying purchaseToken with backend...');
+    const verifyResult = await verifyGooglePlayPurchaseOnBackend({
+      purchaseToken: transaction.purchaseToken,
+      sku: mapping.sku,
+      productId: mapping.sku,
+      planId: plan.id,
+      userId,
+      userEmail,
+    });
+
+    if (!verifyResult.success || !verifyResult.verified || !verifyResult.subscription) {
+      console.error('[CapacitorPlayBilling] Backend verification failed:', verifyResult.error);
+      return {
+        success: false,
+        error: verifyResult.error || 'Server-side Google Play verification failed. No entitlement granted.',
+      };
+    }
+
+    // Acknowledge purchase with Google Play
+    try {
+      await NativePurchases.acknowledgePurchase({
+        purchaseToken: transaction.purchaseToken,
+      });
+      console.log('[CapacitorPlayBilling] Native purchase acknowledged successfully.');
+    } catch (ackErr: any) {
+      console.warn('[CapacitorPlayBilling] Acknowledge note (may already be acknowledged):', ackErr?.message);
+    }
 
     const subscription: UserSubscription = {
+      ...verifyResult.subscription,
       planId: plan.id,
-      subscribedAt: Date.now(),
-      expiresAt: expiresAt,
-      autoRenew: !isLifetime,
       isPremium: true,
       provider: 'google_play',
-      orderId: transaction.orderId || transaction.transactionId || `GPA-${Date.now()}`,
+      orderId: transaction.orderId || transaction.transactionId || verifyResult.subscription.orderId || `GPA-${Date.now()}`,
     };
 
     return {
@@ -77,7 +102,9 @@ export async function purchaseWithCapacitorPlay(
 }
 
 /**
- * Restores previous Google Play purchases via Native Purchases
+ * Restores previous Google Play purchases via Native Purchases.
+ * SECURITY: A restore action NEVER grants Premium simply because catalog products exist or
+ * restore() returns. Entitlement requires authenticated server verification of an active purchase token.
  */
 export async function restoreCapacitorPlayPurchases(
   userId?: string,
@@ -88,31 +115,15 @@ export async function restoreCapacitorPlayPurchases(
       return null;
     }
 
-    console.log('[CapacitorPlayBilling] Restoring native purchases...');
+    console.log('[CapacitorPlayBilling] Synchronizing purchases with Google Play...');
     await NativePurchases.restorePurchases();
     
-    // Check available products / purchases
-    const res = await NativePurchases.getProducts({
-      productIdentifiers: Object.values(PLAY_PRODUCTS),
-      productType: PURCHASE_TYPE.SUBS,
-    });
-
-    if (res && res.products && res.products.length > 0) {
-      // Create restored subscription
-      const restoredSub: UserSubscription = {
-        planId: 'quarterly',
-        subscribedAt: Date.now(),
-        expiresAt: Date.now() + 90 * 24 * 60 * 60 * 1000,
-        autoRenew: true,
-        isPremium: true,
-        provider: 'google_play',
-        orderId: `RESTORED-${Date.now()}`,
-      };
-      return restoredSub;
-    }
+    // Security Rule: Without a verified active purchase token confirmed by /api/payments/google/verify,
+    // client must never construct or assign unverified local premium entitlements.
+    // If no verifiable active purchase exists, return null so user remains on the free tier.
     return null;
   } catch (err) {
-    console.warn('[CapacitorPlayBilling] Restore purchases failed:', err);
+    console.warn('[CapacitorPlayBilling] Restore purchases check failed:', err);
     return null;
   }
 }

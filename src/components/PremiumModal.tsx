@@ -619,7 +619,7 @@ export const PremiumModal: React.FC<PremiumModalProps> = ({
                   </button>
                 )}
 
-                {isGooglePlay && (
+                {isGooglePlay && !isAndroidCapacitor() && (
                   <button
                     disabled={isRestoring}
                     onClick={handleRestorePurchases}
@@ -691,7 +691,7 @@ export const PremiumModal: React.FC<PremiumModalProps> = ({
                   <span>Instant VIP Unlock</span>
                 </div>
 
-                {isGooglePlay && !subscription.isPremium && (
+                {isGooglePlay && !isAndroidCapacitor() && !subscription.isPremium && (
                   <button
                     disabled={isRestoring}
                     onClick={handleRestorePurchases}

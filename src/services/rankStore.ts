@@ -258,14 +258,16 @@ class RankStore {
     this.currentPlayer = player ? { ...player } : null;
     this.recomputeMergedLeaderboard();
 
-    // If authenticated user logged in and we don't have a listener running for this UID:
+    // If authenticated user logged in:
     if (newUid) {
-      this.ensureListenerStarted(newUid);
       // Persist user-namespaced stats in memory / storage
       this.saveUserScopedStats(newUid);
-    } else {
-      // Guest or logged out
-      this.ensureListenerStarted(null);
+    }
+
+    // If Ranks view is actively subscribed during an auth change, refresh the scoped listener
+    if (this.unsubscribeFirestore) {
+      this.stopLeaderboardSubscription();
+      this.startLeaderboardSubscription();
     }
 
     this.notify();
@@ -312,13 +314,8 @@ class RankStore {
   public handleLogout(loggedOutUid?: string | null) {
     const uidToClean = loggedOutUid || this.activeUid;
 
-    // 1. Unsubscribe from Firestore snapshot listener
-    if (this.unsubscribeFirestore) {
-      try {
-        this.unsubscribeFirestore();
-      } catch {}
-      this.unsubscribeFirestore = null;
-    }
+    // 1. Unsubscribe from Firestore snapshot listener if active
+    this.stopLeaderboardSubscription();
 
     // 2. Clear user-scoped cache from localStorage
     if (uidToClean) {
@@ -329,10 +326,6 @@ class RankStore {
     this.activeUid = null;
     this.currentPlayer = null;
     this.recomputeMergedLeaderboard();
-
-    // 4. Start fresh anonymous/guest listener
-    this.ensureListenerStarted(null);
-
     this.notify();
   }
 
@@ -373,15 +366,20 @@ class RankStore {
     } catch {}
   }
 
-  // --- Realtime Firestore Subscription Management ---
+  // --- Realtime Firestore Subscription Management (Active ONLY when Ranks view is open) ---
 
-  private ensureListenerStarted(_uid: string | null) {
+  /**
+   * Starts the scoped top-100 real-time leaderboard listener.
+   * Active ONLY while the Ranks/Leaderboard screen is mounted and visible.
+   */
+  public startLeaderboardSubscription() {
     if (this.unsubscribeFirestore) {
-      // Listener is already active across the session
+      // Listener is already active
       return;
     }
 
     this.isRefreshing = true;
+    this.notify();
 
     this.unsubscribeFirestore = subscribeToRealLeaderboardUsers((incomingUsers) => {
       this.realUsers = incomingUsers;
@@ -409,17 +407,38 @@ class RankStore {
     });
   }
 
+  /**
+   * Immediately stops and cleans up the Firestore leaderboard listener.
+   * Called as soon as the user navigates away from the Ranks view.
+   * Preserves cached data in memory and localStorage so returning to the page feels instant.
+   */
+  public stopLeaderboardSubscription() {
+    if (this.unsubscribeFirestore) {
+      try {
+        this.unsubscribeFirestore();
+      } catch (err) {
+        console.warn('Leaderboard unsubscribe notice:', err);
+      }
+      this.unsubscribeFirestore = null;
+      this.isRefreshing = false;
+      this.notify();
+    }
+  }
+
   // --- Stale-While-Revalidate Checks ---
 
   /**
    * Check if leaderboard data is stale. Called when user visits Rank tab.
-   * Does NOT refetch if fresh. If stale, revalidates silently in background.
+   * Does NOT refetch if fresh. If stale and currently on Ranks screen, revalidates silently in background.
    */
   public checkAndRevalidateIfStale() {
-    if (!this.lastFetchedAt) return;
+    if (!this.lastFetchedAt) {
+      this.startLeaderboardSubscription();
+      return;
+    }
     const age = Date.now() - this.lastFetchedAt;
 
-    if (age > STALE_TTL_MS && !this.isRefreshing) {
+    if (age > STALE_TTL_MS && !this.isRefreshing && this.unsubscribeFirestore) {
       this.silentRevalidate();
     }
   }
@@ -428,23 +447,24 @@ class RankStore {
    * Called when app is reopened or becomes visible after being backgrounded.
    */
   public handleAppResume() {
-    const elapsedSinceActive = Date.now() - this.lastActiveTimestamp;
-    const dataAge = this.lastFetchedAt ? Date.now() - this.lastFetchedAt : Infinity;
-
-    if (elapsedSinceActive > RESUME_STALE_TTL_MS || dataAge > STALE_TTL_MS) {
-      this.silentRevalidate();
-    }
     this.lastActiveTimestamp = Date.now();
+    // Only revalidate if user is currently on Ranks view with an active subscription
+    if (this.unsubscribeFirestore) {
+      const dataAge = this.lastFetchedAt ? Date.now() - this.lastFetchedAt : Infinity;
+      if (dataAge > STALE_TTL_MS) {
+        this.silentRevalidate();
+      }
+    }
   }
 
   /**
    * Performs silent background revalidation without blocking UI or showing skeletons
    */
   public silentRevalidate() {
-    // If listener was detached or paused, reconnect
-    if (!this.unsubscribeFirestore) {
-      this.ensureListenerStarted(this.activeUid);
+    if (this.unsubscribeFirestore) {
+      this.stopLeaderboardSubscription();
     }
+    this.startLeaderboardSubscription();
   }
 }
 

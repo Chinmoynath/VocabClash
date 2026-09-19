@@ -55,8 +55,6 @@ export interface BotMatchSession {
   timingStyle: BotTimingPersonality;
   recentBotStreak: number;
   lastMissedCount: number;
-  lastEmoteRound: number;
-  emotesTriggeredCount: number;
 }
 
 export interface BotRoundDecision {
@@ -152,8 +150,6 @@ export function createBotMatchSession(
     timingStyle,
     recentBotStreak: 0,
     lastMissedCount: 0,
-    lastEmoteRound: -10,
-    emotesTriggeredCount: 0,
   };
 }
 
@@ -448,112 +444,4 @@ export function simulateOpponentAnswer(
     isCorrect, 
     questionId: question.id 
   };
-}
-
-export interface OpponentEmoteEventContext {
-  roundIndex: number;
-  totalRounds: number;
-  timeTakenMs: number;
-  isCorrect: boolean;
-  questionDifficulty?: string;
-  playerScore: number;
-  opponentScore: number;
-  opponentStreak: number;
-}
-
-/**
- * Generates an event-driven, contextual bot emote with strict round cooldowns and match limits.
- * Avoids false claims of real-human activities while providing natural practice-rival atmosphere.
- */
-export function getEventDrivenOpponentEmote(
-  session: BotMatchSession,
-  context: OpponentEmoteEventContext
-): { emoji: string; text?: string } | null {
-  // Strict cooldown: at least 2 rounds between emotes
-  if (context.roundIndex - session.lastEmoteRound < 2) {
-    return null;
-  }
-
-  // Match limit: max 2 to 3 emotes per full match
-  if (session.emotesTriggeredCount >= 3) {
-    return null;
-  }
-
-  // Base trigger probability (target 10-20% overall match rounds)
-  if (Math.random() > 0.32) {
-    return null;
-  }
-
-  const scoreDiff = Math.abs(context.playerScore - context.opponentScore);
-  const isLateMatch = context.roundIndex >= Math.floor(context.totalRounds * 0.7);
-
-  const candidates: { emoji: string; text: string }[] = [];
-
-  // Event 1: Fast correct answer
-  if (context.isCorrect && context.timeTakenMs < 2600) {
-    candidates.push(
-      { emoji: '⚡', text: 'That clicked!' },
-      { emoji: '⚡', text: 'Quick read!' },
-      { emoji: '🎯', text: 'Spot on!' }
-    );
-  }
-
-  // Event 2: Hard / tricky question
-  if (context.questionDifficulty === 'hard') {
-    candidates.push(
-      { emoji: '🤯', text: 'Tricky one!' },
-      { emoji: '📚', text: 'Tough vocab!' },
-      { emoji: '🧐', text: 'Good question!' }
-    );
-  }
-
-  // Event 3: Close score tension
-  if (scoreDiff <= 80 && context.roundIndex >= 3) {
-    candidates.push(
-      { emoji: '👀', text: 'Close battle!' },
-      { emoji: '⚔️', text: 'Neck and neck!' }
-    );
-  }
-
-  // Event 4: Active streak
-  if (context.opponentStreak >= 3) {
-    candidates.push(
-      { emoji: '🔥', text: 'On a roll!' },
-      { emoji: '🎯', text: 'Locked in!' }
-    );
-  }
-
-  // Event 5: Late match
-  if (isLateMatch && scoreDiff <= 120) {
-    candidates.push(
-      { emoji: '💪', text: 'Final push!' },
-      { emoji: '🔥', text: 'Intense duel!' }
-    );
-  }
-
-  // Fallback general candidate
-  if (candidates.length === 0) {
-    candidates.push(
-      { emoji: '👏', text: 'Good round!' },
-      { emoji: '👍', text: 'Well played!' },
-      { emoji: '🎯', text: 'Nice!' }
-    );
-  }
-
-  const chosen = candidates[Math.floor(Math.random() * candidates.length)];
-  session.lastEmoteRound = context.roundIndex;
-  session.emotesTriggeredCount += 1;
-  return chosen;
-}
-
-export function generateRandomOpponentEmote(): { emoji: string; text?: string } {
-  const emotes = [
-    { emoji: '⚡', text: 'That clicked!' },
-    { emoji: '👏', text: 'Good round!' },
-    { emoji: '🤯', text: 'Tricky one!' },
-    { emoji: '🎯', text: 'Spot on!' },
-    { emoji: '⚔️', text: 'Good duel!' },
-    { emoji: '👍', text: 'Well played!' },
-  ];
-  return emotes[Math.floor(Math.random() * emotes.length)];
 }

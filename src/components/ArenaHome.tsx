@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { PlayerProfile, QuestionCategory, ExamType, UserSubscription, DailyStreakState } from '../types';
 import { soundManager } from '../utils/audio';
-import { getSecondsUntilNextAd, ADS_ENABLED } from '../utils/adManager';
+import { ADS_ENABLED } from '../utils/adManager';
 import { User as FirebaseUser } from 'firebase/auth';
 import { AdSenseUnit } from './AdSenseUnit';
 import { ADSENSE_BANNER_SLOT } from '../services/adSenseService';
@@ -91,16 +91,6 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
   onStartSscTop100Drill,
   onStartDueRevision,
 }) => {
-  const [secondsToAd, setSecondsToAd] = useState<number>(() => getSecondsUntilNextAd(subscription.isPremium));
-
-  useEffect(() => {
-    if (!ADS_ENABLED || subscription.isPremium) return;
-    const interval = setInterval(() => {
-      setSecondsToAd(getSecondsUntilNextAd(subscription.isPremium));
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [subscription.isPremium]);
-
   // Current selected exam family
   const activeFamily = normalizeFilterToFamily(selectedExam);
 
@@ -341,29 +331,6 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
               </div>
             </div>
           ) : null}
-
-          {/* Free-Tier Ad Status Helper (Rendered only when ADS_ENABLED is true) */}
-          {ADS_ENABLED && !subscription.isPremium && (
-            <div className="bg-slate-900/90 border border-slate-800 rounded-xl px-3 py-1.5 flex items-center justify-between text-[11px] text-slate-400">
-              <div className="flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse" />
-                <span>Ad Cooldown:</span>
-                <span className="font-mono text-amber-400 font-bold">
-                  {secondsToAd === 0 ? 'Due after match' : `${Math.floor(secondsToAd / 60)}m ${secondsToAd % 60}s`}
-                </span>
-              </div>
-              <button
-                onClick={() => {
-                  soundManager.playTap();
-                  onTriggerTestAd();
-                }}
-                className="text-[10px] bg-slate-800 hover:bg-slate-700 text-sky-300 px-2 py-0.5 rounded border border-slate-700 font-medium cursor-pointer"
-                title="Simulate 10-min interval expiry"
-              >
-                ⚡ Test Ad
-              </button>
-            </div>
-          )}
 
           {/* AdSense Unit (Rendered only when ADS_ENABLED is true) */}
           {ADS_ENABLED && !subscription.isPremium && (

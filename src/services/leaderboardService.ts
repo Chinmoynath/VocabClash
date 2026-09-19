@@ -3,7 +3,10 @@ import {
   doc, 
   setDoc, 
   onSnapshot, 
-  Unsubscribe 
+  Unsubscribe,
+  query,
+  orderBy,
+  limit
 } from 'firebase/firestore';
 import { db, auth, sanitizeForFirestore } from './firebaseService';
 import { PlayerProfile, LeaderboardUser } from '../types';
@@ -157,14 +160,18 @@ export interface FirestoreLeaderboardDoc {
 
 /**
  * Subscribes to real users in Firestore collection 'leaderboard_users' in real-time.
+ * Uses an ordered query limited to the top aspirants needed for UI display to prevent
+ * downloading or listening to thousands of unfiltered documents across the collection.
  */
 export function subscribeToRealLeaderboardUsers(
-  onUpdate: (realUsers: LeaderboardUser[]) => void
+  onUpdate: (realUsers: LeaderboardUser[]) => void,
+  maxUsers: number = 100
 ): Unsubscribe {
   const colRef = collection(db, 'leaderboard_users');
+  const q = query(colRef, orderBy('rankPoints', 'desc'), limit(maxUsers));
 
   return onSnapshot(
-    colRef,
+    q,
     (snapshot) => {
       const realUsers: LeaderboardUser[] = [];
       snapshot.forEach((docSnap) => {

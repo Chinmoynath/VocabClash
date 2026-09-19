@@ -411,29 +411,47 @@ app.post('/api/payments/google/verify', async (req, res) => {
   try {
     const { purchaseToken, sku, productId, basePlanId, planId, userId, userEmail } = req.body;
 
-    if (!purchaseToken || !productId) {
+    // Strict input validation: must have valid non-empty string purchaseToken and productId
+    if (!purchaseToken || typeof purchaseToken !== 'string' || purchaseToken.trim().length < 5) {
       return res.status(400).json({
         success: false,
         verified: false,
-        error: 'Missing purchase token or product ID for Google Play verification',
+        error: 'Invalid or missing Google Play purchase token. Entitlement not granted.',
+      });
+    }
+
+    const validProductIds = [
+      'vocabclash_monthly',
+      'vocabclash_quarterly',
+      'vocabclash_half_yearly',
+      'vocabclash_yearly',
+      'vocabclash_lifetime',
+    ];
+
+    const targetProductId = productId || sku;
+    if (!targetProductId || !validProductIds.includes(targetProductId)) {
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        error: `Unrecognized Google Play product ID: "${targetProductId}". Verification failed.`,
       });
     }
 
     let effectivePlanId = planId;
     if (!effectivePlanId) {
-      if (productId === 'vocabclash_monthly') effectivePlanId = 'monthly';
-      else if (productId === 'vocabclash_quarterly') effectivePlanId = 'quarterly';
-      else if (productId === 'vocabclash_half_yearly') effectivePlanId = 'six_months';
-      else if (productId === 'vocabclash_yearly') effectivePlanId = 'annual';
-      else if (productId === 'vocabclash_lifetime') effectivePlanId = 'lifetime';
+      if (targetProductId === 'vocabclash_monthly') effectivePlanId = 'monthly';
+      else if (targetProductId === 'vocabclash_quarterly') effectivePlanId = 'quarterly';
+      else if (targetProductId === 'vocabclash_half_yearly') effectivePlanId = 'six_months';
+      else if (targetProductId === 'vocabclash_yearly') effectivePlanId = 'annual';
+      else if (targetProductId === 'vocabclash_lifetime') effectivePlanId = 'lifetime';
       else effectivePlanId = 'quarterly';
     }
 
-    const isLifetime = productId === 'vocabclash_lifetime' || effectivePlanId === 'lifetime';
+    const isLifetime = targetProductId === 'vocabclash_lifetime' || effectivePlanId === 'lifetime';
     const packageName = process.env.GOOGLE_PLAY_PACKAGE_NAME || 'in.vocabclash.twa';
 
     // Log verification attempt (safe non-sensitive metadata)
-    console.log(`[Google Play Verification] Verifying token for package: ${packageName}, product: ${productId}, plan: ${effectivePlanId}`);
+    console.log(`[Google Play Verification] Verifying token for package: ${packageName}, product: ${targetProductId}, plan: ${effectivePlanId}, user: ${userId || userEmail || 'anonymous'}`);
 
     // Duration mapping
     const durationDaysMap: Record<string, number> = {
@@ -481,6 +499,8 @@ app.post('/api/payments/google/verify', async (req, res) => {
         purchaseType: isLifetime ? 'one_time' : 'subscription',
         expiresAt,
         verifiedAt: now,
+        userId: userId || undefined,
+        userEmail: userEmail || undefined,
       },
     });
   } catch (error: any) {
