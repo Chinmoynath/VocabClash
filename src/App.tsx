@@ -1720,53 +1720,50 @@ export default function App() {
         window.dispatchEvent(new CustomEvent('daily-challenge-updated'));
       }
       if (cloudData.player) {
-        setPlayer(prev => {
-          const cloudLp = cloudData.player.rankPoints ?? 0;
-          const localLp = prev.rankPoints ?? 0;
-          const cloudPlayed = cloudData.player.matchesPlayed ?? 0;
-          const localPlayed = prev.matchesPlayed ?? 0;
+        const cloudLp = cloudData.player.rankPoints ?? 0;
+        const localLp = player.rankPoints ?? 0;
+        const cloudPlayed = cloudData.player.matchesPlayed ?? 0;
+        const localPlayed = player.matchesPlayed ?? 0;
 
-          if (cloudLp !== localLp || cloudPlayed > localPlayed) {
-            console.log(`[Sync] Cloud LP: ${cloudLp}, Local LP: ${localLp}`);
-            const reconciledLP = Math.max(localLp, cloudLp);
-            const reconciledPlayed = Math.max(localPlayed, cloudPlayed);
-            const reconciledWon = Math.max(prev.matchesWon || 0, cloudData.player.matchesWon || 0);
-            const newTier = getTierFromLP(reconciledLP);
-            const newTierTitle = getTierTitle(newTier);
+        if (cloudLp !== localLp || cloudPlayed > localPlayed) {
+          console.log(`[Sync] Cloud LP: ${cloudLp}, Local LP: ${localLp}`);
+          const reconciledLP = Math.max(localLp, cloudLp);
+          const reconciledPlayed = Math.max(localPlayed, cloudPlayed);
+          const reconciledWon = Math.max(player.matchesWon || 0, cloudData.player.matchesWon || 0);
+          const newTier = getTierFromLP(reconciledLP);
+          const newTierTitle = getTierTitle(newTier);
 
-            const updated: PlayerProfile = {
-              ...prev,
-              rankPoints: reconciledLP,
-              matchesPlayed: reconciledPlayed,
-              matchesWon: reconciledWon,
-              tier: newTier,
-              tierTitle: newTierTitle,
-            };
+          const updated: PlayerProfile = {
+            ...player,
+            rankPoints: reconciledLP,
+            matchesPlayed: reconciledPlayed,
+            matchesWon: reconciledWon,
+            tier: newTier,
+            tierTitle: newTierTitle,
+          };
 
-            try {
-              localStorage.setItem(getPlayerStorageKey(currentUser.uid), JSON.stringify(updated));
-            } catch {}
+          try {
+            localStorage.setItem(getPlayerStorageKey(currentUser.uid), JSON.stringify(updated));
+          } catch {}
 
-            setHeaderCache(currentUser.uid, {
-              displayName: extractCleanUserName(updated.name, updated.email),
-              avatar: updated.avatar || '👨‍💼',
-              photoURL: updated.photoURL || null,
-              level: updated.level,
-              rankPoints: updated.rankPoints,
-              tierTitle: updated.tierTitle,
-              email: updated.email,
-            });
+          setHeaderCache(currentUser.uid, {
+            displayName: extractCleanUserName(updated.name, updated.email),
+            avatar: updated.avatar || '👨‍💼',
+            photoURL: updated.photoURL || null,
+            level: updated.level,
+            rankPoints: updated.rankPoints,
+            tierTitle: updated.tierTitle,
+            email: updated.email,
+          });
 
-            rankStore.updatePlayer(updated);
-            console.log(`[Sync] Reconciled LP -> ${reconciledLP}`);
-            return updated;
-          }
-          return prev;
-        });
+          setPlayer(updated);
+          rankStore.updatePlayer(updated);
+          console.log(`[Sync] Reconciled LP -> ${reconciledLP}`);
+        }
       }
     });
     return () => unsubscribe();
-  }, [currentUser, sessionLoaded]);
+  }, [currentUser, sessionLoaded, player]);
 
   // Cross-device App Resume & Network Reconnection Reconciliation
   useEffect(() => {
@@ -1787,49 +1784,46 @@ export default function App() {
         const freshCloud = await fetchUserDataFromFirestore(currentUser.uid, 4500);
         if (freshCloud) {
           if (freshCloud.player) {
-            setPlayer(prev => {
-              const cloudLp = freshCloud.player.rankPoints ?? 0;
-              const localLp = prev.rankPoints ?? 0;
-              const cloudPlayed = freshCloud.player.matchesPlayed ?? 0;
-              const localPlayed = prev.matchesPlayed ?? 0;
+            const cloudLp = freshCloud.player.rankPoints ?? 0;
+            const localLp = player.rankPoints ?? 0;
+            const cloudPlayed = freshCloud.player.matchesPlayed ?? 0;
+            const localPlayed = player.matchesPlayed ?? 0;
 
-              if (cloudLp !== localLp || cloudPlayed > localPlayed) {
-                console.log(`[Sync] Cloud LP: ${cloudLp}, Local LP: ${localLp}`);
-                const reconciledLP = Math.max(localLp, cloudLp);
-                const reconciledPlayed = Math.max(localPlayed, cloudPlayed);
-                const reconciledWon = Math.max(prev.matchesWon || 0, freshCloud.player.matchesWon || 0);
-                const newTier = getTierFromLP(reconciledLP);
-                const newTierTitle = getTierTitle(newTier);
+            if (cloudLp !== localLp || cloudPlayed > localPlayed) {
+              console.log(`[Sync] Cloud LP: ${cloudLp}, Local LP: ${localLp}`);
+              const reconciledLP = Math.max(localLp, cloudLp);
+              const reconciledPlayed = Math.max(localPlayed, cloudPlayed);
+              const reconciledWon = Math.max(player.matchesWon || 0, freshCloud.player.matchesWon || 0);
+              const newTier = getTierFromLP(reconciledLP);
+              const newTierTitle = getTierTitle(newTier);
 
-                const updated: PlayerProfile = {
-                  ...prev,
-                  rankPoints: reconciledLP,
-                  matchesPlayed: reconciledPlayed,
-                  matchesWon: reconciledWon,
-                  tier: newTier,
-                  tierTitle: newTierTitle,
-                };
+              const updated: PlayerProfile = {
+                ...player,
+                rankPoints: reconciledLP,
+                matchesPlayed: reconciledPlayed,
+                matchesWon: reconciledWon,
+                tier: newTier,
+                tierTitle: newTierTitle,
+              };
 
-                try {
-                  localStorage.setItem(getPlayerStorageKey(currentUser.uid), JSON.stringify(updated));
-                } catch {}
+              try {
+                localStorage.setItem(getPlayerStorageKey(currentUser.uid), JSON.stringify(updated));
+              } catch {}
 
-                setHeaderCache(currentUser.uid, {
-                  displayName: extractCleanUserName(updated.name, updated.email),
-                  avatar: updated.avatar || '👨‍💼',
-                  photoURL: updated.photoURL || null,
-                  level: updated.level,
-                  rankPoints: updated.rankPoints,
-                  tierTitle: updated.tierTitle,
-                  email: updated.email,
-                });
+              setHeaderCache(currentUser.uid, {
+                displayName: extractCleanUserName(updated.name, updated.email),
+                avatar: updated.avatar || '👨‍💼',
+                photoURL: updated.photoURL || null,
+                level: updated.level,
+                rankPoints: updated.rankPoints,
+                tierTitle: updated.tierTitle,
+                email: updated.email,
+              });
 
-                rankStore.updatePlayer(updated);
-                console.log(`[Sync] Reconciled LP -> ${reconciledLP}`);
-                return updated;
-              }
-              return prev;
-            });
+              setPlayer(updated);
+              rankStore.updatePlayer(updated);
+              console.log(`[Sync] Reconciled LP -> ${reconciledLP}`);
+            }
           }
 
           if (freshCloud.dailyChallengeHistory && Array.isArray(freshCloud.dailyChallengeHistory)) {
@@ -1898,43 +1892,41 @@ export default function App() {
     const handleDailyChallengeCompleted = (e: any) => {
       const { rankPointsGained } = e.detail || {};
       if (typeof rankPointsGained === 'number' && rankPointsGained > 0) {
-        setPlayer(prev => {
-          const newLP = (prev.rankPoints || 0) + rankPointsGained;
-          const newTier = getTierFromLP(newLP);
-          const newTierTitle = getTierTitle(newTier);
-          const updated: PlayerProfile = {
-            ...prev,
-            rankPoints: newLP,
-            tier: newTier,
-            tierTitle: newTierTitle,
-          };
-          if (currentUser?.uid) {
-            try {
-              localStorage.setItem(getPlayerStorageKey(currentUser.uid), JSON.stringify(updated));
-            } catch {}
-            setHeaderCache(currentUser.uid, {
-              displayName: extractCleanUserName(updated.name, updated.email),
-              avatar: updated.avatar || '👨‍💼',
-              photoURL: updated.photoURL || null,
-              level: updated.level,
-              rankPoints: updated.rankPoints,
-              tierTitle: updated.tierTitle,
-              email: updated.email,
-            });
-            saveUserDataToFirestore(currentUser.uid, {
-              player: updated,
-              subscription,
-              streak,
-              savedWords,
-              dailyTarget: getDailyTargetState(),
-              dailyChallengeHistory: getDailyChallengeHistory(currentUser.uid),
-            }, currentUser).catch(() => {});
-            syncUserToLeaderboard(updated, currentUser.uid).catch(() => {});
-          }
-          rankStore.updatePlayer(updated);
-          console.log(`[Sync] Daily Challenge LP awarded locally: +${rankPointsGained} LP -> new LP ${newLP}`);
-          return updated;
-        });
+        const newLP = (player.rankPoints || 0) + rankPointsGained;
+        const newTier = getTierFromLP(newLP);
+        const newTierTitle = getTierTitle(newTier);
+        const updated: PlayerProfile = {
+          ...player,
+          rankPoints: newLP,
+          tier: newTier,
+          tierTitle: newTierTitle,
+        };
+        if (currentUser?.uid) {
+          try {
+            localStorage.setItem(getPlayerStorageKey(currentUser.uid), JSON.stringify(updated));
+          } catch {}
+          setHeaderCache(currentUser.uid, {
+            displayName: extractCleanUserName(updated.name, updated.email),
+            avatar: updated.avatar || '👨‍💼',
+            photoURL: updated.photoURL || null,
+            level: updated.level,
+            rankPoints: updated.rankPoints,
+            tierTitle: updated.tierTitle,
+            email: updated.email,
+          });
+          saveUserDataToFirestore(currentUser.uid, {
+            player: updated,
+            subscription,
+            streak,
+            savedWords,
+            dailyTarget: getDailyTargetState(),
+            dailyChallengeHistory: getDailyChallengeHistory(currentUser.uid),
+          }, currentUser).catch(() => {});
+          syncUserToLeaderboard(updated, currentUser.uid).catch(() => {});
+        }
+        setPlayer(updated);
+        rankStore.updatePlayer(updated);
+        console.log(`[Sync] Daily Challenge LP awarded locally: +${rankPointsGained} LP -> new LP ${newLP}`);
       }
     };
 
@@ -1942,7 +1934,7 @@ export default function App() {
     return () => {
       window.removeEventListener('daily-challenge-completed', handleDailyChallengeCompleted);
     };
-  }, [currentUser, subscription, streak, savedWords]);
+  }, [currentUser, subscription, streak, savedWords, player]);
 
   const handleToggleSound = () => {
     const nextVal = !soundEnabled;
@@ -2698,19 +2690,17 @@ export default function App() {
   };
 
   const handleAddLP = (amount: number) => {
-    setPlayer(prev => {
-      const newLP = prev.rankPoints + amount;
-      const newTier = getTierFromLP(newLP);
-      const newTierTitle = getTierTitle(newTier);
-      const updated = {
-        ...prev,
-        rankPoints: newLP,
-        tier: newTier,
-        tierTitle: newTierTitle,
-      };
-      rankStore.updatePlayer(updated);
-      return updated;
-    });
+    const newLP = player.rankPoints + amount;
+    const newTier = getTierFromLP(newLP);
+    const newTierTitle = getTierTitle(newTier);
+    const updated: PlayerProfile = {
+      ...player,
+      rankPoints: newLP,
+      tier: newTier,
+      tierTitle: newTierTitle,
+    };
+    setPlayer(updated);
+    rankStore.updatePlayer(updated);
   };
 
   const handleUpdatePyqScore = (delta: number) => {
@@ -3393,7 +3383,9 @@ export default function App() {
                     fetchUserDataFromFirestore(currentUser.uid, 3000).then(fresh => {
                       if (fresh?.player?.rankPoints && fresh.player.rankPoints !== player.rankPoints) {
                         const newLp = Math.max(player.rankPoints, fresh.player.rankPoints);
-                        setPlayer(prev => ({ ...prev, rankPoints: newLp }));
+                        const updated = { ...player, rankPoints: newLp };
+                        setPlayer(updated);
+                        rankStore.updatePlayer(updated);
                       }
                     }).catch(() => {});
                   }

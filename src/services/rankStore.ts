@@ -121,11 +121,22 @@ class RankStore {
     };
   };
 
+  private notifyPending = false;
+
   private notify() {
-    this.cachedSnapshot = null; // Invalidate memoized snapshot
-    for (const listener of this.listeners) {
-      listener();
-    }
+    this.cachedSnapshot = null; // Invalidate memoized snapshot synchronously
+    if (this.notifyPending) return;
+    this.notifyPending = true;
+    queueMicrotask(() => {
+      this.notifyPending = false;
+      for (const listener of this.listeners) {
+        try {
+          listener();
+        } catch (e) {
+          console.error('[RankStore] Listener error:', e);
+        }
+      }
+    });
   }
 
   // --- Computations ---
@@ -277,6 +288,22 @@ class RankStore {
    * Updates player stats in memory immediately (e.g. after LP changes, profile edit).
    */
   public updatePlayer(player: PlayerProfile) {
+    if (
+      this.currentPlayer &&
+      this.currentPlayer.id === player.id &&
+      this.currentPlayer.rankPoints === player.rankPoints &&
+      this.currentPlayer.matchesPlayed === player.matchesPlayed &&
+      this.currentPlayer.matchesWon === player.matchesWon &&
+      this.currentPlayer.winStreak === player.winStreak &&
+      this.currentPlayer.level === player.level &&
+      this.currentPlayer.name === player.name &&
+      this.currentPlayer.targetExam === player.targetExam &&
+      this.currentPlayer.avatar === player.avatar &&
+      this.currentPlayer.photoURL === player.photoURL &&
+      this.currentPlayer.countryCode === player.countryCode
+    ) {
+      return;
+    }
     this.currentPlayer = { ...player };
     this.recomputeMergedLeaderboard();
     if (this.activeUid) {
