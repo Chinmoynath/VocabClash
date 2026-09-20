@@ -65,57 +65,53 @@ export interface BotRoundDecision {
 }
 
 /**
- * Calculates a player-calibrated bot ability band based on available player history or LP tier.
- * Does NOT force close matches or rubber-band during live gameplay; establishes a stable baseline at match creation.
+ * Calculates a dynamic, authentic bot opponent ability rating.
+ * Ensures rivals have realistic unpredictability across the spectrum (50%, 60%, 80%, 90%)
+ * so matches remain engaging and exciting without locking users into only low-tier bots.
  */
 export function calculateCalibratedBotSkill(
   playerLP: number,
   playerStats?: { accuracyRate?: number; matchesPlayed?: number; pyqScore?: number } | null
 ): number {
-  let playerBaseAccuracy: number;
+  const isHighTier = playerLP >= 2500 || (playerStats?.accuracyRate && playerStats.accuracyRate >= 75);
+  const roll = Math.random();
 
-  if (playerStats && typeof playerStats.matchesPlayed === 'number' && playerStats.matchesPlayed > 0 && typeof playerStats.accuracyRate === 'number' && playerStats.accuracyRate > 0) {
-    // 1. Player has reliable 1v1 / match history
-    playerBaseAccuracy = playerStats.accuracyRate;
-  } else {
-    // 2. Derive from LP / Tier brackets or moderate neutral baseline for new users
-    if (playerLP >= 4500) {
-      playerBaseAccuracy = 82;
-    } else if (playerLP >= 3000) {
-      playerBaseAccuracy = 76;
-    } else if (playerLP >= 2000) {
-      playerBaseAccuracy = 70;
-    } else if (playerLP >= 1200) {
-      playerBaseAccuracy = 64;
-    } else if (playerLP >= 600) {
-      playerBaseAccuracy = 58;
+  let selectedAccuracy: number;
+
+  if (isHighTier) {
+    // High tier player distribution:
+    // 15% Casual/Warmup: 52% - 62%
+    // 35% Strong Contender: 68% - 78%
+    // 35% High Ranker: 80% - 87%
+    // 15% Apex Master / Topper: 88% - 93%
+    if (roll < 0.15) {
+      selectedAccuracy = Math.round(52 + Math.random() * 10);
+    } else if (roll < 0.50) {
+      selectedAccuracy = Math.round(68 + Math.random() * 10);
+    } else if (roll < 0.85) {
+      selectedAccuracy = Math.round(80 + Math.random() * 7);
     } else {
-      // New / early user neutral baseline: 52% - 60%
-      playerBaseAccuracy = 56;
+      selectedAccuracy = Math.round(88 + Math.random() * 5);
+    }
+  } else {
+    // General / Beginner / Intermediate player distribution:
+    // 25% Novice / Foundation Aspirant: 48% - 56% (~50%)
+    // 35% Steady Competitor: 58% - 68% (~60%)
+    // 25% Sharp Ranker: 76% - 84% (~80%)
+    // 15% Topper / High-Scorer: 86% - 92% (~90%)
+    if (roll < 0.25) {
+      selectedAccuracy = Math.round(48 + Math.random() * 8);
+    } else if (roll < 0.60) {
+      selectedAccuracy = Math.round(58 + Math.random() * 10);
+    } else if (roll < 0.85) {
+      selectedAccuracy = Math.round(76 + Math.random() * 8);
+    } else {
+      selectedAccuracy = Math.round(86 + Math.random() * 6);
     }
   }
 
-  // Roll rival skill band relative to player baseline
-  const roll = Math.random();
-  let skillOffset: number;
-
-  if (roll < 0.50) {
-    // Similar rival (±4%)
-    skillOffset = Math.round(Math.random() * 8 - 4);
-  } else if (roll < 0.75) {
-    // Slightly stronger rival (+3% to +8%)
-    skillOffset = Math.round(3 + Math.random() * 5);
-  } else if (roll < 0.95) {
-    // Slightly weaker rival (-3% to -7%)
-    skillOffset = Math.round(-3 - Math.random() * 4);
-  } else {
-    // Occasional outlier performance (noticeably strong or novice)
-    skillOffset = Math.random() < 0.5 ? 11 : -10;
-  }
-
-  const calibrated = Math.round(playerBaseAccuracy + skillOffset);
-  // Safe bounds: never below 42%, never above 88%
-  return Math.max(42, Math.min(88, calibrated));
+  // Safe clamping bounds: 45% to 93%
+  return Math.max(45, Math.min(93, selectedAccuracy));
 }
 
 /**

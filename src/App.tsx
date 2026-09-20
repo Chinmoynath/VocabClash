@@ -2058,6 +2058,14 @@ export default function App() {
     }
   };
 
+  // Switch navigation tabs with natural break interstitial check
+  const handleNavigateTab = (newTab: TabType) => {
+    if (newTab !== currentTab) {
+      triggerAdIfDue();
+      setCurrentTab(newTab);
+    }
+  };
+
   // Start matchmaking flow (with offline check)
   const handleStartMatchmaking = (mode: '1v1_ranked' | 'quick_duel' | 'daily_challenge') => {
     if (!networkManager.isOnline()) {
@@ -3026,9 +3034,7 @@ export default function App() {
       {!matchState && (
         <DesktopSidebar
           currentTab={currentTab}
-          onSelectTab={(tab) => {
-            setCurrentTab(tab);
-          }}
+          onSelectTab={handleNavigateTab}
           player={player}
           subscription={subscription}
           dailyStreak={streak}
@@ -3248,7 +3254,7 @@ export default function App() {
                 }}
                 onOpenTour={() => setShowTourModal(true)}
                 onOpenAppGuide={() => setShowAppGuideModal(true)}
-                onNavigateTab={setCurrentTab}
+                onNavigateTab={handleNavigateTab}
                 onRewardLP={handleRewardLP}
                 onTriggerTestAd={handleTriggerTestAd}
                 onStartSscTop100Drill={handleStartSscTop100Drill}
@@ -3406,8 +3412,8 @@ export default function App() {
                 onRemoveWord={handleRemoveSavedWord}
                 onToggleUserSaved={handleToggleUserSaved}
                 onOpenAiTutor={handleOpenAiTutor}
-                onGoToArena={() => setCurrentTab('arena')}
-                onGoToPractice={() => setCurrentTab('practice')}
+                onGoToArena={() => handleNavigateTab('arena')}
+                onGoToPractice={() => handleNavigateTab('practice')}
               />
             )}
 
@@ -3645,11 +3651,11 @@ export default function App() {
           }}
           onNavigateToPractice={() => {
             setShowStatsModal(false);
-            setCurrentTab('practice');
+            handleNavigateTab('practice');
           }}
           onNavigateToMistakes={() => {
             setShowStatsModal(false);
-            setCurrentTab('mistakes');
+            handleNavigateTab('mistakes');
           }}
         />
       )}
@@ -3660,7 +3666,7 @@ export default function App() {
         onClose={() => setShowTourModal(false)}
         onStartPyq={() => {
           setShowTourModal(false);
-          setCurrentTab('practice');
+          handleNavigateTab('practice');
           if (typeof window !== 'undefined') {
             try {
               const alreadyGuided = localStorage.getItem('vocabclash_filter_guided_completed_v1');
@@ -3691,7 +3697,7 @@ export default function App() {
         onClose={() => setShowAppGuideModal(false)}
         onNavigate={(tab) => {
           setShowAppGuideModal(false);
-          setCurrentTab(tab);
+          handleNavigateTab(tab);
         }}
         onStart1v1={() => {
           setShowAppGuideModal(false);
@@ -3850,9 +3856,7 @@ export default function App() {
       {!matchState && (
         <BottomNavBar
           currentTab={currentTab}
-          onSelectTab={(tab) => {
-            setCurrentTab(tab);
-          }}
+          onSelectTab={handleNavigateTab}
           mistakeCount={activeMistakeCount}
         />
       )}
