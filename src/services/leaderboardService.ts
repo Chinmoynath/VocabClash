@@ -165,7 +165,7 @@ export interface FirestoreLeaderboardDoc {
  */
 export function subscribeToRealLeaderboardUsers(
   onUpdate: (realUsers: LeaderboardUser[]) => void,
-  maxUsers: number = 100
+  maxUsers: number = 1000
 ): Unsubscribe {
   const colRef = collection(db, 'leaderboard_users');
   const q = query(colRef, orderBy('rankPoints', 'desc'), limit(maxUsers));

@@ -9,7 +9,8 @@ import {
   CheckCircle2,
   Lock,
   ChevronRight,
-  Target
+  Target,
+  RefreshCw
 } from 'lucide-react';
 import { AdSenseUnit } from './AdSenseUnit';
 import { ADSENSE_BANNER_SLOT, ADS_ENABLED } from '../services/adSenseService';
@@ -322,9 +323,20 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ player, isPrem
               <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                 Top 10 Rankings
               </span>
-              <span className="text-[10px] text-slate-500 font-mono">
-                Showing {top10List.length} of {totalAspirantsCount}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-slate-500 font-mono">
+                  Showing {top10List.length} of {totalAspirantsCount}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => rankStore.silentRevalidate()}
+                  className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-amber-400 transition-colors"
+                  title="Refresh Leaderboard"
+                  aria-label="Refresh Leaderboard"
+                >
+                  <RefreshCw className={`w-3 h-3 ${isLoading ? 'animate-spin text-amber-400' : ''}`} />
+                </button>
+              </div>
             </div>
 
             {top10List.map((user) => {

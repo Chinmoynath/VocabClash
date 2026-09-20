@@ -710,6 +710,9 @@ export default function App() {
     return INITIAL_PLAYER;
   });
 
+  const playerRef = useRef<PlayerProfile>(player);
+  playerRef.current = player;
+
   // Saved words (Mistake vault)
   const [savedWords, setSavedWords] = useState<SavedWord[]>(() => {
     if (typeof window !== 'undefined') {
@@ -1716,25 +1719,26 @@ export default function App() {
       }
       if (cloudData.dailyChallengeHistory && Array.isArray(cloudData.dailyChallengeHistory)) {
         const clean = sanitizeDailyChallengeHistory(cloudData.dailyChallengeHistory, currentUser.uid, currentUser.email);
-        setDailyChallengeHistoryForUser(currentUser.uid, clean);
+        mergeDailyChallengeHistory(clean, currentUser.uid);
         window.dispatchEvent(new CustomEvent('daily-challenge-updated'));
       }
       if (cloudData.player) {
+        const currentPlayer = playerRef.current;
         const cloudLp = cloudData.player.rankPoints ?? 0;
-        const localLp = player.rankPoints ?? 0;
+        const localLp = currentPlayer.rankPoints ?? 0;
         const cloudPlayed = cloudData.player.matchesPlayed ?? 0;
-        const localPlayed = player.matchesPlayed ?? 0;
+        const localPlayed = currentPlayer.matchesPlayed ?? 0;
 
         if (cloudLp !== localLp || cloudPlayed > localPlayed) {
           console.log(`[Sync] Cloud LP: ${cloudLp}, Local LP: ${localLp}`);
           const reconciledLP = Math.max(localLp, cloudLp);
           const reconciledPlayed = Math.max(localPlayed, cloudPlayed);
-          const reconciledWon = Math.max(player.matchesWon || 0, cloudData.player.matchesWon || 0);
+          const reconciledWon = Math.max(currentPlayer.matchesWon || 0, cloudData.player.matchesWon || 0);
           const newTier = getTierFromLP(reconciledLP);
           const newTierTitle = getTierTitle(newTier);
 
           const updated: PlayerProfile = {
-            ...player,
+            ...currentPlayer,
             rankPoints: reconciledLP,
             matchesPlayed: reconciledPlayed,
             matchesWon: reconciledWon,
@@ -1763,7 +1767,7 @@ export default function App() {
       }
     });
     return () => unsubscribe();
-  }, [currentUser, sessionLoaded, player]);
+  }, [currentUser?.uid, sessionLoaded]);
 
   // Cross-device App Resume & Network Reconnection Reconciliation
   useEffect(() => {
@@ -1784,21 +1788,22 @@ export default function App() {
         const freshCloud = await fetchUserDataFromFirestore(currentUser.uid, 4500);
         if (freshCloud) {
           if (freshCloud.player) {
+            const currentPlayer = playerRef.current;
             const cloudLp = freshCloud.player.rankPoints ?? 0;
-            const localLp = player.rankPoints ?? 0;
+            const localLp = currentPlayer.rankPoints ?? 0;
             const cloudPlayed = freshCloud.player.matchesPlayed ?? 0;
-            const localPlayed = player.matchesPlayed ?? 0;
+            const localPlayed = currentPlayer.matchesPlayed ?? 0;
 
             if (cloudLp !== localLp || cloudPlayed > localPlayed) {
               console.log(`[Sync] Cloud LP: ${cloudLp}, Local LP: ${localLp}`);
               const reconciledLP = Math.max(localLp, cloudLp);
               const reconciledPlayed = Math.max(localPlayed, cloudPlayed);
-              const reconciledWon = Math.max(player.matchesWon || 0, freshCloud.player.matchesWon || 0);
+              const reconciledWon = Math.max(currentPlayer.matchesWon || 0, freshCloud.player.matchesWon || 0);
               const newTier = getTierFromLP(reconciledLP);
               const newTierTitle = getTierTitle(newTier);
 
               const updated: PlayerProfile = {
-                ...player,
+                ...currentPlayer,
                 rankPoints: reconciledLP,
                 matchesPlayed: reconciledPlayed,
                 matchesWon: reconciledWon,
@@ -1885,18 +1890,19 @@ export default function App() {
         removeCapacitorListener();
       }
     };
-  }, [currentUser]);
+  }, [currentUser?.uid]);
 
   // Daily challenge completion LP awarding and synchronization
   useEffect(() => {
     const handleDailyChallengeCompleted = (e: any) => {
       const { rankPointsGained } = e.detail || {};
       if (typeof rankPointsGained === 'number' && rankPointsGained > 0) {
-        const newLP = (player.rankPoints || 0) + rankPointsGained;
+        const currentPlayer = playerRef.current;
+        const newLP = (currentPlayer.rankPoints || 0) + rankPointsGained;
         const newTier = getTierFromLP(newLP);
         const newTierTitle = getTierTitle(newTier);
         const updated: PlayerProfile = {
-          ...player,
+          ...currentPlayer,
           rankPoints: newLP,
           tier: newTier,
           tierTitle: newTierTitle,
@@ -1919,7 +1925,7 @@ export default function App() {
             subscription,
             streak,
             savedWords,
-            dailyTarget: getDailyTargetState(),
+            dailyTarget: getDailyTargetState(currentUser.uid),
             dailyChallengeHistory: getDailyChallengeHistory(currentUser.uid),
           }, currentUser).catch(() => {});
           syncUserToLeaderboard(updated, currentUser.uid).catch(() => {});
@@ -1934,7 +1940,7 @@ export default function App() {
     return () => {
       window.removeEventListener('daily-challenge-completed', handleDailyChallengeCompleted);
     };
-  }, [currentUser, subscription, streak, savedWords, player]);
+  }, [currentUser, subscription, streak, savedWords]);
 
   const handleToggleSound = () => {
     const nextVal = !soundEnabled;

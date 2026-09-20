@@ -1,6 +1,9 @@
 import { useSyncExternalStore } from 'react';
 import { User } from 'firebase/auth';
 import { Unsubscribe } from 'firebase/firestore';
+import { Capacitor } from '@capacitor/core';
+import { App as CapApp } from '@capacitor/app';
+import { Network } from '@capacitor/network';
 import { PlayerProfile, LeaderboardUser } from '../types';
 import { 
   getDeterministicBots, 
@@ -110,6 +113,33 @@ class RankStore {
       window.addEventListener('focus', () => {
         this.handleAppResume();
       });
+
+      window.addEventListener('online', () => {
+        this.silentRevalidate();
+      });
+
+      // Mobile Capacitor Native listeners
+      if (Capacitor.isNativePlatform()) {
+        try {
+          CapApp.addListener('appStateChange', ({ isActive }) => {
+            if (isActive) {
+              this.handleAppResume();
+            } else {
+              this.lastActiveTimestamp = Date.now();
+            }
+          });
+          CapApp.addListener('resume', () => {
+            this.handleAppResume();
+          });
+          Network.addListener('networkStatusChange', (status) => {
+            if (status.connected) {
+              this.silentRevalidate();
+            }
+          });
+        } catch (err) {
+          console.warn('[RankStore] Notice attaching Capacitor listeners:', err);
+        }
+      }
     }
   }
 

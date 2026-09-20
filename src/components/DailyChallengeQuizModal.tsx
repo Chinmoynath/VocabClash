@@ -46,6 +46,7 @@ export const DailyChallengeQuizModal: React.FC<DailyChallengeQuizModalProps> = (
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
   const [isAnswerRevealed, setIsAnswerRevealed] = useState<boolean>(false);
   const [answersLog, setAnswersLog] = useState<{ isCorrect: boolean; category: QuestionCategory }[]>([]);
+  const answersLogRef = useRef<{ isCorrect: boolean; category: QuestionCategory }[]>([]);
   
   const [timeLeft, setTimeLeft] = useState<number>(TOTAL_TIME_SECONDS);
   const [isFinished, setIsFinished] = useState<boolean>(false);
@@ -66,6 +67,7 @@ export const DailyChallengeQuizModal: React.FC<DailyChallengeQuizModalProps> = (
     setSelectedOption(null);
     setIsAnswerRevealed(false);
     setAnswersLog([]);
+    answersLogRef.current = [];
     setTimeLeft(TOTAL_TIME_SECONDS);
     setIsFinished(false);
     setFinalAttempt(null);
@@ -122,9 +124,10 @@ export const DailyChallengeQuizModal: React.FC<DailyChallengeQuizModalProps> = (
       Math.max(1, Math.round((Date.now() - startTimeRef.current) / 1000))
     );
 
-    // Calculate score & accuracy
-    const correctCount = answersLog.filter(a => a.isCorrect).length;
-    const answeredCount = answersLog.length;
+    // Calculate score & accuracy from latest answers log ref
+    const currentLog = answersLogRef.current.length > 0 ? answersLogRef.current : answersLog;
+    const correctCount = currentLog.filter(a => a.isCorrect).length;
+    const answeredCount = currentLog.length;
     const wrongCount = answeredCount - correctCount;
     const score = correctCount; // 1 mark per correct answer out of 20
     const maxMarks = TOTAL_QUESTIONS_COUNT;
@@ -176,9 +179,10 @@ export const DailyChallengeQuizModal: React.FC<DailyChallengeQuizModalProps> = (
     }
 
     const updatedLog = [
-      ...answersLog,
+      ...answersLogRef.current,
       { isCorrect, category: currentQ.category },
     ];
+    answersLogRef.current = updatedLog;
     setAnswersLog(updatedLog);
 
     // Auto-advance swiftly to next question after 450ms
