@@ -403,7 +403,7 @@ let isGoogleAuthInProgress = false;
 export async function signInWithGoogle(forceRedirect = false): Promise<FirebaseUser | null> {
   // BRANCH 1: NATIVE CAPACITOR ANDROID
   // Embedded Android WebViews fail Google OAuth with 403: disallowed_useragent.
-  // We use the native Credential Manager / Google Sign-In plugin to retrieve the Google ID token,
+  // We use the native Google Sign-In plugin to retrieve the Google ID token,
   // then hand it off to the existing Firebase Web SDK via signInWithCredential().
   // This guarantees the exact same Firebase UID, security rules, and Firestore profile.
   if (isAndroidCapacitor()) {
@@ -414,19 +414,64 @@ export async function signInWithGoogle(forceRedirect = false): Promise<FirebaseU
     isGoogleAuthInProgress = true;
 
     try {
-      console.log('[Native Auth] Requesting native Google credential via @capacitor-firebase/authentication...');
+      console.log('[Native Auth] Requesting native Google credential via @capacitor-firebase/authentication (useCredentialManager: false)...');
       const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication');
-      const res = await FirebaseAuthentication.signInWithGoogle();
+      
+      let res;
+      try {
+        res = await FirebaseAuthentication.signInWithGoogle({
+          useCredentialManager: false,
+        });
+      } catch (nativeErr: any) {
+        const nativeMsg = String(nativeErr?.message || nativeErr || '').toLowerCase();
+        const nativeCode = String(nativeErr?.code || '').toLowerCase();
 
-      const idToken = res.credential?.idToken;
+        // Clean cancellation handling: user dismissed the sheet, tapped outside, or pressed back
+        if (
+          nativeMsg.includes('cancel') ||
+          nativeCode.includes('cancel') ||
+          nativeMsg.includes('16') ||
+          nativeMsg.includes('12501') ||
+          nativeMsg.includes('getcredentialcancellationexception')
+        ) {
+          console.log('[Native Auth] User cancelled native Google account selector.');
+          return null;
+        }
+
+        console.error('[Native Auth: native_google_failed] FirebaseAuthentication.signInWithGoogle failed:', nativeErr);
+        (nativeErr as any).stage = 'native_google_failed';
+        throw nativeErr;
+      }
+
+      // Explicit verification: result and credential object must exist
+      if (!res || !res.credential) {
+        console.error('[Native Auth: native_google_failed] Native Google Sign-In returned empty response or missing credential object:', res);
+        const err = new Error('Native Google Sign-In failed: no credential received from account selector.');
+        (err as any).code = 'auth/native-google-failed';
+        (err as any).stage = 'native_google_failed';
+        throw err;
+      }
+
+      // Explicit verification: idToken must exist
+      const idToken = res.credential.idToken;
       if (!idToken) {
-        console.log('[Native Auth] No ID token returned from native selector (user may have dismissed dialog).');
-        return null;
+        console.error('[Native Auth: missing_id_token] Native Google Sign-In returned credential without idToken:', res.credential);
+        const err = new Error('Native Google Sign-In failed: missing ID token in credential from Google account selector.');
+        (err as any).code = 'auth/missing-id-token';
+        (err as any).stage = 'missing_id_token';
+        throw err;
       }
 
       console.log('[Native Auth] Native Google ID token obtained. Bridging to Firebase Web SDK...');
-      const credential = GoogleAuthProvider.credential(idToken);
-      const userCredential = await signInWithCredential(auth, credential);
+      let userCredential;
+      try {
+        const credential = GoogleAuthProvider.credential(idToken);
+        userCredential = await signInWithCredential(auth, credential);
+      } catch (webCredErr: any) {
+        console.error('[Native Auth: firebase_web_credential_failed] Firebase Web SDK signInWithCredential failed:', webCredErr);
+        (webCredErr as any).stage = 'firebase_web_credential_failed';
+        throw webCredErr;
+      }
 
       try {
         const addInfo = getAdditionalUserInfo(userCredential);
@@ -443,18 +488,6 @@ export async function signInWithGoogle(forceRedirect = false): Promise<FirebaseU
       const msg = String(error?.message || error || '').toLowerCase();
       const code = String(error?.code || '').toLowerCase();
 
-      // Clean cancellation handling: user dismissed the sheet, tapped outside, or pressed back
-      if (
-        msg.includes('cancel') ||
-        code.includes('cancel') ||
-        msg.includes('16') ||
-        msg.includes('12501') ||
-        msg.includes('getcredentialcancellationexception')
-      ) {
-        console.log('[Native Auth] User cancelled native Google account selector.');
-        return null;
-      }
-
       // DEVELOPER_ERROR / Code 10 handling (missing SHA-1 or unconfigured OAuth client)
       if (msg.includes('developer_error') || msg.includes('10:') || code.includes('10')) {
         console.error(
@@ -464,6 +497,7 @@ export async function signInWithGoogle(forceRedirect = false): Promise<FirebaseU
         );
         const devErr = new Error('Google Sign-In configuration pending: Android SHA-1 certificate must be registered in Firebase Console.');
         (devErr as any).code = 'auth/developer-error-sha1-unregistered';
+        (devErr as any).stage = 'native_google_failed';
         throw devErr;
       }
 
@@ -471,10 +505,11 @@ export async function signInWithGoogle(forceRedirect = false): Promise<FirebaseU
       if (msg.includes('network') || msg.includes('offline') || msg.includes('7:')) {
         const netErr = new Error('Unable to connect to Google services. Please check your internet connection.');
         (netErr as any).code = 'auth/network-request-failed';
+        (netErr as any).stage = 'native_google_failed';
         throw netErr;
       }
 
-      console.warn('[Native Auth] Native Google Sign-In error:', error);
+      console.warn('[Native Auth] Native Google Sign-In flow error:', error);
       throw error;
     } finally {
       isGoogleAuthInProgress = false;
