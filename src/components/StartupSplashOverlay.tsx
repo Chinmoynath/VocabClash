@@ -1,37 +1,81 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { isNativeCapacitor } from '../utils/platform';
 
+interface StartupSplashOverlayProps {
+  /**
+   * Optional signal indicating that the app's initial auth check or profile
+   * restoration is ready to reveal the main arena.
+   */
+  isReady?: boolean;
+}
+
+// Module-level guard: once dismissed on Capacitor cold-start, never re-display during the session
+let hasCapacitorSplashDismissed = false;
+
 /**
- * Lightweight, zero-layout-shift splash overlay that smoothly dissolves once
- * the primary VocabClash UI has mounted and completed its initial paint.
- * On native Capacitor Android, native SplashScreen handles startup seamlessly,
- * so this overlay is bypassed to avoid duplicate loading screens.
+ * StartupSplashOverlay:
+ * 
+ * - WEB / PWA:
+ *   Always returns null immediately. The web platform renders the main VocabClash
+ *   interface instantly without any full-screen blocking splash or loading barrier.
+ *   Guest users and shared link visitors can immediately access practice, PYQs,
+ *   and articles while Firebase Auth and Firestore initialize asynchronously.
+ * 
+ * - CAPACITOR ANDROID APP:
+ *   Maintains the polished, branded startup loading experience while the native
+ *   WebView mounts and initial profile/auth resolution takes place.
+ *   Dismisses as soon as initialization is ready or via a deterministic fallback
+ *   timer (1.2s max), ensuring it can NEVER get stuck or freeze the app.
  */
-export const StartupSplashOverlay: React.FC = () => {
-  const [isVisible, setIsVisible] = useState(!isNativeCapacitor());
+export const StartupSplashOverlay: React.FC<StartupSplashOverlayProps> = ({ isReady }) => {
+  // 1. Strict Web / PWA Bypass: Never display on web browsers, PWAs, or TWAs
+  if (!isNativeCapacitor() || hasCapacitorSplashDismissed) {
+    return null;
+  }
+
+  return <CapacitorNativeSplashInner isReady={isReady} />;
+};
+
+const CapacitorNativeSplashInner: React.FC<{ isReady?: boolean }> = ({ isReady }) => {
+  const [isVisible, setIsVisible] = useState(true);
+  const dismissedRef = useRef(false);
 
   useEffect(() => {
-    if (isNativeCapacitor()) {
+    // If already dismissed, clean up immediately
+    if (dismissedRef.current || hasCapacitorSplashDismissed) {
       setIsVisible(false);
       return;
     }
 
-    // Wait for the primary arena UI and layout to settle on screen
-    let raf2: number;
-    const raf1 = requestAnimationFrame(() => {
-      raf2 = requestAnimationFrame(() => {
-        setIsVisible(false);
+    // Dismiss helper
+    const dismiss = () => {
+      if (dismissedRef.current) return;
+      dismissedRef.current = true;
+      hasCapacitorSplashDismissed = true;
+      setIsVisible(false);
+    };
+
+    // If isReady is explicitly signaled from App (e.g. cached profile loaded or auth resolved)
+    if (isReady) {
+      const raf = requestAnimationFrame(() => {
+        dismiss();
       });
-    });
+      return () => cancelAnimationFrame(raf);
+    }
+
+    // Deterministic fallback timeout (1.2s max) to guarantee the splash screen
+    // NEVER remains visible forever even if Firebase Auth or network hangs completely
+    const fallbackTimer = setTimeout(() => {
+      dismiss();
+    }, 1200);
 
     return () => {
-      cancelAnimationFrame(raf1);
-      if (raf2) cancelAnimationFrame(raf2);
+      clearTimeout(fallbackTimer);
     };
-  }, []);
+  }, [isReady]);
 
-  if (isNativeCapacitor() || !isVisible) {
+  if (!isVisible) {
     return null;
   }
 

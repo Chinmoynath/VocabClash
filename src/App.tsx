@@ -123,7 +123,6 @@ import { PublicArticlesIndex } from './components/public/PublicArticlesIndex';
 import { PublicArticleDetail } from './components/public/PublicArticleDetail';
 import { Article } from './types/article';
 import { isUserAdmin } from './services/pyqFirestoreService';
-import { StartupSplashOverlay } from './components/StartupSplashOverlay';
 import { BattleAnalyticsDashboard } from './components/admin/BattleAnalyticsDashboard';
 import { recordTabForLaunch, resolveInitialTab } from './utils/launchRoutingManager';
 import { 
@@ -513,6 +512,7 @@ export function clearUserDataOnSignOut(specificUid?: string | null) {
 
   // 1. Reset user profile, vault, subscription, streak from localStorage
   try {
+    localStorage.removeItem('vocabclash_last_active_user_uid');
     localStorage.removeItem('vocabclash_player_profile_guest');
     localStorage.removeItem(STORAGE_KEY_VAULT);
     localStorage.removeItem(STORAGE_KEY_SUBSCRIPTION);
@@ -696,14 +696,34 @@ export default function App() {
   const [player, setPlayer] = useState<PlayerProfile>(() => {
     if (typeof window !== 'undefined') {
       try {
-        // Clean up legacy localStorage keys
+        // Clean up legacy unscoped localStorage keys
         localStorage.removeItem('vocabclash_player_v1');
         localStorage.removeItem('vocabclash_player_v2');
         localStorage.removeItem('vocabclash_player_v3');
-        const saved = localStorage.getItem(STORAGE_KEY_PLAYER);
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          return sanitizeProfile(parsed);
+        localStorage.removeItem(STORAGE_KEY_PLAYER); // Remove dead legacy key
+
+        // 1. Synchronously restore last active authenticated user profile if valid
+        const lastActiveUid = localStorage.getItem('vocabclash_last_active_user_uid');
+        if (lastActiveUid && !lastActiveUid.startsWith('guest_') && lastActiveUid !== 'default_user') {
+          const userScopedRaw = localStorage.getItem(getPlayerStorageKey(lastActiveUid));
+          if (userScopedRaw) {
+            const parsed = JSON.parse(userScopedRaw);
+            if (parsed && typeof parsed.name === 'string' && parsed.name && parsed.name !== 'Govt Aspirant') {
+              return sanitizeProfile({
+                ...parsed,
+                id: lastActiveUid,
+              });
+            }
+          }
+        }
+
+        // 2. Fallback to guest profile cache if available
+        const guestRaw = localStorage.getItem(getPlayerStorageKey(null));
+        if (guestRaw) {
+          const parsed = JSON.parse(guestRaw);
+          if (parsed && typeof parsed === 'object') {
+            return sanitizeProfile(parsed);
+          }
         }
       } catch { /* ignore */ }
     }
@@ -1264,7 +1284,24 @@ export default function App() {
 
   // Listen to Firebase Auth state & sync with Google Account
   const [sessionLoaded, setSessionLoaded] = useState<boolean>(false);
-  const [isProfileReady, setIsProfileReady] = useState<boolean>(false);
+  const [isAuthResolving, setIsAuthResolving] = useState<boolean>(true);
+  const [isProfileReady, setIsProfileReady] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const lastActiveUid = localStorage.getItem('vocabclash_last_active_user_uid');
+        if (lastActiveUid && !lastActiveUid.startsWith('guest_') && lastActiveUid !== 'default_user') {
+          const cached = localStorage.getItem(getPlayerStorageKey(lastActiveUid));
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            if (parsed && typeof parsed.name === 'string' && parsed.name && parsed.name !== 'Govt Aspirant') {
+              return true;
+            }
+          }
+        }
+      } catch {}
+    }
+    return false;
+  });
 
   useEffect(() => {
     // Check if coming back from Google redirect auth
@@ -1274,6 +1311,7 @@ export default function App() {
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
+        setIsAuthResolving(false);
         console.log('[Native Auth] onAuthStateChanged user restored:', {
           uid: user.uid,
           isAnonymous: user.isAnonymous,
@@ -1612,6 +1650,7 @@ export default function App() {
         } catch (error) {
           console.warn('Session cloud data fetch failed, keeping local state safe:', error);
         } finally {
+          setIsAuthResolving(false);
           setIsSyncing(false);
           setSessionLoaded(true);
           setIsProfileReady(true);
@@ -1633,6 +1672,7 @@ export default function App() {
         previousUserUidRef.current = null;
         setCurrentUser(null);
         questionReviewScheduler.setAuthUser(null);
+        setIsAuthResolving(false);
         setIsSyncing(false);
         setSessionLoaded(true);
         setIsProfileReady(true);
@@ -1650,18 +1690,25 @@ export default function App() {
   // Save to user-scoped localStorage on change
   useEffect(() => {
     try {
-      const key = getPlayerStorageKey(currentUser?.uid || (player.id?.startsWith('guest_') ? null : player.id));
-      localStorage.setItem(key, JSON.stringify(player));
-      if (currentUser?.uid && player.id === currentUser.uid && player.name && player.name !== 'Govt Aspirant') {
-        setHeaderCache(currentUser.uid, {
-          displayName: extractCleanUserName(player.name, player.email),
-          avatar: player.avatar || '👨‍💼',
-          photoURL: player.photoURL || null,
-          level: player.level || 1,
-          rankPoints: player.rankPoints || 0,
-          tierTitle: player.tierTitle,
-          email: player.email || currentUser.email || undefined,
-        });
+      if (currentUser?.uid && !currentUser.isAnonymous) {
+        // Authenticated user: ONLY persist if player belongs to this user and is not the default guest placeholder
+        if (player.id === currentUser.uid && player.name && player.name !== 'Govt Aspirant') {
+          const key = getPlayerStorageKey(currentUser.uid);
+          localStorage.setItem(key, JSON.stringify(player));
+          setHeaderCache(currentUser.uid, {
+            displayName: extractCleanUserName(player.name, player.email),
+            avatar: player.avatar || '👨‍💼',
+            photoURL: player.photoURL || null,
+            level: player.level || 1,
+            rankPoints: player.rankPoints || 0,
+            tierTitle: player.tierTitle,
+            email: player.email || currentUser.email || undefined,
+          });
+        }
+      } else {
+        // Guest user: persist only into guest key
+        const guestKey = getPlayerStorageKey(null);
+        localStorage.setItem(guestKey, JSON.stringify(player));
       }
     } catch {}
   }, [player, currentUser]);
@@ -1799,16 +1846,35 @@ export default function App() {
             const cloudPlayed = freshCloud.player.matchesPlayed ?? 0;
             const localPlayed = currentPlayer.matchesPlayed ?? 0;
 
-            if (cloudLp !== localLp || cloudPlayed > localPlayed) {
-              console.log(`[Sync] Cloud LP: ${cloudLp}, Local LP: ${localLp}`);
+            const isCurrentPlayerStaleIdentity =
+              !currentPlayer.name ||
+              currentPlayer.name === 'Govt Aspirant' ||
+              currentPlayer.id !== currentUser.uid ||
+              (Boolean(freshCloud.player.name) && freshCloud.player.name !== 'Govt Aspirant' && currentPlayer.name !== freshCloud.player.name);
+
+            if (cloudLp !== localLp || cloudPlayed > localPlayed || isCurrentPlayerStaleIdentity) {
+              console.log(`[Sync] Reconcile trigger: Cloud LP=${cloudLp}, Local LP=${localLp}, StaleIdentity=${isCurrentPlayerStaleIdentity}`);
               const reconciledLP = Math.max(localLp, cloudLp);
               const reconciledPlayed = Math.max(localPlayed, cloudPlayed);
               const reconciledWon = Math.max(currentPlayer.matchesWon || 0, freshCloud.player.matchesWon || 0);
               const newTier = getTierFromLP(reconciledLP);
               const newTierTitle = getTierTitle(newTier);
 
+              const resolvedName = resolvePlayerName({
+                cloudName: freshCloud.player.name,
+                localName: currentPlayer.name,
+                authDisplayName: currentUser.displayName,
+                email: currentUser.email,
+              });
+
               const updated: PlayerProfile = {
                 ...currentPlayer,
+                ...freshCloud.player,
+                id: currentUser.uid,
+                name: resolvedName || currentPlayer.name || 'Govt Aspirant',
+                avatar: freshCloud.player.avatar || currentPlayer.avatar || '👨‍💼',
+                photoURL: freshCloud.player.photoURL === null ? null : (freshCloud.player.photoURL || currentUser.photoURL || currentPlayer.photoURL),
+                email: currentUser.email || freshCloud.player.email || currentPlayer.email,
                 rankPoints: reconciledLP,
                 matchesPlayed: reconciledPlayed,
                 matchesWon: reconciledWon,
@@ -1832,7 +1898,7 @@ export default function App() {
 
               setPlayer(updated);
               rankStore.updatePlayer(updated);
-              console.log(`[Sync] Reconciled LP -> ${reconciledLP}`);
+              console.log(`[Sync] Reconciled LP -> ${reconciledLP}, Name -> ${updated.name}`);
             }
           }
 
@@ -2872,30 +2938,25 @@ export default function App() {
   if (showAdminArticles) {
     if (adminArticleMode === 'editor') {
       return (
-        <>
-          <StartupSplashOverlay />
-          <ArticleEditor
-            initialArticle={editingArticle}
-            onBack={() => {
-              setAdminArticleMode('dashboard');
-              setEditingArticle(null);
-            }}
-            onSaved={() => {
-              setAdminArticleMode('dashboard');
-              setEditingArticle(null);
-            }}
-          />
-        </>
+        <ArticleEditor
+          initialArticle={editingArticle}
+          onBack={() => {
+            setAdminArticleMode('dashboard');
+            setEditingArticle(null);
+          }}
+          onSaved={() => {
+            setAdminArticleMode('dashboard');
+            setEditingArticle(null);
+          }}
+        />
       );
     }
     return (
-      <>
-        <StartupSplashOverlay />
-        <ArticlesDashboard
-          onNewArticle={() => {
-            setEditingArticle(null);
-            setAdminArticleMode('editor');
-          }}
+      <ArticlesDashboard
+        onNewArticle={() => {
+          setEditingArticle(null);
+          setAdminArticleMode('editor');
+        }}
           onEditArticle={(art) => {
             setEditingArticle(art);
             setAdminArticleMode('editor');
@@ -2915,91 +2976,82 @@ export default function App() {
           }}
           currentUserEmail={currentUser?.email || null}
         />
-      </>
-    );
+      );
   }
 
   // 2. Render Public Crawlable Article Detail Page (/articles/:slug)
   if (activeArticleSlug) {
     return (
-      <>
-        <StartupSplashOverlay />
-        <PublicArticleDetail
-          articleSlug={activeArticleSlug}
-          onNavigateHome={() => {
-            setActiveArticleSlug(null);
-            if (typeof window !== 'undefined') {
-              window.history.pushState(null, '', '/');
-            }
-            setCurrentTab('arena');
-          }}
-          onNavigateToArticles={() => {
-            setActiveArticleSlug(null);
-            setIsViewingArticlesIndex(true);
-            if (typeof window !== 'undefined') {
-              window.history.pushState(null, '', '/articles');
-            }
-          }}
-          onNavigateToSlug={(slug) => {
-            setActiveArticleSlug(slug);
-            if (typeof window !== 'undefined') {
-              window.history.pushState(null, '', `/articles/${slug}`);
-            }
-          }}
-          onStartPractice={(route) => {
-            setActiveArticleSlug(null);
-            handleStartPracticeFromArticle(route);
-          }}
-        />
-      </>
+      <PublicArticleDetail
+        articleSlug={activeArticleSlug}
+        onNavigateHome={() => {
+          setActiveArticleSlug(null);
+          if (typeof window !== 'undefined') {
+            window.history.pushState(null, '', '/');
+          }
+          setCurrentTab('arena');
+        }}
+        onNavigateToArticles={() => {
+          setActiveArticleSlug(null);
+          setIsViewingArticlesIndex(true);
+          if (typeof window !== 'undefined') {
+            window.history.pushState(null, '', '/articles');
+          }
+        }}
+        onNavigateToSlug={(slug) => {
+          setActiveArticleSlug(slug);
+          if (typeof window !== 'undefined') {
+            window.history.pushState(null, '', `/articles/${slug}`);
+          }
+        }}
+        onStartPractice={(route) => {
+          setActiveArticleSlug(null);
+          handleStartPracticeFromArticle(route);
+        }}
+      />
     );
   }
 
   // 3. Render Public Articles Index Listing (/articles)
   if (isViewingArticlesIndex) {
     return (
-      <>
-        <StartupSplashOverlay />
-        <PublicArticlesIndex
-          onSelectArticle={(slug) => {
-            setIsViewingArticlesIndex(false);
-            setActiveArticleSlug(slug);
-            if (typeof window !== 'undefined') {
-              window.history.pushState(null, '', `/articles/${slug}`);
-            }
-          }}
-          onNavigateHome={() => {
-            setIsViewingArticlesIndex(false);
-            if (typeof window !== 'undefined') {
-              window.history.pushState(null, '', '/');
-            }
-            setCurrentTab('arena');
-          }}
-          onStartPractice={(route) => {
-            setIsViewingArticlesIndex(false);
-            handleStartPracticeFromArticle(route);
-          }}
-          isAdmin={isUserAdmin(currentUser?.email)}
-          onNavigateToAdmin={() => {
-            setIsViewingArticlesIndex(false);
-            setShowAdminArticles(true);
-            setAdminArticleMode('dashboard');
-            if (typeof window !== 'undefined') {
-              window.history.pushState(null, '', '/admin/articles');
-            }
-          }}
-        />
-      </>
+      <PublicArticlesIndex
+        onSelectArticle={(slug) => {
+          setIsViewingArticlesIndex(false);
+          setActiveArticleSlug(slug);
+          if (typeof window !== 'undefined') {
+            window.history.pushState(null, '', `/articles/${slug}`);
+          }
+        }}
+        onNavigateHome={() => {
+          setIsViewingArticlesIndex(false);
+          if (typeof window !== 'undefined') {
+            window.history.pushState(null, '', '/');
+          }
+          setCurrentTab('arena');
+        }}
+        onStartPractice={(route) => {
+          setIsViewingArticlesIndex(false);
+          handleStartPracticeFromArticle(route);
+        }}
+        isAdmin={isUserAdmin(currentUser?.email)}
+        onNavigateToAdmin={() => {
+          setIsViewingArticlesIndex(false);
+          setShowAdminArticles(true);
+          setAdminArticleMode('dashboard');
+          if (typeof window !== 'undefined') {
+            window.history.pushState(null, '', '/admin/articles');
+          }
+        }}
+      />
     );
   }
 
   // 4. Render Public Crawlable SEO Page when URL matches any of the 8 SEO topic hubs
   if (activeSeoPage) {
     return (
-      <>
-        <StartupSplashOverlay />
-        <SeoPublicPage
-          pageData={activeSeoPage}
+      <SeoPublicPage
+        pageData={activeSeoPage}
           onNavigateHome={() => {
             if (typeof window !== 'undefined') {
               window.history.pushState(null, '', '/');
@@ -3029,12 +3081,13 @@ export default function App() {
             setActiveSeoSlug(slug);
           }}
         />
-      </>
-    );
+      );
   }
 
+  const isProfileLoading = (!isProfileReady || isAuthResolving) && (!player.name || player.name === 'Govt Aspirant');
+
   return (
-    <AndroidDeviceShell>
+    <AndroidDeviceShell isStartupReady={isProfileReady || !isAuthResolving}>
       {/* Desktop Navigation Sidebar (Visible only on md+ screens when not in live match) */}
       {!matchState && (
         <DesktopSidebar
@@ -3045,7 +3098,7 @@ export default function App() {
           dailyStreak={streak}
           currentUser={currentUser}
           mistakeCount={activeMistakeCount}
-          isLoadingProfile={!isProfileReady}
+          isLoadingProfile={isProfileLoading}
           onOpenProfile={() => {
             soundManager.playTap();
             setShowProfileModal(true);
@@ -3105,7 +3158,7 @@ export default function App() {
           subscription={subscription}
           dailyStreak={streak}
           soundEnabled={soundEnabled}
-          isLoadingProfile={!isProfileReady}
+          isLoadingProfile={isProfileLoading}
           onToggleSound={handleToggleSound}
           onOpenProfile={() => {
             soundManager.playTap();
@@ -3238,6 +3291,7 @@ export default function App() {
                 selectedCategory={selectedCategory}
                 selectedExam={selectedExam}
                 currentUser={currentUser}
+                isLoadingProfile={isProfileLoading}
                 isAdmin={Boolean(
                   currentUser?.email === 'Nathchinmoy777@gmail.com' ||
                   (currentUser?.email && currentUser.email.toLowerCase().includes('admin'))

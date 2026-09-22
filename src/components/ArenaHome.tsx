@@ -47,6 +47,7 @@ interface ArenaHomeProps {
   selectedExam: ExamType;
   currentUser?: FirebaseUser | null;
   isAdmin?: boolean;
+  isLoadingProfile?: boolean;
   onSelectCategory: (cat: QuestionCategory | 'mixed') => void;
   onSelectExam: (exam: ExamType) => void;
   onStartMatchmaking: (mode: '1v1_ranked' | 'quick_duel' | 'daily_challenge') => void;
@@ -74,6 +75,7 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
   selectedExam,
   currentUser,
   isAdmin = false,
+  isLoadingProfile = false,
   onSelectCategory,
   onSelectExam,
   onStartMatchmaking,
@@ -109,6 +111,7 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
             currentUser={currentUser}
             dailyStreak={dailyStreak}
             savedWords={savedWords}
+            isLoadingProfile={isLoadingProfile}
             onStartDueRevision={(dueWords) => {
               if (onStartDueRevision) {
                 onStartDueRevision(dueWords);
@@ -303,7 +306,7 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
 
 
           {/* Guest Sign-In Banner if not signed in */}
-          {!currentUser && onOpenProfile ? (
+          {!currentUser && !isLoadingProfile && onOpenProfile ? (
             <div
               onClick={() => {
                 soundManager.playTap();

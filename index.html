@@ -61,77 +61,6 @@
         min-height: 100%;
         min-height: 100dvh;
       }
-      #vc-startup-splash {
-        position: fixed;
-        inset: 0;
-        width: 100%;
-        height: 100%;
-        height: 100dvh;
-        background-color: #020617;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        z-index: 99999;
-        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        user-select: none;
-        -webkit-user-select: none;
-      }
-      .vc-splash-icon {
-        width: 68px;
-        height: 68px;
-        border-radius: 18px;
-        background: radial-gradient(circle at 30% 30%, #1e293b, #090d16);
-        border: 1px solid rgba(245, 158, 11, 0.4);
-        box-shadow: 0 12px 28px -6px rgba(0, 0, 0, 0.7), 0 0 20px rgba(245, 158, 11, 0.12);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        margin-bottom: 16px;
-      }
-      .vc-splash-title {
-        font-size: 24px;
-        font-weight: 800;
-        letter-spacing: -0.025em;
-        color: #f8fafc;
-        margin: 0 0 4px 0;
-        line-height: 1.2;
-      }
-      .vc-splash-title span {
-        color: #f59e0b;
-      }
-      .vc-splash-sub {
-        font-size: 12px;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: #64748b;
-        margin: 0 0 22px 0;
-      }
-      .vc-splash-pill {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        padding: 6px 14px;
-        border-radius: 9999px;
-        background-color: rgba(15, 23, 42, 0.85);
-        border: 1px solid rgba(51, 65, 85, 0.55);
-        font-size: 12px;
-        font-weight: 500;
-        color: #cbd5e1;
-      }
-      .vc-splash-dot {
-        width: 6px;
-        height: 6px;
-        border-radius: 9999px;
-        background-color: #f59e0b;
-        box-shadow: 0 0 8px #f59e0b;
-        animation: vcPulse 1.4s ease-in-out infinite;
-      }
-      @keyframes vcPulse {
-        0%, 100% { opacity: 0.35; transform: scale(0.9); }
-        50% { opacity: 1; transform: scale(1.15); }
-      }
     </style>
     <script>
       (function() {
@@ -209,20 +138,7 @@
     <!-- AdSense SDK is injected dynamically via adSenseService.ts on demand when ADS_ENABLED is true -->
   </head>
   <body style="background-color: #020617; margin: 0; padding: 0;">
-    <div id="root" style="background-color: #020617;">
-      <!-- Instant Zero-Delay First-Paint Startup State (rendered before JS loads) -->
-      <div id="vc-startup-splash" aria-label="Loading VocabClash">
-        <div class="vc-splash-icon">
-          <img src="/favicon.png" alt="VocabClash" width="42" height="42" style="display:block;border-radius:10px;" />
-        </div>
-        <div class="vc-splash-title">Vocab<span>Clash</span></div>
-        <div class="vc-splash-sub">Govt Exam English Arena</div>
-        <div class="vc-splash-pill">
-          <div class="vc-splash-dot"></div>
-          <span>Preparing your arena…</span>
-        </div>
-      </div>
-    </div>
+    <div id="root" style="background-color: #020617;"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

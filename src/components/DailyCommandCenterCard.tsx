@@ -18,6 +18,7 @@ interface DailyCommandCenterCardProps {
   dailyStreak: DailyStreakState;
   savedWords: SavedWord[];
   currentUser?: FirebaseUser | null;
+  isLoadingProfile?: boolean;
   onStartDueRevision: (dueWords: SavedWord[]) => void;
   onNavigateTab?: (tab: 'arena' | 'practice' | 'leaderboard' | 'mistakes' | 'ai_coach') => void;
   onStartMatchmaking?: (mode: '1v1_ranked' | 'quick_duel' | 'daily_challenge') => void;
@@ -30,6 +31,7 @@ export const DailyCommandCenterCard: React.FC<DailyCommandCenterCardProps> = ({
   dailyStreak,
   savedWords,
   currentUser,
+  isLoadingProfile = false,
   onStartDueRevision,
   onNavigateTab,
   onStartMatchmaking,
@@ -102,9 +104,13 @@ export const DailyCommandCenterCard: React.FC<DailyCommandCenterCardProps> = ({
       <div className="flex flex-col gap-2 sm:gap-2.5">
         {/* Row 1: Greeting & Next Step Badge */}
         <div className="flex items-center justify-between gap-2">
-          <h2 className="text-sm sm:text-base font-extrabold text-slate-200 truncate">
-            {summary.greeting}, <span className="text-cyan-400 font-black">{summary.userName}</span>
-          </h2>
+          {isLoadingProfile ? (
+            <div className="h-5 w-36 sm:w-44 bg-slate-800/80 rounded-md animate-pulse" />
+          ) : (
+            <h2 className="text-sm sm:text-base font-extrabold text-slate-200 truncate">
+              {summary.greeting}, <span className="text-cyan-400 font-black">{summary.userName}</span>
+            </h2>
+          )}
           <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-400 bg-cyan-950/60 border border-cyan-800/60 px-2 py-0.5 rounded-md shrink-0">
             {action.badge || 'YOUR NEXT STEP'}
           </span>
