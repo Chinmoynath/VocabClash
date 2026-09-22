@@ -1274,6 +1274,11 @@ export default function App() {
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
+        console.log('[Native Auth] onAuthStateChanged user restored:', {
+          uid: user.uid,
+          isAnonymous: user.isAnonymous,
+          providerId: user.providerData?.[0]?.providerId || 'firebase'
+        });
         const lastActiveUid = typeof window !== 'undefined' ? localStorage.getItem('vocabclash_last_active_user_uid') : null;
         const previousUid = previousUserUidRef.current;
         const priorUid = previousUid || lastActiveUid;

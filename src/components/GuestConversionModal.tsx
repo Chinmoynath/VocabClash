@@ -105,12 +105,16 @@ export const GuestConversionModal: React.FC<GuestConversionModalProps> = ({
         soundManager.playVictory();
         recordBattleSignupCompleted(user.uid, 'google');
         onSuccess(user);
+      } else if (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('vclash_auth_redirect_pending') === '1') {
+        setInfoMessage('Connecting to Google Sign-In...');
       }
     } catch (err: any) {
       console.warn('Guest Conversion Google Sign-In Error:', err);
       setErrorMessage(getFriendlyAuthErrorMessage(err));
     } finally {
-      setLoading(false);
+      if (typeof sessionStorage === 'undefined' || sessionStorage.getItem('vclash_auth_redirect_pending') !== '1') {
+        setLoading(false);
+      }
     }
   };
 

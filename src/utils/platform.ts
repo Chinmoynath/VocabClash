@@ -70,6 +70,59 @@ export function isWebBrowser(): boolean {
 }
 
 /**
+ * Returns true if running inside an Android Trusted Web Activity (TWA) or Android standalone PWA.
+ * In this environment, popup-based OAuth fails due to cross-window isolation in Chrome Custom Tabs,
+ * and redirect-based OAuth (signInWithRedirect) must be used according to Google Play / Chrome guidelines.
+ */
+export function isAndroidTWA(): boolean {
+  if (typeof window === 'undefined') return false;
+  if (isNativeCapacitor()) return false;
+
+  // 1. Check if Digital Goods API is present (injected into TWAs by Chrome Custom Tabs on Google Play)
+  if ('getDigitalGoodsService' in window && typeof (window as any).getDigitalGoodsService === 'function') {
+    try {
+      sessionStorage.setItem('vclash_is_twa', '1');
+    } catch {}
+    return true;
+  }
+
+  // 2. Check document.referrer (Android passes android-app://in.vocabclash.twa on launch)
+  try {
+    if (typeof document !== 'undefined' && document.referrer && document.referrer.includes('android-app://')) {
+      try {
+        sessionStorage.setItem('vclash_is_twa', '1');
+      } catch {}
+      return true;
+    }
+  } catch {}
+
+  // 3. Check cached session flag (survives in-page navigations & OAuth redirects)
+  try {
+    if (sessionStorage.getItem('vclash_is_twa') === '1') {
+      return true;
+    }
+  } catch {}
+
+  // 4. Android Standalone display mode (Chrome Custom Tab TWA always operates in standalone/fullscreen)
+  try {
+    const isAndroid = /android/i.test(navigator.userAgent || '');
+    const isStandalone = 
+      (typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches) ||
+      (typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: fullscreen)').matches) ||
+      (window.navigator as any).standalone === true;
+
+    if (isAndroid && isStandalone) {
+      try {
+        sessionStorage.setItem('vclash_is_twa', '1');
+      } catch {}
+      return true;
+    }
+  } catch {}
+
+  return false;
+}
+
+/**
  * Cleanup helper for Native Capacitor Android:
  * If a user migrates from the older TWA / Chrome PWA to native Capacitor,
  * this unregisters any lingering service workers and clears stale cache storage

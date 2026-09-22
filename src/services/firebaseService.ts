@@ -39,7 +39,7 @@ import {
   getDocs
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { isAndroidCapacitor } from '../utils/platform';
+import { isAndroidCapacitor, isAndroidTWA } from '../utils/platform';
 import { PlayerProfile, UserSubscription, DailyStreakState, SavedWord, QuestionCategory, ExamType } from '../types';
 import { DailyTargetState } from '../utils/dailyTargetManager';
 import { validateProperEmail } from '../utils/emailValidator';
@@ -288,6 +288,14 @@ export function getFriendlyAuthErrorMessage(error: any): string {
     return 'Native Google Sign-In is initializing for this Android app. Please use Email & Password or try again in the next build.';
   }
 
+  if (code.includes('developer-error') || message.includes('developer_error')) {
+    return 'Google Sign-In configuration check required (Code 10). Please verify Google Cloud OAuth Client ID, or sign in with Email & Password.';
+  }
+
+  if (code.includes('native-google-failed') || code.includes('missing-id-token')) {
+    return 'Google account selection could not be completed. Please try again or sign in with Email & Password.';
+  }
+
   if (code.includes('email-already-in-use') || message.includes('email-already-in-use')) {
     return 'An account with this email already exists. Please sign in instead.';
   }
@@ -401,20 +409,23 @@ export async function verifySignupOtp(email: string, otp: string): Promise<{ suc
 let isGoogleAuthInProgress = false;
 
 export async function signInWithGoogle(forceRedirect = false): Promise<FirebaseUser | null> {
+  const isCapacitor = isAndroidCapacitor();
+  console.log(`[Auth Platform] ${isCapacitor ? 'capacitor_native' : 'web'}`);
+
   // BRANCH 1: NATIVE CAPACITOR ANDROID
   // Embedded Android WebViews fail Google OAuth with 403: disallowed_useragent.
   // We use the native Google Sign-In plugin to retrieve the Google ID token,
   // then hand it off to the existing Firebase Web SDK via signInWithCredential().
   // This guarantees the exact same Firebase UID, security rules, and Firestore profile.
-  if (isAndroidCapacitor()) {
+  if (isCapacitor) {
     if (isGoogleAuthInProgress) {
       console.log('[Native Auth] Google Sign-In is already in progress in Capacitor.');
       return null;
     }
     isGoogleAuthInProgress = true;
+    console.log('[Native Auth] native sign-in started (useCredentialManager: false)');
 
     try {
-      console.log('[Native Auth] Requesting native Google credential via @capacitor-firebase/authentication (useCredentialManager: false)...');
       const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication');
       
       let res;
@@ -422,53 +433,66 @@ export async function signInWithGoogle(forceRedirect = false): Promise<FirebaseU
         res = await FirebaseAuthentication.signInWithGoogle({
           useCredentialManager: false,
         });
+        console.log('[Native Auth] native sign-in returned', {
+          resultExists: !!res,
+          credentialExists: !!res?.credential,
+          idTokenExists: !!res?.credential?.idToken,
+        });
       } catch (nativeErr: any) {
-        const nativeMsg = String(nativeErr?.message || nativeErr || '').toLowerCase();
-        const nativeCode = String(nativeErr?.code || '').toLowerCase();
+        const nativeMsg = String(nativeErr?.message || nativeErr || '');
+        const nativeCode = String(nativeErr?.code || '');
+        console.error('[Native Auth] native sign-in failed', {
+          code: nativeCode,
+          message: nativeMsg,
+        });
 
-        // Clean cancellation handling: user dismissed the sheet, tapped outside, or pressed back
-        if (
-          nativeMsg.includes('cancel') ||
-          nativeCode.includes('cancel') ||
-          nativeMsg.includes('16') ||
-          nativeMsg.includes('12501') ||
-          nativeMsg.includes('getcredentialcancellationexception')
-        ) {
+        // Accurate cancellation handling: user dismissed the sheet, tapped outside, or pressed back
+        const lowerMsg = nativeMsg.toLowerCase();
+        const lowerCode = nativeCode.toLowerCase();
+        const isCancelled = 
+          lowerMsg.includes('cancel') ||
+          lowerCode.includes('cancel') ||
+          lowerCode === '16' ||
+          /^\s*16(\s*:|$)/.test(lowerMsg) ||
+          lowerMsg.includes('12501') ||
+          lowerMsg.includes('getcredentialcancellationexception');
+
+        if (isCancelled) {
           console.log('[Native Auth] User cancelled native Google account selector.');
           return null;
         }
 
-        console.error('[Native Auth: native_google_failed] FirebaseAuthentication.signInWithGoogle failed:', nativeErr);
         (nativeErr as any).stage = 'native_google_failed';
         throw nativeErr;
       }
 
       // Explicit verification: result and credential object must exist
       if (!res || !res.credential) {
-        console.error('[Native Auth: native_google_failed] Native Google Sign-In returned empty response or missing credential object:', res);
+        console.error('[Native Auth] Native Google Sign-In returned empty response or missing credential object');
         const err = new Error('Native Google Sign-In failed: no credential received from account selector.');
         (err as any).code = 'auth/native-google-failed';
         (err as any).stage = 'native_google_failed';
         throw err;
       }
 
-      // Explicit verification: idToken must exist
+      // Explicit verification: idToken must exist (presence logged safely, never the raw token)
       const idToken = res.credential.idToken;
       if (!idToken) {
-        console.error('[Native Auth: missing_id_token] Native Google Sign-In returned credential without idToken:', res.credential);
+        console.error('[Native Auth] Native Google Sign-In returned credential without idToken');
         const err = new Error('Native Google Sign-In failed: missing ID token in credential from Google account selector.');
         (err as any).code = 'auth/missing-id-token';
         (err as any).stage = 'missing_id_token';
         throw err;
       }
 
-      console.log('[Native Auth] Native Google ID token obtained. Bridging to Firebase Web SDK...');
+      console.log('[Native Auth] Native Google account selection completed, received ID token. Bridging to Firebase Web SDK signInWithCredential...');
       let userCredential;
       try {
         const credential = GoogleAuthProvider.credential(idToken);
         userCredential = await signInWithCredential(auth, credential);
+        console.log('[Native Auth] Firebase Web SDK signInWithCredential success. User UID:', userCredential.user.uid);
       } catch (webCredErr: any) {
-        console.error('[Native Auth: firebase_web_credential_failed] Firebase Web SDK signInWithCredential failed:', webCredErr);
+        console.error('[Native Auth] Firebase Web SDK signInWithCredential failure:', webCredErr);
         (webCredErr as any).stage = 'firebase_web_credential_failed';
         throw webCredErr;
       }
@@ -482,27 +506,27 @@ export async function signInWithGoogle(forceRedirect = false): Promise<FirebaseU
         // ignore analytics tracking failure
       }
 
-      console.log('[Native Auth] Successfully authenticated with Firebase Web SDK. UID:', userCredential.user.uid);
       return userCredential.user;
     } catch (error: any) {
       const msg = String(error?.message || error || '').toLowerCase();
       const code = String(error?.code || '').toLowerCase();
 
-      // DEVELOPER_ERROR / Code 10 handling (missing SHA-1 or unconfigured OAuth client)
-      if (msg.includes('developer_error') || msg.includes('10:') || code.includes('10')) {
+      // DEVELOPER_ERROR / Code 10 handling (accurate detection)
+      const isDeveloperError = code === '10' || code === 'auth/developer-error' || msg.includes('developer_error') || /^\s*10(\s*:|$)/.test(msg);
+      if (isDeveloperError) {
         console.error(
           '[Native Auth] Google Sign-In DEVELOPER_ERROR (code 10). ' +
-          'This indicates the Android package (in.vocabclash.twa) and SHA-1 certificate fingerprint ' +
-          'are not registered in the Firebase / Google Cloud Console, or google-services.json is missing.'
+          'Verify that the OAuth 2.0 Web Client ID in strings.xml and Google Cloud Console matches the release configuration.'
         );
-        const devErr = new Error('Google Sign-In configuration pending: Android SHA-1 certificate must be registered in Firebase Console.');
-        (devErr as any).code = 'auth/developer-error-sha1-unregistered';
+        const devErr = new Error('Google Sign-In configuration error (Code 10). Please verify OAuth Client ID and package configuration, or sign in with Email & Password.');
+        (devErr as any).code = 'auth/developer-error';
         (devErr as any).stage = 'native_google_failed';
         throw devErr;
       }
 
-      // Network error
-      if (msg.includes('network') || msg.includes('offline') || msg.includes('7:')) {
+      // Network error (CommonStatusCodes.NETWORK_ERROR = 7)
+      const isNetworkError = code === '7' || /^\s*7(\s*:|$)/.test(msg) || msg.includes('network') || msg.includes('offline');
+      if (isNetworkError) {
         const netErr = new Error('Unable to connect to Google services. Please check your internet connection.');
         (netErr as any).code = 'auth/network-request-failed';
         (netErr as any).stage = 'native_google_failed';
@@ -516,20 +540,63 @@ export async function signInWithGoogle(forceRedirect = false): Promise<FirebaseU
     }
   }
 
-  // BRANCH 2: STANDARD WEB BROWSER / TWA (UNCHANGED)
+  // BRANCH 2: ANDROID TRUSTED WEB ACTIVITY (TWA) & ANDROID STANDALONE PWA
+  // In Chrome Custom Tabs (TWA container), window.open popups fail because CCT isolates
+  // the popup from the TWA opener window, causing window.opener.postMessage to fail.
+  // Google and Firebase guidelines mandate signInWithRedirect for TWAs.
+  if (isAndroidTWA() || forceRedirect) {
+    if (isGoogleAuthInProgress) {
+      console.log('[Auth: TWA] Google Sign-In is already in progress, avoiding concurrent redirect conflict.');
+      return null;
+    }
+    isGoogleAuthInProgress = true;
+    console.log('[Auth: Diagnostic] Sign-in attempt started: method = twa_redirect, provider = google.com');
+
+    try {
+      if (typeof sessionStorage !== 'undefined') {
+        try {
+          sessionStorage.setItem('vclash_auth_redirect_pending', '1');
+        } catch {}
+      }
+      const provider = createGoogleProvider();
+      await signInWithRedirect(auth, provider, browserPopupRedirectResolver);
+      return null;
+    } catch (redirectErr: any) {
+      const code = String(redirectErr?.code || '').toLowerCase();
+      const msg = String(redirectErr?.message || redirectErr || '').toLowerCase();
+      console.error('[Auth: Diagnostic] signInWithRedirect failed:', { code, message: msg });
+      throw redirectErr;
+    } finally {
+      isGoogleAuthInProgress = false;
+    }
+  }
+
+  // BRANCH 3: STANDARD WEB BROWSER (DESKTOP & MOBILE BROWSER POPUP)
   if (isGoogleAuthInProgress) {
     console.log('Google sign-in is already in progress, avoiding concurrent popup conflict.');
     return null;
   }
   isGoogleAuthInProgress = true;
+  console.log('[Auth: Diagnostic] Sign-in attempt started: method = web_popup, provider = google.com');
 
   try {
     const provider = createGoogleProvider();
-    if (forceRedirect) {
-      await signInWithRedirect(auth, provider, browserPopupRedirectResolver);
-      return null;
+    let result;
+    try {
+      result = await signInWithPopup(auth, provider, browserPopupRedirectResolver);
+    } catch (popupErr: any) {
+      const pCode = String(popupErr?.code || '').toLowerCase();
+      const pMsg = String(popupErr?.message || popupErr || '').toLowerCase();
+
+      // If popup is blocked by browser, automatically fall back to signInWithRedirect
+      if (pCode.includes('popup-blocked') || pMsg.includes('popup-blocked')) {
+        console.log('[Auth: Diagnostic] Popup blocked by browser. Automatically falling back to signInWithRedirect...');
+        await signInWithRedirect(auth, provider, browserPopupRedirectResolver);
+        return null;
+      }
+      throw popupErr;
     }
-    const result = await signInWithPopup(auth, provider, browserPopupRedirectResolver);
+
     try {
       const addInfo = getAdditionalUserInfo(result);
       if (addInfo?.isNewUser) {
@@ -538,6 +605,7 @@ export async function signInWithGoogle(forceRedirect = false): Promise<FirebaseU
     } catch {
       // ignore
     }
+    console.log('[Auth: Diagnostic] Web popup sign-in completed successfully! User UID:', result.user.uid);
     return result.user;
   } catch (error: any) {
     const code = String(error?.code || '').toLowerCase();
@@ -550,7 +618,7 @@ export async function signInWithGoogle(forceRedirect = false): Promise<FirebaseU
       code.includes('popup-closed-by-user') || 
       msg.includes('popup-closed-by-user')
     ) {
-      console.log('Google Sign-In popup was closed or cancelled by user.');
+      console.log('[Auth: Diagnostic] Google Sign-In popup was closed or cancelled by user.');
       return null;
     }
 
@@ -567,13 +635,14 @@ export async function signInWithGoogle(forceRedirect = false): Promise<FirebaseU
         } catch {
           // ignore
         }
+        console.log('[Auth: Diagnostic] Retry popup sign-in completed successfully! User UID:', retryResult.user.uid);
         return retryResult.user;
       } catch (retryErr) {
         console.warn('Retry after database closing error failed:', retryErr);
         throw retryErr;
       }
     }
-    console.warn('Google Sign-In notice:', error);
+    console.warn('[Auth: Diagnostic] Google Sign-In error:', { code, message: msg });
     throw error;
   } finally {
     isGoogleAuthInProgress = false;
@@ -598,8 +667,15 @@ export async function checkRedirectAuthResult(): Promise<FirebaseUser | null> {
     return null;
   }
   try {
+    console.log('[Auth: Diagnostic] Checking redirect auth result via getRedirectResult...');
     const res = await getRedirectResult(auth, browserPopupRedirectResolver);
+    if (typeof sessionStorage !== 'undefined') {
+      try {
+        sessionStorage.removeItem('vclash_auth_redirect_pending');
+      } catch {}
+    }
     if (res?.user) {
+      console.log('[Auth: Diagnostic] getRedirectResult completed successfully! Authenticated User UID:', res.user.uid);
       try {
         const addInfo = getAdditionalUserInfo(res);
         if (addInfo?.isNewUser) {
@@ -608,10 +684,20 @@ export async function checkRedirectAuthResult(): Promise<FirebaseUser | null> {
       } catch {
         // ignore
       }
+      return res.user;
+    } else {
+      console.log('[Auth: Diagnostic] getRedirectResult returned null (no pending redirect callback).');
     }
-    return res?.user || null;
+    return null;
   } catch (err: any) {
-    console.warn('getRedirectResult check:', err);
+    if (typeof sessionStorage !== 'undefined') {
+      try {
+        sessionStorage.removeItem('vclash_auth_redirect_pending');
+      } catch {}
+    }
+    const code = String(err?.code || '').toLowerCase();
+    const msg = String(err?.message || err || '').toLowerCase();
+    console.error('[Auth: Diagnostic] getRedirectResult error:', { code, message: msg });
     return null;
   }
 }

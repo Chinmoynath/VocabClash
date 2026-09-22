@@ -195,12 +195,16 @@ export const FriendLobbyModal: React.FC<FriendLobbyModalProps> = ({
         if (onUserChange) {
           onUserChange(user);
         }
+      } else if (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('vclash_auth_redirect_pending') === '1') {
+        setAuthSuccessMessage('Connecting to Google Sign-In...');
       }
     } catch (err: any) {
       console.error('Friend Lobby Sign-In Error:', err);
       setAuthError(getFriendlyAuthErrorMessage(err));
     } finally {
-      setIsSigningIn(false);
+      if (typeof sessionStorage === 'undefined' || sessionStorage.getItem('vclash_auth_redirect_pending') !== '1') {
+        setIsSigningIn(false);
+      }
     }
   };
 

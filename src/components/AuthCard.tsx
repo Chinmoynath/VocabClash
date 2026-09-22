@@ -83,23 +83,16 @@ export const AuthCard: React.FC<AuthCardProps> = ({
         if (onSuccessClose) {
           setTimeout(onSuccessClose, 1000);
         }
+      } else if (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('vclash_auth_redirect_pending') === '1') {
+        setSuccessMsg('Connecting to Google Sign-In...');
       }
     } catch (err: any) {
-      const code = String(err?.code || '').toLowerCase();
-      const msg = String(err?.message || err || '').toLowerCase();
-      if (
-        code.includes('cancelled-popup-request') || 
-        msg.includes('cancelled-popup-request') ||
-        code.includes('popup-closed-by-user') || 
-        msg.includes('popup-closed-by-user')
-      ) {
-        // User closed or dismissed popup, no error needed
-        return;
-      }
       console.warn('Google Sign-In notice:', err);
       setErrorMsg(getFriendlyAuthErrorMessage(err));
     } finally {
-      setLoading(false);
+      if (typeof sessionStorage === 'undefined' || sessionStorage.getItem('vclash_auth_redirect_pending') !== '1') {
+        setLoading(false);
+      }
     }
   };
 
