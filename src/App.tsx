@@ -1526,6 +1526,12 @@ export default function App() {
             setStreak(mergedStreak);
             saveStreakState(mergedStreak, user.uid);
 
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('daily-challenge-updated'));
+              window.dispatchEvent(new CustomEvent('user-stats-updated'));
+              window.dispatchEvent(new CustomEvent('daily-target-updated'));
+            }
+
             // Asynchronously write clean repaired data back to Firestore in background without blocking UI
             saveUserDataToFirestore(
               user.uid,

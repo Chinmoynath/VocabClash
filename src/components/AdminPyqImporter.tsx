@@ -4,6 +4,7 @@ import {
   Upload, 
   CheckCircle2, 
   AlertTriangle, 
+  AlertCircle,
   XCircle, 
   Edit3, 
   Check, 
@@ -155,6 +156,7 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
     batchInfo?: ImportBatch;
   } | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [publishProgress, setPublishProgress] = useState<{ current: number; total: number; stage: string } | null>(null);
 
   // Health Diagnostics State
   const [healthData, setHealthData] = useState(() => questionBankEngine.getCloudVsRuntimeCounts());
@@ -614,34 +616,77 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
             publishedCount: approved.length
           };
 
-      const firestoreResult = await publishApprovedQuestionsToFirestore(
-        batchMetadata,
-        finalQuestionsToPublish
-      );
-
-      // Register immediately into runtime QuestionBankEngine
-      const registerResult = questionBankEngine.registerApprovedQuestions(finalQuestionsToPublish, true);
-
-      setImportSummary({
-        totalInput: ((currentBatch as any)?.totalQuestionsInFile || extractedQuestions.length + skippedItems.length),
-        eligibleCount: extractedQuestions.length,
-        skippedCount: skippedItems.length,
-        publishedCount: firestoreResult.publishedCount,
-        totalApproved: approved.length,
-        mergedCount: registerResult.mergedCount,
-        addedCount: registerResult.addedCount,
-        rejectedCount: extractedQuestions.filter(q => q.reviewStatus === 'rejected').length,
-        isQuotaExhausted: firestoreResult.isQuotaExhausted || false,
-        isCloudSynced: firestoreResult.success,
-        exportQuestions: finalQuestionsToPublish,
-        batchInfo: batchMetadata,
+      setPublishProgress({
+        current: 0,
+        total: finalQuestionsToPublish.length,
+        stage: 'Connecting to Firestore cloud database...'
       });
 
-      setHealthData(questionBankEngine.getCloudVsRuntimeCounts());
+      const firestoreResult = await publishApprovedQuestionsToFirestore(
+        batchMetadata,
+        finalQuestionsToPublish,
+        undefined,
+        (progress) => {
+          setPublishProgress(progress);
+        }
+      );
+
+      if (firestoreResult.success || firestoreResult.publishedCount > 0) {
+        // Register published items immediately into runtime QuestionBankEngine
+        const registeredList = finalQuestionsToPublish.slice(0, firestoreResult.publishedCount);
+        const registerResult = questionBankEngine.registerApprovedQuestions(registeredList.length > 0 ? registeredList : finalQuestionsToPublish, true);
+
+        // Synchronize with cloud question bank so cache is updated
+        questionBankEngine.refreshFromFirestore(true).then(() => {
+          setHealthData(questionBankEngine.getCloudVsRuntimeCounts());
+        }).catch(syncErr => {
+          console.warn('Background QuestionBank sync warning:', syncErr);
+        });
+
+        setImportSummary({
+          totalInput: ((currentBatch as any)?.totalQuestionsInFile || extractedQuestions.length + skippedItems.length),
+          eligibleCount: extractedQuestions.length,
+          skippedCount: skippedItems.length,
+          publishedCount: firestoreResult.publishedCount,
+          totalApproved: approved.length,
+          mergedCount: registerResult.mergedCount,
+          addedCount: registerResult.addedCount,
+          rejectedCount: extractedQuestions.filter(q => q.reviewStatus === 'rejected').length,
+          isQuotaExhausted: firestoreResult.isQuotaExhausted || false,
+          isCloudSynced: firestoreResult.success,
+          exportQuestions: finalQuestionsToPublish,
+          batchInfo: batchMetadata,
+        });
+
+        setHealthData(questionBankEngine.getCloudVsRuntimeCounts());
+        if (firestoreResult.success) {
+          setErrorMessage(null);
+        } else {
+          setErrorMessage(`${firestoreResult.publishedCount} of ${finalQuestionsToPublish.length} questions published. Remaining failed: ${firestoreResult.error || 'Check network and retry.'}`);
+        }
+      } else {
+        setErrorMessage(firestoreResult.error || 'Failed to publish questions to Firestore. Please verify internet connection and retry.');
+        setImportSummary({
+          totalInput: ((currentBatch as any)?.totalQuestionsInFile || extractedQuestions.length + skippedItems.length),
+          eligibleCount: extractedQuestions.length,
+          skippedCount: skippedItems.length,
+          publishedCount: 0,
+          totalApproved: approved.length,
+          mergedCount: 0,
+          addedCount: 0,
+          rejectedCount: extractedQuestions.filter(q => q.reviewStatus === 'rejected').length,
+          isQuotaExhausted: firestoreResult.isQuotaExhausted || false,
+          isCloudSynced: false,
+          exportQuestions: finalQuestionsToPublish,
+          batchInfo: batchMetadata,
+        });
+      }
     } catch (err: any) {
-      setErrorMessage(err?.message || 'Publishing completed with local caching.');
+      console.error('Final publish error:', err);
+      setErrorMessage(err?.message || 'Publishing failed. Check network connection or permissions.');
     } finally {
       setIsPublishing(false);
+      setPublishProgress(null);
     }
   };
 
@@ -1346,60 +1391,123 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
             </div>
 
             {/* Step 2: Extraction Batch Summary & Controls */}
-            {(extractedQuestions.length > 0 || skippedItems.length > 0) && (
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-5">
-                <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
-                  <div>
-                    <h2 className="text-base font-bold text-white flex items-center gap-2">
-                      <Layers className="w-5 h-5 text-amber-400" />
-                      2. Review Queue ({extractedQuestions.length} Eligible, {skippedItems.length} Skipped)
-                    </h2>
-                    <p className="text-xs text-slate-400">
-                      Review educational learning data and approve eligible vocabulary questions before publishing.
-                    </p>
+            {(extractedQuestions.length > 0 || skippedItems.length > 0) && (() => {
+              const aiEnrichedCount = extractedQuestions.filter(q => !isFallbackEnrichment(q) && Boolean(q.meaning && q.hindiMeaning && q.optionDetails?.length === 4)).length;
+              const fallbackCount = extractedQuestions.filter(q => isFallbackEnrichment(q)).length;
+              const pendingCount = extractedQuestions.filter(q => (!q.meaning || !q.hindiMeaning || !q.optionDetails || q.optionDetails.length === 0) && !isFallbackEnrichment(q)).length;
+              const totalNeedAi = fallbackCount + pendingCount;
+
+              return (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-5">
+                  <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
+                    <div>
+                      <h2 className="text-base font-bold text-white flex items-center gap-2">
+                        <Layers className="w-5 h-5 text-amber-400" />
+                        2. Review Queue ({extractedQuestions.length} Eligible, {skippedItems.length} Skipped)
+                      </h2>
+                      <p className="text-xs text-slate-400">
+                        Review educational learning data and approve eligible vocabulary questions before publishing.
+                      </p>
+                      
+                      <div className="flex items-center gap-2 mt-2 flex-wrap">
+                        <span className="text-xs bg-emerald-500/20 text-emerald-300 px-2.5 py-1 rounded-lg font-bold border border-emerald-500/30 flex items-center gap-1.5">
+                          <Sparkles className="w-3.5 h-3.5" /> AI Enriched: {aiEnrichedCount}
+                        </span>
+                        <span className="text-xs bg-amber-500/20 text-amber-300 px-2.5 py-1 rounded-lg font-bold border border-amber-500/30 flex items-center gap-1.5">
+                          <AlertTriangle className="w-3.5 h-3.5 text-amber-400" /> Template Fallbacks: {fallbackCount}
+                        </span>
+                        {pendingCount > 0 && (
+                          <span className="text-xs bg-slate-800 text-slate-400 px-2.5 py-1 rounded-lg font-medium border border-slate-700 flex items-center gap-1.5">
+                            Pending: {pendingCount}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        onClick={() => handleEnrichBatch(undefined, false)}
+                        disabled={isEnriching || extractedQuestions.length === 0}
+                        className="px-3.5 py-2 bg-gradient-to-r from-purple-500/20 to-indigo-500/20 border border-purple-500/40 hover:bg-purple-500/30 text-purple-200 text-xs font-bold rounded-xl flex items-center gap-1.5 transition disabled:opacity-50"
+                        title="AI Auto-Enrich Hindi meanings, Mnemonics & 4-Option Details"
+                      >
+                        <Sparkles className={`w-4 h-4 text-purple-400 ${isEnriching ? 'animate-spin' : ''}`} />
+                        {isEnriching 
+                          ? 'Enriching Learning Data...' 
+                          : `Auto-Enrich Batch (${totalNeedAi} need AI)`}
+                      </button>
+
+                      <button
+                        onClick={() => handleEnrichBatch(undefined, true)}
+                        disabled={isEnriching || extractedQuestions.length === 0}
+                        className="px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs font-bold rounded-xl flex items-center gap-1.5 transition disabled:opacity-50"
+                        title="Force Gemini AI to re-generate educational content for all questions, replacing any template fallbacks"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 text-purple-400 ${isEnriching ? 'animate-spin' : ''}`} />
+                        Force Re-Enrich All
+                      </button>
+
+                      <button
+                        onClick={handleApproveAllValid}
+                        className="px-3.5 py-2 bg-emerald-500/20 border border-emerald-500/40 hover:bg-emerald-500/30 text-emerald-300 text-xs font-bold rounded-xl flex items-center gap-1.5 transition"
+                      >
+                        <CheckCircle2 className="w-4 h-4" />
+                        Approve All Valid ({extractedQuestions.filter(q => q.correctIndex !== null && q.reviewStatus !== 'duplicate').length})
+                      </button>
+
+                      <button
+                        onClick={handleFinalPublish}
+                        disabled={isPublishing || extractedQuestions.filter(q => q.reviewStatus === 'approved').length === 0}
+                        className="px-5 py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-extrabold text-xs rounded-xl shadow-lg shadow-amber-500/20 flex items-center gap-2 transition"
+                      >
+                        <CloudUpload className={`w-4 h-4 ${isPublishing ? 'animate-spin' : ''}`} />
+                        {isPublishing
+                          ? (publishProgress ? `Publishing (${publishProgress.current}/${publishProgress.total})...` : 'Publishing to Cloud...')
+                          : `Publish to Firestore Question Bank (${extractedQuestions.filter(q => q.reviewStatus === 'approved').length})`
+                        }
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <button
-                      onClick={() => handleEnrichBatch(undefined, false)}
-                      disabled={isEnriching || extractedQuestions.length === 0}
-                      className="px-3.5 py-2 bg-gradient-to-r from-purple-500/20 to-indigo-500/20 border border-purple-500/40 hover:bg-purple-500/30 text-purple-200 text-xs font-bold rounded-xl flex items-center gap-1.5 transition disabled:opacity-50"
-                      title="AI Auto-Enrich Hindi meanings, Mnemonics & 4-Option Details"
-                    >
-                      <Sparkles className={`w-4 h-4 text-purple-400 ${isEnriching ? 'animate-spin' : ''}`} />
-                      {isEnriching 
-                        ? 'Enriching Learning Data...' 
-                        : `Auto-Enrich Batch (${extractedQuestions.filter(q => needsEnrichment(q)).length} need AI)`}
-                    </button>
+                {/* Cloud Publishing Live Progress Bar */}
+                {isPublishing && publishProgress && (
+                  <div className="bg-amber-950/40 border border-amber-500/30 rounded-xl p-3.5 space-y-2 animate-fadeIn">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-bold text-amber-200 flex items-center gap-2">
+                        <CloudUpload className="w-4 h-4 text-amber-400 animate-spin" />
+                        {publishProgress.stage}
+                      </span>
+                      <span className="font-mono text-amber-300 font-bold">
+                        {publishProgress.current} / {publishProgress.total} Questions ({Math.round((publishProgress.current / (publishProgress.total || 1)) * 100)}%)
+                      </span>
+                    </div>
+                    <div className="w-full bg-slate-950 rounded-full h-2 overflow-hidden border border-amber-500/20">
+                      <div 
+                        className="bg-gradient-to-r from-amber-500 to-orange-400 h-full transition-all duration-300 rounded-full"
+                        style={{ width: `${Math.round((publishProgress.current / (publishProgress.total || 1)) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
 
+                {/* Section 2 In-Place Notification / Error Banner */}
+                {errorMessage && (
+                  <div className="bg-rose-950/70 border border-rose-500/50 rounded-xl p-3.5 flex items-start justify-between gap-3 text-rose-200 text-xs shadow-lg animate-fadeIn">
+                    <div className="flex items-start gap-2.5">
+                      <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-bold text-rose-100">Publish Notification</p>
+                        <p className="text-rose-200/90 mt-0.5">{errorMessage}</p>
+                      </div>
+                    </div>
                     <button
-                      onClick={() => handleEnrichBatch(undefined, true)}
-                      disabled={isEnriching || extractedQuestions.length === 0}
-                      className="px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs font-bold rounded-xl flex items-center gap-1.5 transition disabled:opacity-50"
-                      title="Force Gemini AI to re-generate educational content for all questions, replacing any template fallbacks"
+                      onClick={() => setErrorMessage(null)}
+                      className="text-rose-400 hover:text-rose-200 text-xs font-semibold px-2 py-0.5 rounded hover:bg-rose-900/50"
                     >
-                      <RefreshCw className={`w-3.5 h-3.5 text-purple-400 ${isEnriching ? 'animate-spin' : ''}`} />
-                      Force Re-Enrich All
-                    </button>
-
-                    <button
-                      onClick={handleApproveAllValid}
-                      className="px-3.5 py-2 bg-emerald-500/20 border border-emerald-500/40 hover:bg-emerald-500/30 text-emerald-300 text-xs font-bold rounded-xl flex items-center gap-1.5 transition"
-                    >
-                      <CheckCircle2 className="w-4 h-4" />
-                      Approve All Valid ({extractedQuestions.filter(q => q.correctIndex !== null && q.reviewStatus !== 'duplicate').length})
-                    </button>
-
-                    <button
-                      onClick={handleFinalPublish}
-                      disabled={isPublishing || extractedQuestions.filter(q => q.reviewStatus === 'approved').length === 0}
-                      className="px-5 py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-extrabold text-xs rounded-xl shadow-lg shadow-amber-500/20 flex items-center gap-2 transition"
-                    >
-                      <CloudUpload className={`w-4 h-4 ${isPublishing ? 'animate-spin' : ''}`} />
-                      Publish to Firestore Question Bank ({extractedQuestions.filter(q => q.reviewStatus === 'approved').length})
+                      Dismiss
                     </button>
                   </div>
-                </div>
+                )}
 
                 {/* Enrichment Live Progress Bar */}
                 {isEnriching && enrichProgress && (
@@ -1850,7 +1958,8 @@ export const AdminPyqImporter: React.FC<AdminPyqImporterProps> = ({ userEmail, o
                   </div>
                 )}
               </div>
-            )}
+            );
+          })()}
           </div>
         )}
 

@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { X, Save, AlertTriangle, CheckCircle2, BookOpen } from 'lucide-react';
+import { X, Save, AlertTriangle, BookOpen, Sparkles, UploadCloud, RefreshCw } from 'lucide-react';
 import { Question } from '../types';
 import { normalizeText } from '../services/pyqQualityValidator';
+import { enrichSingleQuestion } from '../services/pyqEnrichmentService';
 
 interface AdminQuestionEditModalProps {
   question: Question;
-  onSave: (updatedFields: Partial<Question>) => Promise<void>;
+  onSave: (updatedFields: Partial<Question>, pushDirectly?: boolean) => Promise<void>;
   onClose: () => void;
   isSaving: boolean;
 }
@@ -34,7 +35,11 @@ export const AdminQuestionEditModal: React.FC<AdminQuestionEditModalProps> = ({
   const [meaning, setMeaning] = useState<string>(question.meaning || '');
   const [hindiMeaning, setHindiMeaning] = useState<string>(question.hindiMeaning || '');
   const [explanation, setExplanation] = useState<string>(question.explanation || '');
+  const [mnemonic, setMnemonic] = useState<string>(question.mnemonic || '');
+  const [exampleSentence, setExampleSentence] = useState<string>(question.exampleSentence || '');
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [isEnriching, setIsEnriching] = useState<boolean>(false);
+  const [enrichSuccess, setEnrichSuccess] = useState<string | null>(null);
 
   const handleOptionChange = (index: number, val: string) => {
     const next = [...options];
@@ -42,7 +47,37 @@ export const AdminQuestionEditModal: React.FC<AdminQuestionEditModalProps> = ({
     setOptions(next);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleAutoEnrich = async () => {
+    try {
+      setIsEnriching(true);
+      setValidationError(null);
+      setEnrichSuccess(null);
+
+      const draftQuestion = {
+        ...question,
+        wordOrPhrase: wordOrPhrase.trim() || question.wordOrPhrase,
+        options,
+        correctIndex,
+        instruction,
+      };
+
+      const enriched = await enrichSingleQuestion(draftQuestion as any, true);
+
+      if (enriched.meaning) setMeaning(enriched.meaning);
+      if (enriched.hindiMeaning) setHindiMeaning(enriched.hindiMeaning);
+      if (enriched.explanation) setExplanation(enriched.explanation);
+      if (enriched.mnemonic) setMnemonic(enriched.mnemonic);
+      if (enriched.exampleSentence) setExampleSentence(enriched.exampleSentence);
+
+      setEnrichSuccess('✨ Auto-enrichment successful! Meanings, Hindi definition, and rationale populated.');
+    } catch (err: any) {
+      setValidationError(`Enrichment error: ${err?.message || 'Could not enrich with AI'}`);
+    } finally {
+      setIsEnriching(false);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent, pushDirectly: boolean = false) => {
     e.preventDefault();
     setValidationError(null);
 
@@ -83,7 +118,9 @@ export const AdminQuestionEditModal: React.FC<AdminQuestionEditModalProps> = ({
       meaning: meaning.trim(),
       hindiMeaning: hindiMeaning.trim(),
       explanation: explanation.trim(),
-    });
+      mnemonic: mnemonic.trim(),
+      exampleSentence: exampleSentence.trim(),
+    }, pushDirectly);
   };
 
   return (
@@ -92,9 +129,25 @@ export const AdminQuestionEditModal: React.FC<AdminQuestionEditModalProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-800 pb-3">
           <div>
-            <span className="text-xs uppercase tracking-wider font-semibold text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/60">
-              Safe Manual Edit
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs uppercase tracking-wider font-semibold text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/60">
+                Safe Question Edit
+              </span>
+              <button
+                type="button"
+                onClick={handleAutoEnrich}
+                disabled={isEnriching}
+                className="px-2.5 py-0.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs rounded-full flex items-center gap-1.5 shadow transition disabled:opacity-50"
+                title="Automatically generate English/Hindi meanings, explanation, and mnemonics using AI"
+              >
+                {isEnriching ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                )}
+                <span>{isEnriching ? 'Enriching with AI...' : 'Auto-Enrich with AI'}</span>
+              </button>
+            </div>
             <h3 className="text-lg font-bold text-slate-100 mt-1 flex items-center gap-2">
               <BookOpen className="w-5 h-5 text-emerald-400" />
               Edit PYQ Record ({question.category.toUpperCase()})
@@ -111,6 +164,13 @@ export const AdminQuestionEditModal: React.FC<AdminQuestionEditModalProps> = ({
           </button>
         </div>
 
+        {enrichSuccess && (
+          <div className="p-3 bg-purple-950/60 border border-purple-800/80 rounded-xl text-purple-200 text-xs flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-purple-400 shrink-0" />
+            <span>{enrichSuccess}</span>
+          </div>
+        )}
+
         {validationError && (
           <div className="p-3 bg-rose-950/60 border border-rose-800/80 rounded-xl text-rose-200 text-xs flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
@@ -118,7 +178,7 @@ export const AdminQuestionEditModal: React.FC<AdminQuestionEditModalProps> = ({
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4 text-sm">
+        <form onSubmit={(e) => handleSubmit(e, false)} className="space-y-4 text-sm">
           {/* Instruction */}
           <div>
             <label className="block text-xs font-semibold text-slate-300 mb-1">
@@ -231,8 +291,36 @@ export const AdminQuestionEditModal: React.FC<AdminQuestionEditModalProps> = ({
             />
           </div>
 
+          {/* Mnemonic & Example */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">
+                Mnemonic / Memory Trick (Optional)
+              </label>
+              <input
+                type="text"
+                value={mnemonic}
+                onChange={e => setMnemonic(e.target.value)}
+                placeholder="e.g. Abhor = hear horror..."
+                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 outline-none focus:ring-1 focus:ring-emerald-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">
+                Example Sentence (Optional)
+              </label>
+              <input
+                type="text"
+                value={exampleSentence}
+                onChange={e => setExampleSentence(e.target.value)}
+                placeholder="e.g. He abhors all forms of cruelty."
+                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 outline-none focus:ring-1 focus:ring-emerald-500"
+              />
+            </div>
+          </div>
+
           {/* Buttons */}
-          <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-800">
             <button
               type="button"
               onClick={onClose}
@@ -240,23 +328,35 @@ export const AdminQuestionEditModal: React.FC<AdminQuestionEditModalProps> = ({
             >
               Cancel
             </button>
-            <button
-              type="submit"
-              disabled={isSaving}
-              className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl flex items-center gap-2 shadow-lg shadow-emerald-950 transition-all"
-            >
-              {isSaving ? (
-                <>
-                  <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  Saving to Firestore...
-                </>
-              ) : (
-                <>
-                  <Save className="w-4 h-4" />
-                  Save Changes
-                </>
-              )}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="submit"
+                disabled={isSaving}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 font-bold text-xs rounded-xl flex items-center gap-2 border border-slate-600 transition-all"
+              >
+                <Save className="w-4 h-4 text-emerald-400" />
+                <span>Save Locally</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={(e) => handleSubmit(e, true)}
+                disabled={isSaving}
+                className="px-5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl flex items-center gap-2 shadow-lg shadow-emerald-950 transition-all"
+              >
+                {isSaving ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Pushing to Firestore...
+                  </>
+                ) : (
+                  <>
+                    <UploadCloud className="w-4 h-4" />
+                    <span>Save & Push to Firestore</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </form>
       </div>

@@ -1,3 +1,5 @@
+import { Question } from './index';
+
 export type QualityStatus = 'valid' | 'suspicious' | 'critical';
 
 export type QualityIssueCode =
@@ -36,6 +38,7 @@ export interface UserQuestionReport {
   userName?: string;
   reportedAt: number;
   status: 'open' | 'reviewed' | 'dismissed' | 'resolved';
+  questionData?: Question;
 }
 
 export interface QualityAuditStats {

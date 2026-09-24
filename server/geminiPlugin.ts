@@ -115,7 +115,7 @@ Respond strictly with a JSON object in this exact schema without markdown format
 
               try {
                 const response = await ai.models.generateContent({
-                  model: 'gemini-3.1-flash-lite',
+                  model: 'gemini-3.5-flash-lite',
                   contents: prompt,
                   config: {
                     responseMimeType: 'application/json',

@@ -230,4 +230,70 @@ export const IDIOM_MASTER_EXTENDED: IdiomEntry[] = [
       'A tendency to ruin everything one touches'
     ],
   },
+  {
+    idiom: 'Be hard up',
+    meaning: 'To have very little money; experiencing severe financial difficulty or shortage of funds',
+    hindi: 'अत्यधिक आर्थिक तंगी में होना / पैसे की भारी किल्लत होना / कंगाली की स्थिति',
+    example: 'After the unexpected economic downturn, the startup founder found himself hard up and had to seek emergency loans.',
+    origin: 'Nautical term describing a ship\'s helm turned all the way (hard up) against the wind in severe storm distress.',
+    repeats: 25,
+    distractors: [
+      'Find it very difficult to wake up early',
+      'Unable to calculate numerical data',
+      'Have difficulty in climbing stairs'
+    ],
+  },
+  {
+    idiom: 'Hard up',
+    meaning: 'Having very little money; in financial need or distress',
+    hindi: 'आर्थिक तंगी में / पैसे की कमी से जूझना',
+    example: 'He was so hard up that he could scarcely afford two square meals a day.',
+    origin: 'Old 19th-century British slang for extreme poverty and financial destitution.',
+    repeats: 22,
+    distractors: [
+      'Physically exhausted from manual labor',
+      'Living in a high-rise building',
+      'Having strong social connections'
+    ],
+  },
+  {
+    idiom: 'At the eleventh hour',
+    meaning: 'At the very last possible moment; almost too late',
+    hindi: 'अंतिम क्षण में / बिल्कुल आखिरी वक्त पर',
+    example: 'The government rolled back the controversial policy at the eleventh hour following widespread protests.',
+    origin: 'Biblical parable of laborers hired at the eleventh hour of a twelve-hour workday.',
+    repeats: 28,
+    distractors: [
+      'Exactly at 11 o\'clock at night',
+      'Early in the morning during dawn',
+      'After an unacceptably long delay'
+    ],
+  },
+  {
+    idiom: 'Under the weather',
+    meaning: 'Feeling slightly unwell, sick, or indisposed',
+    hindi: 'तबीयत खराब होना / अस्वस्थ महसूस करना',
+    example: 'She could not attend the general awareness lecture as she was feeling a bit under the weather.',
+    origin: 'Maritime tradition where sick sailors went below deck to escape bad weather on open seas.',
+    repeats: 27,
+    distractors: [
+      'Caught outside in torrential rain',
+      'Suffering from acute depression',
+      'Travelling to an unfamiliar climate'
+    ],
+  },
+  {
+    idiom: 'A blessing in disguise',
+    meaning: 'An apparent misfortune that eventually results in something unexpectedly good',
+    hindi: 'छुपा हुआ वरदान / दुख के वेश में सुख',
+    example: 'Failing the prelims in his first attempt was a blessing in disguise as it taught him disciplined time management.',
+    origin: '18th-century poetic expression regarding divine providence disguised as trials.',
+    repeats: 24,
+    distractors: [
+      'A curse delivered by a holy person',
+      'A miraculous discovery in nature',
+      'A fraudulent gift from a stranger'
+    ],
+  },
 ];
+

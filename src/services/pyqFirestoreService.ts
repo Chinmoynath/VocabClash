@@ -43,9 +43,9 @@ export function sanitizeForFirestore<T>(data: T): T {
   if (Array.isArray(data)) {
     return data.map(item => sanitizeForFirestore(item)) as unknown as T;
   }
-  if (typeof data === 'object' && data.constructor === Object) {
+  if (typeof data === 'object' && data !== null) {
     const cleaned: Record<string, any> = {};
-    for (const [key, value] of Object.entries(data)) {
+    for (const [key, value] of Object.entries(data as Record<string, any>)) {
       if (value !== undefined) {
         cleaned[key] = sanitizeForFirestore(value);
       }
@@ -241,6 +241,25 @@ export async function recordAnswerConflicts(
   }
 }
 
+const FIRESTORE_WRITE_TIMEOUT_MS = 45000;
+
+function withFirestoreTimeout<T>(promise: Promise<T>, timeoutMs: number, operationLabel: string): Promise<T> {
+  let timeoutHandle: any;
+  const timeoutPromise = new Promise<T>((_, reject) => {
+    timeoutHandle = setTimeout(
+      () => reject(new Error(`Timeout: ${operationLabel} took longer than ${timeoutMs / 1000}s. Please check your network connection and retry.`)),
+      timeoutMs
+    );
+  });
+
+  return Promise.race([
+    promise.finally(() => {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+    }),
+    timeoutPromise
+  ]);
+}
+
 /**
  * Publish approved questions to Firestore in batches (with cross-exam appearance merging and quota limit detection)
  */
@@ -253,19 +272,34 @@ export async function publishApprovedQuestionsToFirestore(
     category: string;
     details: AnswerConflictDetails;
     sourceFileName?: string;
-  }[]
+  }[],
+  onProgress?: (progress: { current: number; total: number; stage: string }) => void
 ): Promise<{ success: boolean; publishedCount: number; isQuotaExhausted?: boolean; error?: string }> {
   if (questions.length === 0 && (!conflictsToRecord || conflictsToRecord.length === 0)) {
     return { success: true, publishedCount: 0 };
   }
+
+  // Ensure Firebase Auth persistence is resolved before checking admin identity
+  try {
+    if (typeof (auth as any).authStateReady === 'function') {
+      await (auth as any).authStateReady();
+    }
+  } catch {}
 
   const currentUser = auth.currentUser;
   if (!currentUser || !isUserAdmin(currentUser.email)) {
     return { 
       success: false, 
       publishedCount: 0, 
-      error: 'Unauthorized: Only authorized admin account can publish questions.' 
+      error: `Unauthorized: Publishing to cloud question bank requires the authorized admin account (${ADMIN_EMAIL}). Current identity: ${currentUser?.email || 'Guest / Not signed in'}.` 
     };
+  }
+
+  // Force-refresh auth token to ensure fresh token with verified email claims in Firestore rules
+  try {
+    await currentUser.getIdToken(true);
+  } catch (tokErr) {
+    console.warn('[Firestore Auth] Token refresh warning:', tokErr);
   }
 
   if (isFirestoreQuotaExhausted()) {
@@ -280,44 +314,59 @@ export async function publishApprovedQuestionsToFirestore(
   let totalPublished = 0;
 
   try {
-    // 1. Record batch metadata in `pyq_import_batches`
-    const batchDocRef = doc(db, 'pyq_import_batches', batch.batchId);
+    onProgress?.({ current: 0, total: questions.length, stage: 'Connecting to Firestore cloud database...' });
+
     const resolvedBatchShift = (batch.shift && batch.shift !== 'Not Specified' && batch.shift !== 'null' && batch.shift !== 'undefined')
       ? batch.shift
       : null;
     const resolvedBatchExamDate = batch.examDate ? normalizeExamDate(batch.examDate) : null;
 
-    const sanitizedBatch = sanitizeForFirestore({
-      ...batch,
-      shift: resolvedBatchShift,
-      examDate: resolvedBatchExamDate,
-      status: 'completed',
-      publishedCount: questions.length,
-      updatedAt: Date.now(),
-    });
+    console.log('[Publisher] click_received');
+    console.log(`[Publisher] publish_started count=${questions.length}`);
 
-    await setDoc(batchDocRef, sanitizedBatch, { merge: true });
+    // STEP 1: Verify and Force Fresh Firebase ID Token
+    console.log('[Publisher] auth_token_start');
+    const idToken = await currentUser.getIdToken(true);
+    console.log('[Publisher] auth_token_received');
 
-    // 2. Record any detected answer conflicts
-    if (conflictsToRecord && conflictsToRecord.length > 0) {
-      await recordAnswerConflicts(batch.batchId, conflictsToRecord);
+    function parseJwtPayload(token: string) {
+      try {
+        const base64Url = token.split('.')[1];
+        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+        const jsonPayload = decodeURIComponent(
+          atob(base64)
+            .split('')
+            .map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+            .join('')
+        );
+        return JSON.parse(jsonPayload);
+      } catch {
+        return null;
+      }
     }
 
-    // 3. Commit questions to `question_bank` in safe chunks with stream drain delay
-    const CHUNK_SIZE = 20;
-    for (let i = 0; i < questions.length; i += CHUNK_SIZE) {
-      const chunk = questions.slice(i, i + CHUNK_SIZE);
-      const writeBatchInstance = writeBatch(db);
+    const jwt = parseJwtPayload(idToken);
+    const currentTimeSec = Math.floor(Date.now() / 1000);
+    console.log(`[Publish Auth] aud=${jwt?.aud}`);
+    console.log(`[Publish Auth] iss=${jwt?.iss}`);
+    console.log(`[Publish Auth] sub_present=${Boolean(jwt?.sub)}`);
+    console.log(`[Publish Auth] email=${jwt?.email}`);
+    console.log(`[Publish Auth] exp=${jwt?.exp}`);
+    console.log(`[Publish Auth] current_time=${currentTimeSec}`);
 
-      for (const q of chunk) {
-        const targetDocId = q.canonicalQuestionId || q.id || generateCanonicalQuestionId(
-          q.category,
-          q.wordOrPhrase,
-          q.options,
-          q.correctIndex
-        );
-        const docRef = doc(db, 'question_bank', targetDocId);
+    if (jwt?.aud !== 'tactile-world-jq6d2' || jwt?.iss !== 'https://securetoken.google.com/tactile-world-jq6d2') {
+      const authMismatchMsg = `Auth Token Audience/Issuer mismatch: aud=${jwt?.aud}, iss=${jwt?.iss}`;
+      console.error(`[Publish Auth] STOP: ${authMismatchMsg}`);
+      return { success: false, publishedCount: 0, error: authMismatchMsg };
+    }
 
+    onProgress?.({
+      current: 0,
+      total: questions.length,
+      stage: `Publishing ${questions.length} questions to Question Bank via verified REST pipeline...`
+    });
+
+      const sanitizedQuestionsPayload = questions.map(q => {
         const resolvedShift = (q.shift && q.shift !== 'Not Specified' && q.shift !== 'null' && q.shift !== 'undefined') 
           ? q.shift 
           : resolvedBatchShift;
@@ -333,7 +382,6 @@ export async function publishApprovedQuestionsToFirestore(
           questionNumber: q.questionNumber !== undefined && q.questionNumber !== null ? q.questionNumber : null,
         };
 
-        // Determine canonical appearances
         const appearances: ExamAppearance[] = Array.isArray(q.appearances) && q.appearances.length > 0
           ? sortAppearances(q.appearances)
           : [defaultApp];
@@ -342,6 +390,13 @@ export async function publishApprovedQuestionsToFirestore(
         const validOptionDetails = (Array.isArray(q.optionDetails) && q.optionDetails.length === 4)
           ? q.optionDetails
           : null;
+
+        const targetDocId = q.canonicalQuestionId || q.id || generateCanonicalQuestionId(
+          q.category,
+          q.wordOrPhrase,
+          q.options,
+          q.correctIndex
+        );
 
         const fingerprint = q.fingerprint || computeQuestionFingerprint(
           q.category,
@@ -362,7 +417,7 @@ export async function publishApprovedQuestionsToFirestore(
         const repeatCount = computeRepeatCount(appearances, q.repeatCount);
         const importanceLevel = computeImportanceLevel(repeatCount);
 
-        const payload: any = sanitizeForFirestore({
+        return sanitizeForFirestore({
           id: targetDocId,
           canonicalQuestionId: targetDocId,
           category: q.category,
@@ -399,47 +454,79 @@ export async function publishApprovedQuestionsToFirestore(
           createdAt: Date.now(),
           updatedAt: Date.now(),
         });
+      });
 
-        writeBatchInstance.set(docRef, payload, { merge: true });
+      console.log('[Publisher] rest_fetch_start url=/api/admin/publish-questions');
+      const restStart = performance.now();
+      const abortController = new AbortController();
+      const abortTimeout = setTimeout(() => abortController.abort(), 18000);
+
+      try {
+        const response = await fetch('/api/admin/publish-questions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${idToken}`,
+          },
+          body: JSON.stringify({
+            questions: sanitizedQuestionsPayload,
+            batchMetadata: batch ? sanitizeForFirestore({
+              ...batch,
+              shift: resolvedBatchShift,
+              examDate: resolvedBatchExamDate,
+              status: 'completed',
+              publishedCount: questions.length,
+              updatedAt: Date.now(),
+            }) : undefined,
+          }),
+          signal: abortController.signal,
+        });
+
+        clearTimeout(abortTimeout);
+        console.log(`[Publisher] rest_response_received status=${response.status}`);
+
+        const json = await response.json().catch(() => ({}));
+        console.log(`[Publisher] rest_response_body=`, json);
+
+        if (response.ok && json.success) {
+          console.log(`[Publisher] publish_finished via high-speed REST pipeline in ${(performance.now() - restStart).toFixed(2)}ms, publishedCount=${json.publishedCount || questions.length}`);
+          onProgress?.({
+            current: json.publishedCount || questions.length,
+            total: questions.length,
+            stage: 'Publish completed successfully!'
+          });
+          return { success: true, publishedCount: json.publishedCount || questions.length };
+        } else {
+          const errMsg = json.error || `Publishing failed with status ${response.status}`;
+          console.error('[Publisher] REST publishing failed:', errMsg);
+          return {
+            success: false,
+            publishedCount: json.publishedCount || 0,
+            error: errMsg,
+          };
+        }
+      } catch (fetchErr: any) {
+        clearTimeout(abortTimeout);
+        const isAbort = fetchErr?.name === 'AbortError';
+        const errMsg = isAbort 
+          ? 'Publishing failed: server publish endpoint did not respond within 20 seconds.' 
+          : (fetchErr?.message || 'Network error during publish');
+        console.error(`[Publisher] rest_fetch_failed code=${fetchErr?.name || 'FETCH_ERROR'} message=${errMsg}`);
+        return {
+          success: false,
+          publishedCount: 0,
+          error: errMsg,
+        };
       }
-
-      await writeBatchInstance.commit();
-      totalPublished += chunk.length;
-
-      // Allow Firestore WebChannel write stream to drain and acknowledge
-      if (i + CHUNK_SIZE < questions.length) {
-        await new Promise(resolve => setTimeout(resolve, 300));
-      }
-    }
-
-    return { success: true, publishedCount: totalPublished };
-  } catch (err: any) {
-    const errMsg = err instanceof Error ? err.message : String(err);
-    const isQuota = 
-      errMsg.includes('resource-exhausted') || 
-      errMsg.includes('Quota limit exceeded') || 
-      errMsg.includes('Quota exceeded') ||
-      errMsg.includes('Free daily write units');
-
-    if (isQuota) {
-      markFirestoreQuotaExhausted();
-      return { 
-        success: false, 
-        isQuotaExhausted: true,
-        publishedCount: totalPublished, 
-        error: 'Firestore Free Tier daily write quota is currently reached (20,000 writes/day). The questions have been registered to your local runtime question bank and are 100% playable in-game!' 
+    } catch (err: any) {
+      console.error('[Publisher] Fatal publish error:', err);
+      return {
+        success: false,
+        publishedCount: 0,
+        error: err?.message || 'An unexpected error occurred during publish.',
       };
     }
-
-    console.error('Error publishing approved questions to Firestore:', err);
-    handleFirestoreError(err, OperationType.WRITE, 'question_bank');
-    return { 
-      success: false, 
-      publishedCount: totalPublished, 
-      error: errMsg || 'Failed to commit questions to Firestore.' 
-    };
   }
-}
 
 export interface DeduplicationResult {
   totalScanned: number;

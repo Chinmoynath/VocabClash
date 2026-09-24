@@ -3,6 +3,7 @@ import {
   saveDailyChallengeToFirestore, 
   deleteDailyChallengeDayFromFirestore,
   fetchDailyChallengeHistoryFromFirestore, 
+  atomicIncrementLPInFirestore,
   auth 
 } from './firebaseService';
 
@@ -307,6 +308,12 @@ export function saveDailyChallengeAttempt(
     saveDailyChallengeToFirestore(effectiveUid, finalizedAttempt, updatedHistory).catch(err => {
       console.warn('[Daily Challenge] Firestore persistence notice:', err);
     });
+
+    if (rankPointsGained > 0) {
+      atomicIncrementLPInFirestore(effectiveUid, rankPointsGained).catch(err => {
+        console.warn('[Daily Challenge] Atomic LP increment notice:', err);
+      });
+    }
   }
 
   // 3. Sync with Backend Server API (asynchronous fallback)

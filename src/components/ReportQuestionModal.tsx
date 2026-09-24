@@ -115,6 +115,7 @@ Timestamp: ${new Date().toISOString()}
         notes: notes.trim() || undefined,
         userEmail: userEmail || undefined,
         userName: userName || undefined,
+        questionData: question,
       });
       if (!resolved) {
         resolved = true;

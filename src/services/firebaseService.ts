@@ -32,6 +32,9 @@ import {
   doc, 
   getDoc, 
   setDoc,
+  updateDoc,
+  increment,
+  runTransaction,
   deleteDoc,
   getDocFromServer,
   onSnapshot,
@@ -136,18 +139,12 @@ export function createGoogleProvider(): GoogleAuthProvider {
 
 export const googleProvider = createGoogleProvider();
 
-// Initialize Firestore with auto-detect long polling to establish fast streams and gracefully fallback
+// Initialize standard Firestore instance with applet database ID (as required by SKILL.md)
 let dbInstance: ReturnType<typeof getFirestore>;
 try {
-  dbInstance = initializeFirestore(
-    app,
-    {
-      experimentalAutoDetectLongPolling: true,
-    },
-    firebaseConfig.firestoreDatabaseId || undefined
-  );
-} catch {
   dbInstance = getFirestore(app, firebaseConfig.firestoreDatabaseId || undefined);
+} catch {
+  dbInstance = getFirestore(app);
 }
 
 export const db = dbInstance;
@@ -982,48 +979,189 @@ export async function saveUserDataToFirestore(
 }
 
 /**
- * Saves a daily challenge attempt to Firestore for cross-device sync
+ * Atomically increments or adjusts user LP in Firestore and updates leaderboard & caches.
+ * Uses atomic Firestore transactions / field increments so concurrent devices never overwrite each other.
+ */
+export async function atomicIncrementLPInFirestore(
+  uid: string,
+  lpDelta: number,
+  additionalUpdates?: {
+    matchesPlayedDelta?: number;
+    matchesWonDelta?: number;
+    winStreak?: number;
+    pyqScoreDelta?: number;
+    targetExam?: string;
+  }
+): Promise<number | null> {
+  if (!uid || uid === 'default_user' || uid.startsWith('guest_') || lpDelta === 0) {
+    return null;
+  }
+
+  const userDocRef = doc(db, 'users', uid);
+  const leaderboardDocRef = doc(db, 'leaderboard', uid);
+
+  try {
+    let finalLP = 0;
+    await runTransaction(db, async (transaction) => {
+      const userDoc = await transaction.get(userDocRef);
+      const userData = userDoc.exists() ? userDoc.data() : null;
+      const currentLP = (userData?.player?.rankPoints as number) ?? (userData?.rankPoints as number) ?? 0;
+      const newLP = Math.max(0, currentLP + lpDelta);
+      finalLP = newLP;
+
+      const currentMatchesPlayed = (userData?.player?.matchesPlayed as number) ?? 0;
+      const currentMatchesWon = (userData?.player?.matchesWon as number) ?? 0;
+      const newMatchesPlayed = currentMatchesPlayed + (additionalUpdates?.matchesPlayedDelta || 0);
+      const newMatchesWon = currentMatchesWon + (additionalUpdates?.matchesWonDelta || 0);
+      const accuracyRate = newMatchesPlayed > 0 ? Math.round((newMatchesWon / newMatchesPlayed) * 100) : 0;
+
+      const userUpdate: Record<string, any> = {
+        'player.rankPoints': newLP,
+        'player.matchesPlayed': newMatchesPlayed,
+        'player.matchesWon': newMatchesWon,
+        'player.accuracyRate': accuracyRate,
+        updatedAt: Date.now(),
+      };
+
+      if (additionalUpdates?.winStreak !== undefined) {
+        userUpdate['player.winStreak'] = additionalUpdates.winStreak;
+      }
+      if (additionalUpdates?.pyqScoreDelta) {
+        const currentPyq = (userData?.player?.pyqScore as number) ?? 0;
+        userUpdate['player.pyqScore'] = Math.max(0, currentPyq + additionalUpdates.pyqScoreDelta);
+      }
+      if (additionalUpdates?.targetExam) {
+        userUpdate['player.targetExam'] = additionalUpdates.targetExam;
+      }
+
+      transaction.set(userDocRef, userUpdate, { merge: true });
+
+      // Keep public leaderboard doc in sync
+      const leaderboardUpdate: Record<string, any> = {
+        uid,
+        rankPoints: newLP,
+        matchesPlayed: newMatchesPlayed,
+        matchesWon: newMatchesWon,
+        winRate: accuracyRate,
+        updatedAt: Date.now(),
+      };
+      if (userData?.player?.name) leaderboardUpdate.name = userData.player.name;
+      if (userData?.player?.avatar) leaderboardUpdate.avatar = userData.player.avatar;
+      if (userData?.player?.photoURL) leaderboardUpdate.photoURL = userData.player.photoURL;
+      if (userData?.player?.targetExam) leaderboardUpdate.targetExam = userData.player.targetExam;
+      transaction.set(leaderboardDocRef, leaderboardUpdate, { merge: true });
+    });
+
+    latestCloudLPMap.set(uid, {
+      rankPoints: finalLP,
+      matchesPlayed: (latestCloudLPMap.get(uid)?.matchesPlayed || 0) + (additionalUpdates?.matchesPlayedDelta || 0),
+      matchesWon: (latestCloudLPMap.get(uid)?.matchesWon || 0) + (additionalUpdates?.matchesWonDelta || 0),
+    });
+
+    console.log(`[Atomic LP] Successfully updated Firestore LP for ${uid}: delta=${lpDelta >= 0 ? '+' : ''}${lpDelta} -> new LP=${finalLP}`);
+    return finalLP;
+  } catch (err) {
+    console.warn('[Atomic LP] Transaction fallback to updateDoc:', err);
+    try {
+      await updateDoc(userDocRef, {
+        'player.rankPoints': increment(lpDelta),
+        updatedAt: Date.now(),
+      });
+      await updateDoc(leaderboardDocRef, {
+        rankPoints: increment(lpDelta),
+        updatedAt: Date.now(),
+      }).catch(() => {});
+      return null;
+    } catch (fallbackErr) {
+      console.error('[Atomic LP] Update failed:', fallbackErr);
+      return null;
+    }
+  }
+}
+
+/**
+ * Saves a daily challenge attempt to Firestore for authoritative cross-device sync.
+ * Writes to both `users/{uid}/dailyChallenges/{date}` and `users/{uid}/daily_challenges/{date}`
+ * as well as the root document's `dailyChallenges` map and `dailyChallengeHistory` array.
  */
 export async function saveDailyChallengeToFirestore(
   uid: string,
   attempt: any,
   fullHistory: any[]
 ): Promise<void> {
-  if (!uid || uid === 'default_user') return;
+  if (!uid || uid === 'default_user' || uid.startsWith('guest_')) return;
   try {
     const userDocRef = doc(db, 'users', uid);
     const cleanHistory = sanitizeForFirestore(fullHistory || []);
     const cleanAttempt = attempt ? sanitizeForFirestore(attempt) : null;
 
-    // 1. Update full history in user document
+    const normalizedAttempt = cleanAttempt ? {
+      completed: true,
+      score: cleanAttempt.score ?? 0,
+      correct: cleanAttempt.correctCount ?? cleanAttempt.correct ?? 0,
+      total: cleanAttempt.totalQuestions ?? cleanAttempt.total ?? 20,
+      accuracy: cleanAttempt.percentage ?? cleanAttempt.accuracy ?? 0,
+      speed: cleanAttempt.timeTakenSeconds ?? cleanAttempt.speed ?? 0,
+      completedAt: cleanAttempt.timestamp ?? Date.now(),
+      lpEarned: cleanAttempt.rankPointsAwarded ?? cleanAttempt.lpEarned ?? 0,
+      date: cleanAttempt.date,
+      uid,
+      userEmail: cleanAttempt.userEmail || auth.currentUser?.email || null,
+      updatedAt: Date.now(),
+      ...(cleanAttempt.categoryBreakdown ? { categoryBreakdown: cleanAttempt.categoryBreakdown } : {}),
+    } : null;
+
+    // 1. Update root document dailyChallenges map and history array
+    const rootUpdate: Record<string, any> = {
+      dailyChallengeHistory: cleanHistory,
+      updatedAt: Date.now(),
+    };
+    if (normalizedAttempt && normalizedAttempt.date) {
+      rootUpdate[`dailyChallenges.${normalizedAttempt.date}`] = normalizedAttempt;
+    }
+
     await withTimeout(
-      setDoc(userDocRef, { dailyChallengeHistory: cleanHistory, updatedAt: Date.now() }, { merge: true }),
-      2500,
+      setDoc(userDocRef, rootUpdate, { merge: true }),
+      3500,
       undefined
     );
 
-    // 2. Also write specific day record in subcollection if attempt provided
-    if (cleanAttempt && cleanAttempt?.date) {
-      const dayDocRef = doc(db, 'users', uid, 'daily_challenges', cleanAttempt.date);
+    // 2. Write specific day record in users/{uid}/dailyChallenges/{date} (canonical path)
+    if (normalizedAttempt && normalizedAttempt.date) {
+      const dayDocRef1 = doc(db, 'users', uid, 'dailyChallenges', normalizedAttempt.date);
       await withTimeout(
-        setDoc(dayDocRef, { ...cleanAttempt, uid, updatedAt: Date.now() }, { merge: true }),
-        2000,
+        setDoc(dayDocRef1, normalizedAttempt, { merge: true }),
+        3000,
         undefined
-      );
+      ).catch(() => {});
+
+      // 3. Write specific day record in users/{uid}/daily_challenges/{date} (legacy compatibility path)
+      const dayDocRef2 = doc(db, 'users', uid, 'daily_challenges', normalizedAttempt.date);
+      await withTimeout(
+        setDoc(dayDocRef2, normalizedAttempt, { merge: true }),
+        3000,
+        undefined
+      ).catch(() => {});
     }
+
+    console.log(`[Daily Challenge] Saved to Firestore for ${uid}: date=${normalizedAttempt?.date}, score=${normalizedAttempt?.score}`);
   } catch (err) {
     console.warn('[DAILY CHALLENGE FIRESTORE] Notice saving attempt:', err);
   }
 }
 
 /**
- * Deletes a specific day attempt from a user's daily_challenges subcollection
+ * Deletes a specific day attempt from a user's dailyChallenges subcollection
  */
 export async function deleteDailyChallengeDayFromFirestore(uid: string, date: string): Promise<void> {
   if (!uid || uid === 'default_user' || !date) return;
   try {
-    const dayDocRef = doc(db, 'users', uid, 'daily_challenges', date);
-    await withTimeout(deleteDoc(dayDocRef), 2000, undefined).catch(() => {});
+    const dayDocRef1 = doc(db, 'users', uid, 'dailyChallenges', date);
+    const dayDocRef2 = doc(db, 'users', uid, 'daily_challenges', date);
+    await Promise.allSettled([
+      withTimeout(deleteDoc(dayDocRef1), 2000, undefined),
+      withTimeout(deleteDoc(dayDocRef2), 2000, undefined)
+    ]);
   } catch (err) {
     console.warn('[DAILY CHALLENGE FIRESTORE] Notice deleting day attempt:', err);
   }
@@ -1031,17 +1169,17 @@ export async function deleteDailyChallengeDayFromFirestore(uid: string, date: st
 
 /**
  * Fetches daily challenge history from Firestore for cross-device sync.
- * Reads both the root document array and the daily_challenges subcollection,
+ * Reads both the root document, the `dailyChallenges` subcollection, and `daily_challenges` subcollection,
  * merging and deduplicating by date so no historical attempts are ever lost.
  */
 export async function fetchDailyChallengeHistoryFromFirestore(uid: string): Promise<any[]> {
-  if (!uid || uid === 'default_user') return [];
+  if (!uid || uid === 'default_user' || uid.startsWith('guest_')) return [];
   const map = new Map<string, any>();
 
   try {
-    // 1. Fetch array from users/{uid} root document
+    // 1. Fetch from users/{uid} root document
     const userDocRef = doc(db, 'users', uid);
-    const snap = await withTimeout(getDoc(userDocRef), 2500, null);
+    const snap = await withTimeout(getDoc(userDocRef), 3000, null);
     if (snap && snap.exists()) {
       const data = snap.data();
       if (Array.isArray(data?.dailyChallengeHistory)) {
@@ -1051,19 +1189,79 @@ export async function fetchDailyChallengeHistoryFromFirestore(uid: string): Prom
           }
         });
       }
+      if (data?.dailyChallenges && typeof data.dailyChallenges === 'object') {
+        Object.entries(data.dailyChallenges).forEach(([d, item]: [string, any]) => {
+          if (item && typeof item === 'object') {
+            const dateKey = item.date || d;
+            const existing = map.get(dateKey);
+            if (!existing || (item.score ?? 0) >= (existing.score ?? 0)) {
+              map.set(dateKey, {
+                ...item,
+                date: dateKey,
+                correctCount: item.correct ?? item.correctCount ?? 0,
+                totalQuestions: item.total ?? item.totalQuestions ?? 20,
+                percentage: item.accuracy ?? item.percentage ?? 0,
+                timeTakenSeconds: item.speed ?? item.timeTakenSeconds ?? 0,
+                score: item.score ?? 0,
+                maxMarks: item.total ?? item.maxMarks ?? 20,
+                timestamp: item.completedAt ?? item.timestamp ?? Date.now(),
+                rankPointsAwarded: item.lpEarned ?? item.rankPointsAwarded ?? 0,
+              });
+            }
+          }
+        });
+      }
     }
 
-    // 2. Fetch all day documents from users/{uid}/daily_challenges subcollection
-    const subColRef = collection(db, 'users', uid, 'daily_challenges');
-    const subSnap = await withTimeout(getDocs(subColRef), 2500, null);
-    if (subSnap && !subSnap.empty) {
-      subSnap.forEach((docItem) => {
+    // 2. Fetch all day documents from users/{uid}/dailyChallenges subcollection
+    const subColRef1 = collection(db, 'users', uid, 'dailyChallenges');
+    const subSnap1 = await withTimeout(getDocs(subColRef1), 3000, null).catch(() => null);
+    if (subSnap1 && !subSnap1.empty) {
+      subSnap1.forEach((docItem) => {
         const item = docItem.data();
         if (item && (item.date || docItem.id)) {
           const dateKey = item.date || docItem.id;
           const existing = map.get(dateKey);
           if (!existing || (item.score ?? 0) >= (existing.score ?? 0)) {
-            map.set(dateKey, { ...item, date: dateKey });
+            map.set(dateKey, {
+              ...item,
+              date: dateKey,
+              correctCount: item.correct ?? item.correctCount ?? 0,
+              totalQuestions: item.total ?? item.totalQuestions ?? 20,
+              percentage: item.accuracy ?? item.percentage ?? 0,
+              timeTakenSeconds: item.speed ?? item.timeTakenSeconds ?? 0,
+              score: item.score ?? 0,
+              maxMarks: item.total ?? item.maxMarks ?? 20,
+              timestamp: item.completedAt ?? item.timestamp ?? Date.now(),
+              rankPointsAwarded: item.lpEarned ?? item.rankPointsAwarded ?? 0,
+            });
+          }
+        }
+      });
+    }
+
+    // 3. Fetch from legacy users/{uid}/daily_challenges subcollection
+    const subColRef2 = collection(db, 'users', uid, 'daily_challenges');
+    const subSnap2 = await withTimeout(getDocs(subColRef2), 3000, null).catch(() => null);
+    if (subSnap2 && !subSnap2.empty) {
+      subSnap2.forEach((docItem) => {
+        const item = docItem.data();
+        if (item && (item.date || docItem.id)) {
+          const dateKey = item.date || docItem.id;
+          const existing = map.get(dateKey);
+          if (!existing || (item.score ?? 0) >= (existing.score ?? 0)) {
+            map.set(dateKey, {
+              ...item,
+              date: dateKey,
+              correctCount: item.correct ?? item.correctCount ?? 0,
+              totalQuestions: item.total ?? item.totalQuestions ?? 20,
+              percentage: item.accuracy ?? item.percentage ?? 0,
+              timeTakenSeconds: item.speed ?? item.timeTakenSeconds ?? 0,
+              score: item.score ?? 0,
+              maxMarks: item.total ?? item.maxMarks ?? 20,
+              timestamp: item.completedAt ?? item.timestamp ?? Date.now(),
+              rankPointsAwarded: item.lpEarned ?? item.rankPointsAwarded ?? 0,
+            });
           }
         }
       });
@@ -1136,9 +1334,19 @@ export async function fetchUserDataFromFirestore(uid: string, timeoutMs: number 
     }
 
     const userDocRef = doc(db, 'users', uid);
-    const docSnap = await withTimeout(getDoc(userDocRef), timeoutMs, null);
+    const [docSnap, challengeHistory] = await Promise.all([
+      withTimeout(getDoc(userDocRef), timeoutMs, null),
+      fetchDailyChallengeHistoryFromFirestore(uid).catch(() => [])
+    ]);
+
     if (docSnap && docSnap.exists()) {
       const data = docSnap.data() as UserCloudData;
+
+      // Attach complete subcollection daily challenge history to the user cloud data
+      if (Array.isArray(challengeHistory) && challengeHistory.length > 0) {
+        data.dailyChallengeHistory = challengeHistory;
+      }
+
       if (data.player && typeof data.player.rankPoints === 'number') {
         latestCloudLPMap.set(uid, {
           rankPoints: data.player.rankPoints,

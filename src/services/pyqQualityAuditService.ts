@@ -15,37 +15,70 @@ import { QuestionQualityResult, QualityAuditStats, UserQuestionReport } from '..
 import { validateQuestionBatchQuality } from './pyqQualityValidator';
 import { fetchPublishedQuestionBank, sanitizeForFirestore, deleteQuestionFromFirestore } from './pyqFirestoreService';
 import { questionBankEngine } from './questionBankEngine';
+import { generateCanonicalQuestionId } from '../utils/questionFingerprint';
 
 const AUDIT_STORAGE_KEY = 'vocabclash_pyq_quality_audit_cache_v1';
+const USER_REPORTS_STORAGE_KEY = 'vocabclash_user_question_reports_cache_v2';
+
+function loadReportsLocally(): UserQuestionReport[] {
+  try {
+    if (typeof window === 'undefined') return [];
+    const raw = localStorage.getItem(USER_REPORTS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveReportLocally(report: UserQuestionReport): void {
+  try {
+    if (typeof window === 'undefined') return;
+    const existing = loadReportsLocally();
+    const filtered = existing.filter(r => r.reportId !== report.reportId);
+    filtered.unshift(report);
+    localStorage.setItem(USER_REPORTS_STORAGE_KEY, JSON.stringify(filtered.slice(0, 500)));
+  } catch (e) {}
+}
+
+function saveAllReportsLocally(reports: UserQuestionReport[]): void {
+  try {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem(USER_REPORTS_STORAGE_KEY, JSON.stringify(reports.slice(0, 500)));
+  } catch (e) {}
+}
 
 /**
  * Submit a user discrepancy report from PYQ drill into Firestore `question_reports`
  */
 export async function submitQuestionReport(report: Omit<UserQuestionReport, 'reportId' | 'reportedAt' | 'status'>): Promise<{ success: boolean; error?: string }> {
   const reportId = `report_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-  const path = `question_reports/${reportId}`;
+  const payload: UserQuestionReport = {
+    ...report,
+    reportId,
+    reportedAt: Date.now(),
+    status: 'open',
+  };
+
+  // 1. Immediately cache locally so admin panel sees it right away
+  saveReportLocally(payload);
+  pyqQualityAuditService.addReportLocally(payload);
+
   try {
     const docRef = doc(db, 'question_reports', reportId);
-    const payload: UserQuestionReport = {
-      ...report,
-      reportId,
-      reportedAt: Date.now(),
-      status: 'open',
-    };
     
     // Firestore setDoc returns a Promise that waits for server write acknowledgement.
     // In web browsers/iframes, this can take a long time or stall even though the write
-    // was already queued and sent to the server. We race it with a 1.2s timeout so the
-    // client UI gets an immediate success response while the write flushes in background.
+    // was already queued and sent to the server. We race it with a 2.5s timeout.
     const writePromise = setDoc(docRef, sanitizeForFirestore(payload));
     const timeoutPromise = new Promise<{ timeout: boolean }>(resolve => 
-      setTimeout(() => resolve({ timeout: true }), 1200)
+      setTimeout(() => resolve({ timeout: true }), 2500)
     );
     await Promise.race([writePromise, timeoutPromise]);
     return { success: true };
   } catch (err) {
-    console.warn('Could not write question report to Firestore, saving locally:', err);
-    // Non-blocking fallback
+    console.warn('Could not write question report to Firestore, saved locally:', err);
     return { success: true };
   }
 }
@@ -54,30 +87,52 @@ export async function submitQuestionReport(report: Omit<UserQuestionReport, 'rep
  * Fetch all open user question reports from Firestore `question_reports`
  */
 export async function fetchUserQuestionReports(): Promise<UserQuestionReport[]> {
-  const path = 'question_reports';
+  const localReports = loadReportsLocally().filter(r => r.status !== 'resolved' && r.status !== 'dismissed');
   try {
-    if (isFirestoreQuotaExhausted()) return [];
-    const colRef = collection(db, path);
+    if (isFirestoreQuotaExhausted()) return localReports;
+    const colRef = collection(db, 'question_reports');
     const q = query(colRef, orderBy('reportedAt', 'desc'), limit(500));
     const snap = await getDocs(q);
-    const reports: UserQuestionReport[] = [];
+    const serverReports: UserQuestionReport[] = [];
     snap.forEach(d => {
       const data = d.data() as UserQuestionReport;
-      if (data.status !== 'resolved') {
-        reports.push(data);
+      if (data.status !== 'resolved' && data.status !== 'dismissed') {
+        serverReports.push(data);
       }
     });
-    return reports;
+
+    // Unify by reportId
+    const reportMap = new Map<string, UserQuestionReport>();
+    serverReports.forEach(r => reportMap.set(r.reportId, r));
+    localReports.forEach(r => {
+      if (!reportMap.has(r.reportId) && r.status !== 'resolved' && r.status !== 'dismissed') {
+        reportMap.set(r.reportId, r);
+      }
+    });
+
+    const unified = Array.from(reportMap.values()).sort((a, b) => (b.reportedAt || 0) - (a.reportedAt || 0));
+    saveAllReportsLocally(unified);
+    return unified;
   } catch (err) {
-    console.warn('Could not fetch question reports from Firestore:', err);
-    return [];
+    console.warn('Could not fetch question reports from Firestore, using local cache:', err);
+    return localReports;
   }
 }
 
 /**
  * Admin action: Resolve / dismiss all user discrepancy reports for a given question in Firestore
  */
-export async function resolveUserReportsForQuestion(questionId: string): Promise<boolean> {
+export async function resolveUserReportsForQuestion(questionId: string, alternateIds: string[] = []): Promise<boolean> {
+  const allIds = new Set([questionId, ...alternateIds].filter(Boolean));
+  // Clean up local storage cache
+  const local = loadReportsLocally();
+  const updatedLocal = local.filter(r => 
+    !allIds.has(r.questionId) && 
+    !allIds.has(r.questionData?.canonicalQuestionId || '') &&
+    !allIds.has(r.questionData?.id || '')
+  );
+  saveAllReportsLocally(updatedLocal);
+
   try {
     const colRef = collection(db, 'question_reports');
     const snap = await getDocs(query(colRef, limit(500)));
@@ -86,7 +141,9 @@ export async function resolveUserReportsForQuestion(questionId: string): Promise
     
     snap.forEach(d => {
       const data = d.data() as UserQuestionReport;
-      if (data.questionId === questionId && data.status !== 'resolved') {
+      const matches = allIds.has(data.questionId) || 
+        (data.questionData && (allIds.has(data.questionData.canonicalQuestionId || '') || allIds.has(data.questionData.id || '')));
+      if (matches && data.status !== 'resolved') {
         batch.delete(d.ref);
         count++;
       }
@@ -106,6 +163,10 @@ export async function resolveUserReportsForQuestion(questionId: string): Promise
  * Admin action: Delete a single user discrepancy report by reportId
  */
 export async function deleteSingleUserReport(reportId: string): Promise<boolean> {
+  // Clean local cache
+  const local = loadReportsLocally();
+  saveAllReportsLocally(local.filter(r => r.reportId !== reportId));
+
   try {
     const docRef = doc(db, 'question_reports', reportId);
     await deleteDoc(docRef).catch(e => console.warn('Could not delete report doc:', e));
@@ -169,6 +230,82 @@ class PyqQualityAuditService {
 
   public getUserReports(): UserQuestionReport[] {
     return this.userReports;
+  }
+
+  public addReportLocally(report: UserQuestionReport): void {
+    if (!this.userReports.some(r => r.reportId === report.reportId)) {
+      this.userReports.unshift(report);
+    }
+  }
+
+  /**
+   * Admin Action: PUSH QUESTION TO FIRESTORE
+   * Commits/publishes a question document directly into Firestore `question_bank`,
+   * resolves any linked user discrepancy reports, updates QuestionBankEngine runtime,
+   * and refreshes the audit status to valid.
+   */
+  public async pushQuestionToFirestore(
+    question: Question,
+    resolveReportIds?: string[]
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const targetDocId = question.canonicalQuestionId || question.id || generateCanonicalQuestionId(
+        question.category,
+        question.wordOrPhrase,
+        question.options,
+        question.correctIndex
+      );
+
+      const docRef = doc(db, 'question_bank', targetDocId);
+      const payload: any = sanitizeForFirestore({
+        ...question,
+        id: targetDocId,
+        canonicalQuestionId: targetDocId,
+        verified: true,
+        isPYQ: true,
+        updatedAt: Date.now(),
+      });
+
+      await setDoc(docRef, payload, { merge: true });
+
+      // Clean up linked user reports in Firestore
+      if (resolveReportIds && resolveReportIds.length > 0) {
+        for (const rId of resolveReportIds) {
+          deleteSingleUserReport(rId).catch(console.warn);
+        }
+      }
+      resolveUserReportsForQuestion(targetDocId, [question.id, ...(resolveReportIds || [])]).catch(console.warn);
+      if (question.id !== targetDocId) {
+        resolveUserReportsForQuestion(question.id).catch(console.warn);
+      }
+
+      // Update runtime QuestionBankEngine
+      questionBankEngine.registerApprovedQuestions([payload as Question], true);
+
+      // Remove from in-memory user reports
+      this.userReports = this.userReports.filter(r => 
+        r.questionId !== targetDocId && 
+        r.questionId !== question.id &&
+        !(resolveReportIds || []).includes(r.reportId)
+      );
+
+      // Mark valid in auditResults
+      this.auditResults.set(targetDocId, {
+        questionId: targetDocId,
+        status: 'valid',
+        issues: [],
+        scannedAt: Date.now(),
+      });
+      if (question.id !== targetDocId) {
+        this.auditResults.delete(question.id);
+      }
+      this.saveCachedAudit();
+
+      return { success: true };
+    } catch (err: any) {
+      console.error('Failed to push question to Firestore:', err);
+      return { success: false, error: err?.message || 'Failed to push question to Firestore.' };
+    }
   }
 
   /**

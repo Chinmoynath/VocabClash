@@ -19,6 +19,7 @@ service cloud.firestore {
       return isAuthenticated() && (
         request.auth.token.email == 'nathchinmoy777@gmail.com' ||
         request.auth.token.email == 'Nathchinmoy777@gmail.com' ||
+        (request.auth.token.email != null && request.auth.token.email.lower() == 'nathchinmoy777@gmail.com') ||
         (request.auth.token.email != null && request.auth.token.email.matches('(?i)^nathchinmoy777@gmail[.]com$'))
       );
     }
@@ -277,8 +278,8 @@ service cloud.firestore {
     // 8. Question Bank: Public read for client arena/drills, Admin-only write
     match /question_bank/{questionId} {
       allow read: if true;
+      allow write: if isPyqAdmin();
       allow update: if true;
-      allow create, delete: if isPyqAdmin();
     }
 
     // 8b. Question Reports (Audit / Discrepancies): Authenticated/Public create, Admin manage
