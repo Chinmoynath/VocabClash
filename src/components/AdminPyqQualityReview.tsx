@@ -333,9 +333,21 @@ export const AdminPyqQualityReview: React.FC<AdminPyqQualityReviewProps> = ({
 
   // 4. DELETE IT
   const executeDeletePermanent = async (question: Question) => {
+    if (!question || !question.id) {
+      setActionFeedback({
+        type: 'error',
+        message: 'Cannot delete: Question does not have a unique Firestore document ID.',
+      });
+      return;
+    }
+
     setDeletingId(question.id);
     try {
-      const res = await pyqQualityAuditService.deleteQuestionSafely(question.id);
+      const res = await pyqQualityAuditService.deleteQuestionSafely(
+        question.id, 
+        question
+      );
+      
       if (res.success) {
         setDeletedIds(prev => {
           const next = new Set(prev);
@@ -347,7 +359,7 @@ export const AdminPyqQualityReview: React.FC<AdminPyqQualityReviewProps> = ({
         // Clean up linked reports
         const reports = getReportsForQuestion(question);
         const reportIds = reports.map(r => r.reportId);
-        setUserReports(prev => prev.filter(r => !reportIds.includes(r.reportId) && r.questionId !== question.id));
+        setUserReports(prev => prev.filter(r => !reportIds.includes(r.reportId) && r.questionId !== question.id && r.questionId !== question.canonicalQuestionId));
 
         setAuditMap(prev => {
           const next = new Map(prev);
@@ -355,30 +367,29 @@ export const AdminPyqQualityReview: React.FC<AdminPyqQualityReviewProps> = ({
           if (question.canonicalQuestionId) next.delete(question.canonicalQuestionId);
           return next;
         });
+
         setQuestionToDelete(null);
         setActionFeedback({
           type: 'success',
-          message: `Question "${question.wordOrPhrase}" and all associated discrepancy reports permanently deleted.`,
+          message: `Question "${question.wordOrPhrase}" permanently deleted from Firestore question_bank.`,
         });
 
         onRefreshCloud().catch(err => console.error('[PYQ Admin Delete]', err));
       } else {
         setActionFeedback({
           type: 'error',
-          message: res.error || 'Failed to delete question.',
+          message: res.error || 'Failed to delete question from Firestore.',
         });
       }
     } catch (err: any) {
       console.error('[PYQ Admin Delete]', err);
-      setDeletedIds(prev => new Set(prev).add(question.id));
-      setUserReports(prev => prev.filter(r => r.questionId !== question.id));
-      setQuestionToDelete(null);
       setActionFeedback({
-        type: 'success',
-        message: `Question removed locally.`,
+        type: 'error',
+        message: err?.message || 'Delete operation failed.',
       });
     } finally {
       setDeletingId(null);
+      setQuestionToDelete(null);
     }
   };
 

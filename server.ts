@@ -16,7 +16,7 @@ const PORT = 3000;
 // Lazy initialization for Gemini AI SDK
 let genAIClient: GoogleGenAI | null = null;
 function getGenAI(): GoogleGenAI | null {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || process.env.VITE_GEMINI_API_KEY;
   if (!apiKey) {
     return null;
   }
@@ -1214,6 +1214,162 @@ app.post('/api/admin/publish-questions', async (req, res) => {
   }
 });
 
+// Admin Delete Question & Linked Reports from Firestore Endpoint
+app.post('/api/admin/delete-question', async (req, res) => {
+  console.log('[Delete API] request_received');
+  try {
+    const authHeader = req.headers.authorization || '';
+    const isBearer = authHeader.startsWith('Bearer ');
+    const token = isBearer ? authHeader.slice(7).trim() : '';
+
+    if (!isBearer || !token) {
+      console.warn('[Delete API] Rejected: Missing admin authorization token');
+      return res.status(401).json({ success: false, error: 'Unauthorized: Missing admin authorization token' });
+    }
+
+    const { questionIds, reportIds } = req.body;
+    const targetQuestionIds: string[] = Array.isArray(questionIds) 
+      ? questionIds.filter(Boolean) 
+      : (req.body.questionId ? [String(req.body.questionId)] : []);
+    const targetReportIds: string[] = Array.isArray(reportIds) 
+      ? reportIds.filter(Boolean) 
+      : (req.body.reportId ? [String(req.body.reportId)] : []);
+
+    if (targetQuestionIds.length === 0 && targetReportIds.length === 0) {
+      return res.status(400).json({ success: false, error: 'No questionIds or reportIds provided for deletion' });
+    }
+
+    const projectId = 'tactile-world-jq6d2';
+    const databaseId = 'ai-studio-vocabclashgovtex-f49a3d8d-a36c-4264-be13-35bd86c794c3';
+    const baseUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents`;
+    const commitUrl = `${baseUrl}:commit`;
+
+    const writes: any[] = [];
+    for (const qId of targetQuestionIds) {
+      writes.push({
+        delete: `projects/${projectId}/databases/${databaseId}/documents/question_bank/${qId}`,
+      });
+    }
+
+    for (const rId of targetReportIds) {
+      writes.push({
+        delete: `projects/${projectId}/databases/${databaseId}/documents/question_reports/${rId}`,
+      });
+    }
+
+    console.log(`[Delete API] deleting ${targetQuestionIds.length} question docs and ${targetReportIds.length} report docs via Firestore REST`);
+
+    const commitRes = await fetch(commitUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ writes }),
+    });
+
+    console.log(`[Delete API] firestore_response_status=${commitRes.status}`);
+
+    if (!commitRes.ok) {
+      const errorText = await commitRes.text();
+      console.error(`[Delete API] commit failed HTTP ${commitRes.status}:`, errorText);
+      return res.status(commitRes.status).json({ success: false, error: `Firestore delete error: ${errorText}` });
+    }
+
+    return res.json({ 
+      success: true, 
+      deletedQuestions: targetQuestionIds.length, 
+      deletedReports: targetReportIds.length 
+    });
+  } catch (err: any) {
+    console.error('[Delete API] exception:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'Server error during delete' });
+  }
+});
+
+// Admin Resolve / Dismiss Reports Endpoint (Preserves report history by updating status)
+app.post('/api/admin/resolve-reports', async (req, res) => {
+  console.log('[Resolve Reports API] request_received');
+  try {
+    const authHeader = req.headers.authorization || '';
+    const isBearer = authHeader.startsWith('Bearer ');
+    const token = isBearer ? authHeader.slice(7).trim() : '';
+
+    if (!isBearer || !token) {
+      return res.status(401).json({ success: false, error: 'Unauthorized: Missing admin authorization token' });
+    }
+
+    const { reportIds, status = 'resolved', resolutionNotes } = req.body;
+    const targetReportIds: string[] = Array.isArray(reportIds) 
+      ? reportIds.filter(Boolean) 
+      : (req.body.reportId ? [String(req.body.reportId)] : []);
+
+    if (targetReportIds.length === 0) {
+      return res.json({ success: true, resolvedCount: 0 });
+    }
+
+    const targetStatus: string = status === 'dismissed' ? 'dismissed' : 'resolved';
+    const now = Date.now();
+
+    const projectId = 'tactile-world-jq6d2';
+    const databaseId = 'ai-studio-vocabclashgovtex-f49a3d8d-a36c-4264-be13-35bd86c794c3';
+    const baseUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents`;
+    const commitUrl = `${baseUrl}:commit`;
+
+    const fieldPaths = ['status', 'updatedAt', targetStatus === 'resolved' ? 'resolvedAt' : 'dismissedAt'];
+    if (resolutionNotes) {
+      fieldPaths.push('resolutionNotes');
+    }
+
+    const writes = targetReportIds.map(rId => {
+      const fields: Record<string, any> = {
+        status: { stringValue: targetStatus },
+        updatedAt: { integerValue: String(now) },
+      };
+
+      if (targetStatus === 'resolved') {
+        fields.resolvedAt = { integerValue: String(now) };
+      } else {
+        fields.dismissedAt = { integerValue: String(now) };
+      }
+
+      if (resolutionNotes) {
+        fields.resolutionNotes = { stringValue: String(resolutionNotes) };
+      }
+
+      return {
+        update: {
+          name: `projects/${projectId}/databases/${databaseId}/documents/question_reports/${rId}`,
+          fields,
+        },
+        updateMask: {
+          fieldPaths,
+        },
+      };
+    });
+
+    const commitRes = await fetch(commitUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ writes }),
+    });
+
+    if (!commitRes.ok) {
+      const errText = await commitRes.text();
+      console.warn('[Resolve Reports API] Warning:', errText);
+      return res.status(commitRes.status).json({ success: false, error: errText });
+    }
+
+    console.log(`[Resolve Reports API] Successfully updated ${targetReportIds.length} reports to status='${targetStatus}'`);
+    return res.json({ success: true, updatedCount: targetReportIds.length, status: targetStatus });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'Server error during report resolution' });
+  }
+});
+
 // Cancel / Leave Lobby Endpoint
 app.post('/api/lobby/leave', (req, res) => {
   try {
@@ -1317,7 +1473,7 @@ Respond strictly with a JSON object in this exact schema without markdown format
   }
 
   // Model candidates with fallback if a model experiences high traffic (503)
-  const modelCandidates = ['gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest'];
+  const modelCandidates = ['gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-3.7-flash'];
   let lastErrorStatus = 500;
   let lastErrorMessage = 'Gemini AI unavailable';
 

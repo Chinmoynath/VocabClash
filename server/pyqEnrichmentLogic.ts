@@ -256,8 +256,8 @@ STRICT EDUCATIONAL MANDATE (EVERY SINGLE QUESTION MUST BE FULLY ENRICHED):
 
 Respond strictly with a JSON array.`;
 
-    // Active candidate models with gemini-3.5-flash-lite prioritized for fast, quota-available AI generation
-    const modelCandidates = ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest'];
+    // Active candidate models prioritized for high-speed, reliable, high-yield AI vocabulary enrichment
+    const modelCandidates = ['gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-3.7-flash'];
     
     for (const modelName of modelCandidates) {
       let succeeded = false;
@@ -347,7 +347,7 @@ Respond strictly with a JSON array.`;
             await new Promise(resolve => setTimeout(resolve, delay));
             continue;
           }
-          console.warn(`[GEMINI ENRICHMENT] Model ${modelName} notice (${err?.status || err?.message || 'Unavailable'}). Switched to high-yield dictionary synthesis.`);
+          console.error(`[GEMINI ENRICHMENT] Model ${modelName} error:`, err?.status, err?.message || err);
           break;
         }
       }

@@ -9,7 +9,7 @@ import {
   orderBy,
   limit
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType, isFirestoreQuotaExhausted } from './firebaseService';
+import { db, auth, handleFirestoreError, OperationType, isFirestoreQuotaExhausted } from './firebaseService';
 import { Question } from '../types';
 import { QuestionQualityResult, QualityAuditStats, UserQuestionReport } from '../types/pyqQuality';
 import { validateQuestionBatchQuality } from './pyqQualityValidator';
@@ -126,14 +126,32 @@ export async function resolveUserReportsForQuestion(questionId: string, alternat
   const allIds = new Set([questionId, ...alternateIds].filter(Boolean));
   // Clean up local storage cache
   const local = loadReportsLocally();
-  const updatedLocal = local.filter(r => 
-    !allIds.has(r.questionId) && 
-    !allIds.has(r.questionData?.canonicalQuestionId || '') &&
-    !allIds.has(r.questionData?.id || '')
-  );
+  const matchingReportIds: string[] = [];
+  const updatedLocal = local.filter(r => {
+    const matches = allIds.has(r.questionId) || 
+      (r.questionData && (allIds.has(r.questionData.canonicalQuestionId || '') || allIds.has(r.questionData.id || '')));
+    if (matches) {
+      matchingReportIds.push(r.reportId);
+      return false;
+    }
+    return true;
+  });
   saveAllReportsLocally(updatedLocal);
 
   try {
+    const currentUser = auth.currentUser;
+    if (currentUser && matchingReportIds.length > 0) {
+      const idToken = await currentUser.getIdToken();
+      await fetch('/api/admin/resolve-reports', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({ reportIds: matchingReportIds }),
+      }).catch(console.warn);
+    }
+
     const colRef = collection(db, 'question_reports');
     const snap = await getDocs(query(colRef, limit(500)));
     const batch = writeBatch(db);
@@ -168,6 +186,19 @@ export async function deleteSingleUserReport(reportId: string): Promise<boolean>
   saveAllReportsLocally(local.filter(r => r.reportId !== reportId));
 
   try {
+    const currentUser = auth.currentUser;
+    if (currentUser) {
+      const idToken = await currentUser.getIdToken();
+      await fetch('/api/admin/resolve-reports', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({ reportIds: [reportId] }),
+      }).catch(console.warn);
+    }
+
     const docRef = doc(db, 'question_reports', reportId);
     await deleteDoc(docRef).catch(e => console.warn('Could not delete report doc:', e));
     return true;
@@ -240,8 +271,9 @@ class PyqQualityAuditService {
 
   /**
    * Admin Action: PUSH QUESTION TO FIRESTORE
-   * Commits/publishes a question document directly into Firestore `question_bank`,
-   * resolves any linked user discrepancy reports, updates QuestionBankEngine runtime,
+   * Commits/publishes a question document directly into Firestore `question_bank`
+   * via high-speed server REST publishing pipeline, resolves linked user discrepancy reports
+   * (preserving audit history by updating status to 'resolved'), updates QuestionBankEngine runtime,
    * and refreshes the audit status to valid.
    */
   public async pushQuestionToFirestore(
@@ -249,44 +281,73 @@ class PyqQualityAuditService {
     resolveReportIds?: string[]
   ): Promise<{ success: boolean; error?: string }> {
     try {
-      const targetDocId = question.canonicalQuestionId || question.id || generateCanonicalQuestionId(
+      const targetDocId = question.id || question.canonicalQuestionId || generateCanonicalQuestionId(
         question.category,
         question.wordOrPhrase,
         question.options,
         question.correctIndex
       );
 
-      const docRef = doc(db, 'question_bank', targetDocId);
       const payload: any = sanitizeForFirestore({
         ...question,
         id: targetDocId,
-        canonicalQuestionId: targetDocId,
+        canonicalQuestionId: question.canonicalQuestionId || targetDocId,
         verified: true,
         isPYQ: true,
         updatedAt: Date.now(),
       });
 
-      await setDoc(docRef, payload, { merge: true });
-
-      // Clean up linked user reports in Firestore
-      if (resolveReportIds && resolveReportIds.length > 0) {
-        for (const rId of resolveReportIds) {
-          deleteSingleUserReport(rId).catch(console.warn);
-        }
+      // Use authoritative server REST publish endpoint (same pipeline as repaired JSON publisher)
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        throw new Error('Admin authentication required to push to Firestore question bank.');
       }
-      resolveUserReportsForQuestion(targetDocId, [question.id, ...(resolveReportIds || [])]).catch(console.warn);
-      if (question.id !== targetDocId) {
-        resolveUserReportsForQuestion(question.id).catch(console.warn);
+
+      const idToken = await currentUser.getIdToken(true);
+      const response = await fetch('/api/admin/publish-questions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          questions: [payload],
+        }),
+      });
+
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({}));
+        throw new Error(errJson?.error || `Publish failed with HTTP status ${response.status}`);
+      }
+
+      // Update linked user reports in Firestore by updating status to 'resolved' (preserving history)
+      const reportsToResolve = resolveReportIds && resolveReportIds.length > 0 
+        ? resolveReportIds 
+        : this.userReports.filter(r => r.questionId === targetDocId || r.questionId === question.id).map(r => r.reportId);
+
+      if (reportsToResolve.length > 0) {
+        await fetch('/api/admin/resolve-reports', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${idToken}`,
+          },
+          body: JSON.stringify({ 
+            reportIds: reportsToResolve, 
+            status: 'resolved',
+            resolutionNotes: 'Fixed and verified in question bank by admin' 
+          }),
+        }).catch(console.warn);
       }
 
       // Update runtime QuestionBankEngine
       questionBankEngine.registerApprovedQuestions([payload as Question], true);
 
-      // Remove from in-memory user reports
+      // Remove from in-memory open user reports
       this.userReports = this.userReports.filter(r => 
         r.questionId !== targetDocId && 
         r.questionId !== question.id &&
-        !(resolveReportIds || []).includes(r.reportId)
+        !reportsToResolve.includes(r.reportId)
       );
 
       // Mark valid in auditResults
@@ -296,7 +357,7 @@ class PyqQualityAuditService {
         issues: [],
         scannedAt: Date.now(),
       });
-      if (question.id !== targetDocId) {
+      if (question.id && question.id !== targetDocId) {
         this.auditResults.delete(question.id);
       }
       this.saveCachedAudit();
@@ -383,7 +444,7 @@ class PyqQualityAuditService {
 
   /**
    * Admin Action: KEEP / ACKNOWLEDGE
-   * Marks question audit status as valid / reviewed, and clears any associated user reports.
+   * Marks question audit status as valid / reviewed, and updates any associated user reports to resolved (preserving history).
    */
   public async markAsKeep(questionId: string): Promise<{ success: boolean }> {
     const existing = this.auditResults.get(questionId);
@@ -396,26 +457,63 @@ class PyqQualityAuditService {
     });
     this.saveCachedAudit();
 
-    // Remove in-memory user reports for this question
+    // Mark matching reports as resolved
+    const matchingReportIds = this.userReports.filter(r => r.questionId === questionId).map(r => r.reportId);
     this.userReports = this.userReports.filter(r => r.questionId !== questionId);
 
-    // Clean up / resolve in Firestore question_reports in background
-    resolveUserReportsForQuestion(questionId).catch(err => {
-      console.warn('Background resolve question reports warning:', err);
-    });
+    if (matchingReportIds.length > 0) {
+      const currentUser = auth.currentUser;
+      if (currentUser) {
+        try {
+          const idToken = await currentUser.getIdToken();
+          await fetch('/api/admin/resolve-reports', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${idToken}`,
+            },
+            body: JSON.stringify({ 
+              reportIds: matchingReportIds, 
+              status: 'resolved',
+              resolutionNotes: 'Acknowledged as valid authentic PYQ by admin'
+            }),
+          });
+        } catch (err) {
+          console.warn('Background resolve question reports warning:', err);
+        }
+      }
+    }
 
     return { success: true };
   }
 
   /**
    * Admin Action: DISMISS SINGLE REPORT
-   * Dismisses a specific report from memory and Firestore.
+   * Dismisses a specific report from memory and updates Firestore status to 'dismissed' (preserving history).
    */
   public async deleteSingleReport(reportId: string, questionId: string): Promise<{ success: boolean }> {
     this.userReports = this.userReports.filter(r => r.reportId !== reportId);
-    deleteSingleUserReport(reportId).catch(err => {
-      console.warn('Background delete single report warning:', err);
-    });
+
+    const currentUser = auth.currentUser;
+    if (currentUser) {
+      try {
+        const idToken = await currentUser.getIdToken();
+        await fetch('/api/admin/resolve-reports', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${idToken}`,
+          },
+          body: JSON.stringify({ 
+            reportIds: [reportId], 
+            status: 'dismissed',
+            resolutionNotes: 'Dismissed by admin in quality review'
+          }),
+        });
+      } catch (err) {
+        console.warn('Background dismiss report warning:', err);
+      }
+    }
 
     const remainingReports = this.userReports.filter(r => r.questionId === questionId);
     if (remainingReports.length === 0) {
@@ -444,13 +542,16 @@ class PyqQualityAuditService {
     originalQuestion: Question
   ): Promise<{ success: boolean; error?: string }> {
     try {
-      const docRef = doc(db, 'question_bank', questionId);
+      if (!questionId || typeof questionId !== 'string' || questionId.trim() === '') {
+        return { success: false, error: 'Cannot update: Invalid question document ID' };
+      }
 
+      const cleanId = questionId.trim();
       const mergedPayload = sanitizeForFirestore({
         ...originalQuestion,
         ...updatedFields,
-        id: questionId,
-        canonicalQuestionId: originalQuestion.canonicalQuestionId || questionId,
+        id: cleanId,
+        canonicalQuestionId: originalQuestion.canonicalQuestionId || cleanId,
         appearances: originalQuestion.appearances,
         examHistory: originalQuestion.examHistory,
         repeatCount: originalQuestion.repeatCount,
@@ -459,7 +560,28 @@ class PyqQualityAuditService {
         updatedAt: Date.now(),
       });
 
-      await setDoc(docRef, mergedPayload, { merge: true });
+      // Use REST pipeline with admin ID token
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        throw new Error('Admin authentication required to save question edits to Firestore.');
+      }
+
+      const idToken = await currentUser.getIdToken(true);
+      const response = await fetch('/api/admin/publish-questions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          questions: [mergedPayload],
+        }),
+      });
+
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({}));
+        throw new Error(errJson?.error || `Failed to update question with HTTP ${response.status}`);
+      }
 
       // Re-validate single question
       const revalidatedQuestion: Question = {
@@ -468,7 +590,7 @@ class PyqQualityAuditService {
       };
       const newAudit = validateQuestionBatchQuality([revalidatedQuestion]);
       if (newAudit.length > 0) {
-        this.auditResults.set(questionId, newAudit[0]);
+        this.auditResults.set(cleanId, newAudit[0]);
         this.saveCachedAudit();
       }
 
@@ -481,35 +603,84 @@ class PyqQualityAuditService {
 
   /**
    * Admin Action: DELETE QUESTION
-   * Safely deletes corrupted question from Firestore question_bank, cleans up user reports,
+   * Safely deletes ONLY the exact resolved production question document from Firestore question_bank,
+   * updates any linked user reports to status='resolved' (preserving audit history),
    * and removes audit entry and runtime memory caches.
    */
-  public async deleteQuestionSafely(questionId: string): Promise<{ success: boolean; error?: string }> {
+  public async deleteQuestionSafely(
+    exactDocId: string, 
+    originalQuestion?: Question
+  ): Promise<{ success: boolean; error?: string }> {
+    if (!exactDocId || typeof exactDocId !== 'string' || exactDocId.trim() === '') {
+      console.error('[Quality Delete] failed: Missing exact Firestore document ID');
+      return { success: false, error: 'Cannot delete: Question does not have a unique Firestore document ID.' };
+    }
+
+    const cleanDocId = exactDocId.trim();
+
     try {
-      // 1. Delete from Firestore question_bank
-      const ok = await deleteQuestionFromFirestore(questionId);
-      
-      // 2. Resolve/clean up any user discrepancy reports for this question
-      resolveUserReportsForQuestion(questionId).catch(e => console.warn(e));
+      // 1. Delete ONLY the exact production document from Firestore question_bank
+      const ok = await deleteQuestionFromFirestore(cleanDocId);
+      if (!ok) {
+        return { success: false, error: `Could not delete document ${cleanDocId} from Firestore.` };
+      }
+
+      // 2. Resolve linked user discrepancy reports in Firestore (preserving history)
+      const linkedReports = this.userReports.filter(r => 
+        r.questionId === cleanDocId || 
+        (originalQuestion && (r.questionId === originalQuestion.id || r.questionId === originalQuestion.canonicalQuestionId))
+      );
+      const linkedReportIds = linkedReports.map(r => r.reportId);
+
+      if (linkedReportIds.length > 0) {
+        const currentUser = auth.currentUser;
+        if (currentUser) {
+          try {
+            const idToken = await currentUser.getIdToken();
+            await fetch('/api/admin/resolve-reports', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${idToken}`,
+              },
+              body: JSON.stringify({
+                reportIds: linkedReportIds,
+                status: 'resolved',
+                resolutionNotes: 'Question permanently deleted from question bank by admin',
+              }),
+            });
+          } catch (repErr) {
+            console.warn('[Quality Delete] Report status update notice:', repErr);
+          }
+        }
+      }
 
       // 3. Clean up runtime engine and quality audit memory
-      questionBankEngine.deleteQuestionById(questionId);
-      this.auditResults.delete(questionId);
-      this.userReports = this.userReports.filter(r => r.questionId !== questionId);
+      questionBankEngine.deleteQuestionById(cleanDocId);
+      if (originalQuestion?.id && originalQuestion.id !== cleanDocId) {
+        questionBankEngine.deleteQuestionById(originalQuestion.id);
+      }
+      if (originalQuestion?.canonicalQuestionId) {
+        questionBankEngine.deleteQuestionById(originalQuestion.canonicalQuestionId);
+      }
+
+      this.auditResults.delete(cleanDocId);
+      if (originalQuestion?.id) this.auditResults.delete(originalQuestion.id);
+
+      this.userReports = this.userReports.filter(r => 
+        r.questionId !== cleanDocId && 
+        !linkedReportIds.includes(r.reportId) &&
+        (!originalQuestion || (r.questionId !== originalQuestion.id && r.questionId !== originalQuestion.canonicalQuestionId))
+      );
       this.saveCachedAudit();
 
-      if (ok) {
-        return { success: true };
-      }
+      console.log('[Quality Delete] reports_updated');
+      console.log('[Quality Delete] ui_refreshed');
+
       return { success: true };
     } catch (err: any) {
-      console.error('[PYQ Admin Delete]', err);
-      // Clean up locally so UI is never stuck
-      questionBankEngine.deleteQuestionById(questionId);
-      this.auditResults.delete(questionId);
-      this.userReports = this.userReports.filter(r => r.questionId !== questionId);
-      this.saveCachedAudit();
-      return { success: true };
+      console.error(`[Quality Delete] failed code=${err?.code || 'DELETE_ERROR'} message=${err?.message || 'Delete error'}`);
+      return { success: false, error: err?.message || 'Delete operation failed' };
     }
   }
 }

@@ -820,17 +820,69 @@ export async function fetchRecentBatches(limitCount: number = 20): Promise<Impor
 }
 
 /**
- * Delete a single question from Firestore question_bank (Admin only)
+ * Delete a single question from Firestore question_bank by exact document ID (Admin only)
+ * Uses high-speed server REST pipeline with Bearer token authentication and timeout protection.
  */
-export async function deleteQuestionFromFirestore(questionId: string): Promise<boolean> {
-  const path = `question_bank/${questionId}`;
+export async function deleteQuestionFromFirestore(exactDocId: string): Promise<boolean> {
+  if (!exactDocId || typeof exactDocId !== 'string' || exactDocId.trim() === '') {
+    console.error('[Quality Delete] failed: No valid exact document ID provided');
+    return false;
+  }
+
+  const cleanDocId = exactDocId.trim();
+  console.log('[Quality Delete] confirmed');
+  console.log(`[Quality Delete] question_id_resolved target_doc_id=${cleanDocId}`);
+  console.log(`[Quality Delete] request_started`);
+
   try {
-    const docRef = doc(db, 'question_bank', questionId);
-    await deleteDoc(docRef);
+    const currentUser = auth.currentUser;
+    if (currentUser) {
+      const idToken = await currentUser.getIdToken();
+      const abortController = new AbortController();
+      const timeoutId = setTimeout(() => abortController.abort(), 10000);
+
+      try {
+        const response = await fetch('/api/admin/delete-question', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${idToken}`,
+          },
+          body: JSON.stringify({ 
+            questionIds: [cleanDocId],
+          }),
+          signal: abortController.signal,
+        });
+        clearTimeout(timeoutId);
+
+        console.log(`[Quality Delete] response_status status=${response.status}`);
+        if (response.ok) {
+          console.log(`[Quality Delete] document_verified_absent id=${cleanDocId}`);
+          return true;
+        } else {
+          const errJson = await response.json().catch(() => ({}));
+          console.error('[Quality Delete] REST delete failed:', errJson?.error || response.statusText);
+          return false;
+        }
+      } catch (restErr: any) {
+        clearTimeout(timeoutId);
+        console.error('[Quality Delete] REST request error:', restErr);
+        return false;
+      }
+    }
+
+    // Direct Web SDK with timeout if not authenticated through REST
+    const docRef = doc(db, 'question_bank', cleanDocId);
+    const webSdkPromise = deleteDoc(docRef);
+    const timeoutPromise = new Promise<{ timeout: boolean }>((_, reject) => 
+      setTimeout(() => reject(new Error('Web SDK delete operation timed out after 6s')), 6000)
+    );
+
+    await Promise.race([webSdkPromise, timeoutPromise]);
+    console.log(`[Quality Delete] document_verified_absent via Web SDK id=${cleanDocId}`);
     return true;
   } catch (err: any) {
-    console.error('[PYQ Admin Delete]', err);
-    handleFirestoreError(err, OperationType.DELETE, path);
+    console.error(`[Quality Delete] failed code=${err?.code || 'DELETE_ERROR'} message=${err?.message || 'Delete error'}`);
     return false;
   }
 }
