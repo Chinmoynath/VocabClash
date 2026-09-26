@@ -47,6 +47,8 @@ import { ExamAppearancesBadge } from './ExamAppearancesBadge';
 import { formatRepeatCount } from '../utils/questionFingerprint';
 import { resolveCardEducation } from '../utils/questionEducationResolver';
 import { QuestionSolutionBreakdown } from './QuestionSolutionBreakdown';
+import { isAndroidCapacitor } from '../utils/platform';
+import { openExternalUrl } from '../utils/externalLinks';
 import { VaultFlyAnimation, VaultFlyItem } from './VaultFlyAnimation';
 import { EXAM_FAMILY_PILLS, EXAM_FAMILY_SUB_TAGS, normalizeFilterToFamily, matchesExamFamilyFilter } from '../utils/examFamilyUtils';
 import { questionBankEngine } from '../services/questionBankEngine';
@@ -1875,8 +1877,21 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
           </div>
 
           {!isAnswered && (
-            <div className="text-center py-1.5 text-[11px] text-slate-400/80 font-medium">
-              💡 Select an option (or press <span className="text-sky-300 font-mono font-bold">1, 2, 3, 4</span> on keyboard) to check answer & reveal breakdown
+            <div className="text-center py-1.5 text-[11px] text-slate-400/80 font-medium select-none">
+              {isAndroidCapacitor() ? (
+                <span className="inline-flex items-center justify-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => openExternalUrl('https://vocabclash.in')}
+                    className="text-slate-300 font-semibold hover:text-sky-300 active:text-sky-400 transition-colors cursor-pointer"
+                  >
+                    VocabClash.in
+                  </button>
+                  <span className="text-slate-500 font-normal">• Official Website</span>
+                </span>
+              ) : (
+                <>💡 Select an option (or press <span className="text-sky-300 font-mono font-bold">1, 2, 3, 4</span> on keyboard) to check answer & reveal breakdown</>
+              )}
             </div>
           )}
 
