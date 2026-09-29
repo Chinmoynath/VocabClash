@@ -70,12 +70,14 @@ export async function purchaseWithCapacitorPlay(
       };
     }
 
-    // Acknowledge purchase with Google Play
+    // Acknowledge purchase with Google Play if unacknowledged
     try {
-      await NativePurchases.acknowledgePurchase({
-        purchaseToken: transaction.purchaseToken,
-      });
-      console.log('[CapacitorPlayBilling] Native purchase acknowledged successfully.');
+      if (!transaction.isAcknowledged) {
+        await NativePurchases.acknowledgePurchase({
+          purchaseToken: transaction.purchaseToken,
+        });
+        console.log('[CapacitorPlayBilling] Native purchase acknowledged successfully.');
+      }
     } catch (ackErr: any) {
       console.warn('[CapacitorPlayBilling] Acknowledge note (may already be acknowledged):', ackErr?.message);
     }
@@ -94,6 +96,28 @@ export async function purchaseWithCapacitorPlay(
     };
   } catch (err: any) {
     console.error('[CapacitorPlayBilling] Purchase error:', err);
+    const errStr = (err?.message || String(err)).toLowerCase();
+    const isAlreadyOwned = errStr.includes('already owned') || 
+      errStr.includes('already subscribed') || 
+      errStr.includes('item_already_owned') || 
+      errStr.includes('responsecode: 7') ||
+      err?.code === 7 || err?.responseCode === 7;
+
+    if (isAlreadyOwned) {
+      console.log('[CapacitorPlayBilling] Item already owned in Google Play ledger. Initiating auto-recovery...');
+      const restored = await restoreCapacitorPlayPurchases(userId, userEmail);
+      if (restored) {
+        return {
+          success: true,
+          subscription: restored,
+        };
+      }
+      return {
+        success: false,
+        error: "We found your Google Play subscription but couldn't verify it yet. Please tap Restore Purchases.",
+      };
+    }
+
     return {
       success: false,
       error: err?.message || 'An error occurred during Google Play checkout.',
@@ -115,12 +139,81 @@ export async function restoreCapacitorPlayPurchases(
       return null;
     }
 
-    console.log('[CapacitorPlayBilling] Synchronizing purchases with Google Play...');
-    await NativePurchases.restorePurchases();
-    
-    // Security Rule: Without a verified active purchase token confirmed by /api/payments/google/verify,
-    // client must never construct or assign unverified local premium entitlements.
-    // If no verifiable active purchase exists, return null so user remains on the free tier.
+    console.log('[CapacitorPlayBilling] Querying owned purchases from Google Play...');
+    try {
+      await NativePurchases.restorePurchases();
+    } catch (syncErr) {
+      console.warn('[CapacitorPlayBilling] restorePurchases sync note:', syncErr);
+    }
+
+    // Query active subscriptions and in-app purchases
+    let subsPurchases: any[] = [];
+    let inAppPurchases: any[] = [];
+    try {
+      const subsRes = await NativePurchases.getPurchases({ productType: PURCHASE_TYPE.SUBS });
+      subsPurchases = subsRes?.purchases || [];
+    } catch (err) {
+      console.warn('[CapacitorPlayBilling] getPurchases(SUBS) note:', err);
+    }
+
+    try {
+      const inAppRes = await NativePurchases.getPurchases({ productType: PURCHASE_TYPE.INAPP });
+      inAppPurchases = inAppRes?.purchases || [];
+    } catch (err) {
+      console.warn('[CapacitorPlayBilling] getPurchases(INAPP) note:', err);
+    }
+
+    const allPurchases = [...subsPurchases, ...inAppPurchases];
+    console.log(`[CapacitorPlayBilling] Total transactions retrieved: ${allPurchases.length}`);
+
+    // Supported VocabClash product IDs in priority order
+    const priorityProductIds = [
+      PLAY_PRODUCTS.lifetime,
+      PLAY_PRODUCTS.yearly,
+      PLAY_PRODUCTS.halfYearly,
+      PLAY_PRODUCTS.quarterly,
+      PLAY_PRODUCTS.monthly,
+    ];
+
+    for (const prodId of priorityProductIds) {
+      const match = allPurchases.find(p => p.productIdentifier === prodId && p.purchaseToken);
+      if (match) {
+        console.log(`[CapacitorPlayBilling] Found active owned purchase for ${prodId}`);
+        let planId = 'quarterly';
+        if (prodId === PLAY_PRODUCTS.monthly) planId = 'monthly';
+        else if (prodId === PLAY_PRODUCTS.quarterly) planId = 'quarterly';
+        else if (prodId === PLAY_PRODUCTS.halfYearly) planId = 'six_months';
+        else if (prodId === PLAY_PRODUCTS.yearly) planId = 'annual';
+        else if (prodId === PLAY_PRODUCTS.lifetime) planId = 'lifetime';
+
+        const verifyResult = await verifyGooglePlayPurchaseOnBackend({
+          purchaseToken: match.purchaseToken,
+          sku: prodId,
+          productId: prodId,
+          planId,
+          userId,
+          userEmail,
+          orderId: match.transactionId,
+        });
+
+        if (verifyResult.success && verifyResult.verified && verifyResult.subscription) {
+          if (!match.isAcknowledged) {
+            try {
+              await NativePurchases.acknowledgePurchase({ purchaseToken: match.purchaseToken });
+              console.log(`[CapacitorPlayBilling] Acknowledged restored purchase for ${prodId}`);
+            } catch (ackErr) {
+              console.warn('[CapacitorPlayBilling] Acknowledge note:', ackErr);
+            }
+          }
+          return {
+            ...verifyResult.subscription,
+            isPremium: true,
+            provider: 'google_play',
+          } as UserSubscription;
+        }
+      }
+    }
+
     return null;
   } catch (err) {
     console.warn('[CapacitorPlayBilling] Restore purchases check failed:', err);

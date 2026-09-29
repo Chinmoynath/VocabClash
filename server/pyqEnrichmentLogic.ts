@@ -198,11 +198,50 @@ function extractJsonArray(raw: string): any[] | null {
   return null;
 }
 
+// Global in-memory cooldown state to prevent hammering Gemini API when 429 quota limits are hit
+let geminiQuotaCooldownUntil = 0;
+
+export function setGeminiQuotaCooldown(durationMs: number = 60000): void {
+  geminiQuotaCooldownUntil = Math.max(geminiQuotaCooldownUntil, Date.now() + durationMs);
+}
+
+export function isGeminiInQuotaCooldown(): boolean {
+  return Date.now() < geminiQuotaCooldownUntil;
+}
+
+function parseRetryDelayMs(err: any): number {
+  try {
+    const details = err?.error?.details || err?.details;
+    if (Array.isArray(details)) {
+      for (const d of details) {
+        if (d?.['@type']?.includes('RetryInfo') && d?.retryDelay) {
+          const sec = parseFloat(String(d.retryDelay).replace(/[^\d.]/g, ''));
+          if (!isNaN(sec) && sec > 0) return Math.ceil(sec * 1000) + 1000;
+        }
+      }
+    }
+    const msg = typeof err?.message === 'string' ? err.message : JSON.stringify(err);
+    const retryMatch = msg.match(/retry(?:Delay| in)?[:\s]+(\d+(?:\.\d+)?)\s*s/i);
+    if (retryMatch && retryMatch[1]) {
+      const sec = parseFloat(retryMatch[1]);
+      if (!isNaN(sec) && sec > 0) return Math.ceil(sec * 1000) + 1000;
+    }
+  } catch {}
+  return 60000; // 60s default cooldown on 429
+}
+
 export async function processPyqEnrichmentBatch(
   batch: EnrichmentQuestionInput[],
   ai: GoogleGenAI | null
 ): Promise<EnrichedQuestionOutput[]> {
   const safeBatch = batch.slice(0, 10);
+
+  // If AI is in quota cooldown or unavailable, immediately return authentic high-yield synthesis fallback
+  if (isGeminiInQuotaCooldown()) {
+    const remainingSec = Math.ceil((geminiQuotaCooldownUntil - Date.now()) / 1000);
+    console.log(`[GEMINI ENRICHMENT] AI currently in quota cooldown (${remainingSec}s remaining). Using high-yield offline educational synthesis.`);
+    return safeBatch.map(createFallbackOutput);
+  }
 
   if (ai) {
     const prompt = `You are a distinguished English Faculty and Senior Vocabulary Master for Indian Govt Examinations (SSC CGL, CHSL, CPO, MTS, CDS, NDA, Banking PO).
@@ -256,12 +295,14 @@ STRICT EDUCATIONAL MANDATE (EVERY SINGLE QUESTION MUST BE FULLY ENRICHED):
 
 Respond strictly with a JSON array.`;
 
-    // Active candidate models prioritized for high-speed, reliable, high-yield AI vocabulary enrichment
-    const modelCandidates = ['gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-3.7-flash'];
+    // Active candidate models prioritized for high-speed, reliable, high-yield AI vocabulary enrichment per @google/genai guidelines
+    const modelCandidates = ['gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest'];
     
     for (const modelName of modelCandidates) {
+      if (isGeminiInQuotaCooldown()) break;
       let succeeded = false;
       for (let attempt = 1; attempt <= 2; attempt++) {
+        if (isGeminiInQuotaCooldown()) break;
         try {
           const response = await ai.models.generateContent({
             model: modelName,
@@ -341,17 +382,30 @@ Respond strictly with a JSON array.`;
             }
           }
         } catch (err: any) {
-          const isTransient = err?.status === 503 || err?.status === 429 || err?.message?.includes('503') || err?.message?.includes('429');
+          const isQuota = err?.status === 429 || 
+            err?.message?.includes('429') || 
+            err?.message?.includes('RESOURCE_EXHAUSTED') || 
+            err?.message?.includes('Quota exceeded') ||
+            err?.message?.includes('quota');
+
+          if (isQuota) {
+            const cooldownMs = Math.max(30000, parseRetryDelayMs(err));
+            setGeminiQuotaCooldown(cooldownMs);
+            console.warn(`[GEMINI ENRICHMENT] Model ${modelName} reached rate/quota limit (429). Setting cooldown for ${Math.round(cooldownMs / 1000)}s. Activating high-yield dictionary synthesis.`);
+            break; // Cease querying remaining candidate models to prevent quota spam
+          }
+
+          const isTransient = err?.status === 503 || err?.message?.includes('503');
           if (attempt === 1 && isTransient) {
             const delay = 1000 + Math.floor(Math.random() * 600);
             await new Promise(resolve => setTimeout(resolve, delay));
             continue;
           }
-          console.error(`[GEMINI ENRICHMENT] Model ${modelName} error:`, err?.status, err?.message || err);
+          console.warn(`[GEMINI ENRICHMENT] Model ${modelName} unavailable, falling back:`, err?.status || err?.message);
           break;
         }
       }
-      if (succeeded) break;
+      if (succeeded || isGeminiInQuotaCooldown()) break;
     }
   }
 

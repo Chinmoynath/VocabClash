@@ -2,6 +2,7 @@ import { SubscriptionPlan, UserSubscription } from '../types';
 import { mapPlanToGooglePlay, PLAY_PRODUCTS, PlayPlanMapping } from '../config/playProducts';
 import { isAndroidCapacitor } from '../utils/platform';
 import { restoreCapacitorPlayPurchases } from './capacitorPlayBillingService';
+import { auth } from './firebaseService';
 
 const PLAY_BILLING_METHOD = 'https://play.google.com/billing';
 
@@ -120,27 +121,73 @@ export async function verifyGooglePlayPurchaseOnBackend(params: {
   planId: string;
   userId?: string;
   userEmail?: string;
+  orderId?: string;
 }): Promise<GooglePlayVerificationResult> {
   try {
-    const res = await fetch('/api/payments/google/verify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      return data;
+    // 1. Authenticate caller with fresh Firebase ID token
+    let idToken = '';
+    const currentUser = auth.currentUser;
+    if (currentUser) {
+      try {
+        idToken = await currentUser.getIdToken(true);
+      } catch (tokErr) {
+        console.warn('[Payments] Fresh token retrieval notice:', tokErr);
+        idToken = await currentUser.getIdToken();
+      }
     }
 
-    const errData = await res.json().catch(() => ({}));
+    if (!idToken) {
+      return {
+        success: false,
+        verified: false,
+        error: 'Please sign in with your VocabClash account first to verify and link your VIP subscription.',
+      };
+    }
+
+    // 2. Resolve target URL:
+    // In native Capacitor Android, local WebView cannot resolve relative /api routes; use absolute production domain.
+    const verifyEndpoints = isAndroidCapacitor()
+      ? ['https://www.vocabclash.in/api/payments/google/verify']
+      : ['/api/payments/google/verify', 'https://www.vocabclash.in/api/payments/google/verify'];
+
+    let lastError = '';
+
+    for (const url of verifyEndpoints) {
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${idToken}`,
+          },
+          body: JSON.stringify(params),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.success && data.subscription) {
+            return data;
+          }
+        }
+
+        const errData = await res.json().catch(() => ({}));
+        lastError = errData.error || `Server verification returned status ${res.status}`;
+        if (res.status === 401 || res.status === 400) {
+          // Client or auth error, don't retry alternative host
+          break;
+        }
+      } catch (fetchErr: any) {
+        lastError = fetchErr?.message || 'Network connection failure';
+      }
+    }
+
     return {
       success: false,
       verified: false,
-      error: errData.error || `Server verification returned status ${res.status}`,
+      error: lastError || 'Server verification failed',
     };
   } catch (err: any) {
-    console.error('[Payments] Network error during Google Play backend verification:', err);
+    console.error('[Payments] Exception during Google Play backend verification:', err);
     return {
       success: false,
       verified: false,
@@ -211,6 +258,20 @@ export async function purchaseWithGooglePlay(
     paymentResponse = await request.show();
     console.log(`[Play Billing] Google Play sheet opened for ${playMapping.sku}`);
   } catch (err: any) {
+    const errStr = (err?.message || String(err)).toLowerCase();
+    const isAlreadyOwned = errStr.includes('already owned') || 
+      errStr.includes('already subscribed') || 
+      errStr.includes('item_already_owned');
+
+    if (isAlreadyOwned) {
+      console.log(`[Play Billing] Item ${playMapping.sku} already owned in Google Play ledger. Initiating auto-recovery...`);
+      const restored = await restoreGooglePlayPurchases(userId, userEmail);
+      if (restored) {
+        return restored;
+      }
+      throw new Error("We found your Google Play subscription but couldn't verify it yet. Please tap Restore Purchases.");
+    }
+
     console.error(`[Play Billing] paymentRequest.show() error for ${playMapping.sku}:`, err);
     throw err;
   }
@@ -235,9 +296,10 @@ export async function purchaseWithGooglePlay(
     planId: plan.id,
     userId,
     userEmail,
+    orderId: details.orderId,
   });
 
-  if (!verifyResult.success || !verifyResult.verified) {
+  if (!verifyResult.success || !verifyResult.verified || !verifyResult.subscription) {
     await paymentResponse.complete('fail').catch(() => {});
     throw new Error(verifyResult.error || 'Google Play purchase verification failed on server.');
   }
@@ -253,29 +315,11 @@ export async function purchaseWithGooglePlay(
     console.warn('[Play Billing] Acknowledge notice (may already be acknowledged):', ackErr?.message);
   }
 
-  const durationDays = plan.periodDurationDays || (plan.id === 'monthly' ? 30 : plan.id === 'six_months' ? 180 : plan.id === 'annual' ? 365 : 90);
-  const renewDate = isOneTime
-    ? 'Lifetime Active'
-    : `Renews ${new Date(Date.now() + durationDays * 86400000).toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-      })} at ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
-
   return {
+    ...verifyResult.subscription,
     isPremium: true,
-    planId: plan.id,
-    planName: plan.name,
-    subscribedAt: Date.now(),
-    renewalDate: renewDate,
-    autoRenew: !isOneTime,
     provider: 'google_play',
-    purchaseToken,
-    orderId: details.orderId || undefined,
-    purchaseType: playMapping.itemType,
-    verifiedAt: Date.now(),
-    expiresAt: isOneTime ? undefined : Date.now() + durationDays * 86400000,
-  };
+  } as UserSubscription;
 }
 
 /**
@@ -300,9 +344,18 @@ export async function restoreGooglePlayPurchases(
     return null;
   }
 
-  // Check the most relevant active purchase
-  for (const p of purchases) {
-    if (p.purchaseToken) {
+  const priorityProductIds = [
+    PLAY_PRODUCTS.lifetime,
+    PLAY_PRODUCTS.yearly,
+    PLAY_PRODUCTS.halfYearly,
+    PLAY_PRODUCTS.quarterly,
+    PLAY_PRODUCTS.monthly,
+  ];
+
+  // Check the most relevant active purchase in priority order
+  for (const targetId of priorityProductIds) {
+    const p = purchases.find(item => item.itemId === targetId && item.purchaseToken);
+    if (p && p.purchaseToken) {
       let matchedPlanId = 'quarterly';
       if (p.itemId === PLAY_PRODUCTS.monthly) matchedPlanId = 'monthly';
       else if (p.itemId === PLAY_PRODUCTS.quarterly) matchedPlanId = 'quarterly';
@@ -322,6 +375,14 @@ export async function restoreGooglePlayPurchases(
       });
 
       if (verifyResult.success && verifyResult.verified && verifyResult.subscription) {
+        if (!p.acknowledged) {
+          try {
+            await service.acknowledge(p.purchaseToken, isLifetime ? 'onetime' : 'repeatable');
+            console.log(`[Play Billing] Acknowledged restored purchase for ${p.itemId}`);
+          } catch (ackErr) {
+            console.warn('[Play Billing] Acknowledge note during restore:', ackErr);
+          }
+        }
         return {
           ...verifyResult.subscription,
           isPremium: true,

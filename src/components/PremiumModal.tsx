@@ -212,6 +212,10 @@ export const PremiumModal: React.FC<PremiumModalProps> = ({
 
         onUpdateSubscription(updatedSub);
 
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('user-stats-updated'));
+        }
+
         setStatusMessage({
           text: `Payment Successful! VIP Pass activated for ${selectedPlan.name}.`,
           type: 'success',
@@ -231,7 +235,17 @@ export const PremiumModal: React.FC<PremiumModalProps> = ({
         let userFriendlyMsg = "Google Play couldn't start the purchase. Please try again.";
         if (errorMsg.toLowerCase().includes('user_cancelled') || errorMsg === 'Payment was cancelled.') {
           userFriendlyMsg = 'Payment was cancelled.';
-        } else if (errorMsg.includes('verification failed') || errorMsg.includes('Network connection')) {
+        } else if (
+          errorMsg.includes('verification') || 
+          errorMsg.includes('Verification') || 
+          errorMsg.includes('Network') || 
+          errorMsg.includes('network') ||
+          errorMsg.includes('found your Google Play subscription') ||
+          errorMsg.includes('sign in') ||
+          errorMsg.includes('Entitlement')
+        ) {
+          userFriendlyMsg = errorMsg;
+        } else if (errorMsg && errorMsg.length > 5 && !errorMsg.includes('PaymentRequest')) {
           userFriendlyMsg = errorMsg;
         }
 
@@ -276,6 +290,9 @@ export const PremiumModal: React.FC<PremiumModalProps> = ({
       if (restored) {
         soundManager.playCorrect();
         onUpdateSubscription(restored);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('user-stats-updated'));
+        }
         setStatusMessage({
           text: 'Google Play purchases restored successfully! VIP activated.',
           type: 'success',
