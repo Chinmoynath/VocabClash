@@ -130,8 +130,8 @@ export const InterstitialAdModal: React.FC<InterstitialAdModalProps> = ({
             onClick={handleGoPremium}
             className="w-full bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-600 hover:from-purple-500 hover:to-indigo-500 active:scale-98 text-white font-extrabold py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-purple-950 border border-purple-400/30 transition-all"
           >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>UPGRADE TO REMOVE ADS</span>
+            <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+            <span>UPGRADE TO VIP</span>
             <ArrowRight className="w-3.5 h-3.5" />
           </button>
         </div>

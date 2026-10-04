@@ -1,5 +1,18 @@
 import { QuestionCategory, PlayerProfile } from '../types';
 import { 
+  DailyChallengeAttempt,
+  DailyChallengeReportStats,
+  getTodayDateString,
+  formatDisplayDate,
+  formatDuration,
+  normalizeDailyChallengeAttempt,
+  deduplicateDailyChallengeHistory,
+  getLast30DaysRange,
+  getLast30DaysChallengeAttempts,
+  getCalendarDayOffset,
+  calculateDailyChallengeReportStats
+} from '../utils/dailyChallengeHistoryUtils';
+import { 
   saveDailyChallengeToFirestore, 
   deleteDailyChallengeDayFromFirestore,
   fetchDailyChallengeHistoryFromFirestore, 
@@ -7,22 +20,18 @@ import {
   auth 
 } from './firebaseService';
 
-export interface DailyChallengeAttempt {
-  date: string; // ISO format "YYYY-MM-DD"
-  timestamp: number;
-  totalQuestions: number; // usually 20
-  answeredCount: number;
-  correctCount: number;
-  wrongCount: number;
-  score: number; // Marks (e.g. 1 mark per correct or total marks)
-  maxMarks: number; // usually 20
-  percentage: number; // Accuracy percentage (0-100)
-  timeTakenSeconds: number; // Seconds spent (out of 120s)
-  categoryBreakdown?: Record<QuestionCategory, { total: number; correct: number }>;
-  rankPointsAwarded?: number;
-  userId?: string;
-  userEmail?: string;
-}
+export type { DailyChallengeAttempt, DailyChallengeReportStats };
+export { 
+  getTodayDateString, 
+  formatDisplayDate, 
+  formatDuration, 
+  normalizeDailyChallengeAttempt, 
+  deduplicateDailyChallengeHistory, 
+  getLast30DaysRange, 
+  getLast30DaysChallengeAttempts, 
+  getCalendarDayOffset,
+  calculateDailyChallengeReportStats 
+};
 
 // Clean v2 storage keys
 const STORAGE_KEY_V2_PREFIX = 'vocabclash_daily_challenge_v2_';
@@ -62,7 +71,7 @@ export function sanitizeDailyChallengeHistory(
   const effectiveEmail = userEmail || auth.currentUser?.email;
   const isChinmoy = isChinmoyAccount(effectiveEmail);
 
-  return history.filter(attempt => {
+  const filtered = history.filter(attempt => {
     if (!attempt || !attempt.date) return false;
 
     // Chinmoy's genuine attempts are preserved
@@ -86,51 +95,8 @@ export function sanitizeDailyChallengeHistory(
 
     return true;
   });
-}
 
-/**
- * Returns today's date formatted as YYYY-MM-DD in India Standard Time (Asia/Kolkata).
- * Ensures a single synchronized calendar date for all users worldwide.
- */
-export function getTodayDateString(date: Date = new Date()): string {
-  try {
-    const formatter = new Intl.DateTimeFormat('en-US', {
-      timeZone: 'Asia/Kolkata',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    });
-    const parts = formatter.formatToParts(date);
-    let year = '';
-    let month = '';
-    let day = '';
-    for (const part of parts) {
-      if (part.type === 'year') year = part.value;
-      if (part.type === 'month') month = part.value.padStart(2, '0');
-      if (part.type === 'day') day = part.value.padStart(2, '0');
-    }
-    if (year && month && day) {
-      return `${year}-${month}-${day}`;
-    }
-  } catch {}
-
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-/**
- * Formats a date string for display (e.g. "15 Sep" or "Sep 15")
- */
-export function formatDisplayDate(dateStr: string): string {
-  try {
-    const [year, month, day] = dateStr.split('-').map(Number);
-    const d = new Date(year, month - 1, day);
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  } catch {
-    return dateStr;
-  }
+  return deduplicateDailyChallengeHistory(filtered);
 }
 
 /**
@@ -144,7 +110,7 @@ function cleanAndGetLocalHistory(userId?: string | null): DailyChallengeAttempt[
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        return sanitizeDailyChallengeHistory(parsed, userId).sort((a, b) => a.date.localeCompare(b.date));
+        return sanitizeDailyChallengeHistory(parsed, userId);
       }
     }
 
@@ -228,29 +194,12 @@ export function clearDailyChallengeLocalCache(userId?: string | null): void {
  */
 export function mergeDailyChallengeHistory(cloudAttempts: DailyChallengeAttempt[], userId?: string | null): DailyChallengeAttempt[] {
   const local = getDailyChallengeHistory(userId);
-  if (!Array.isArray(cloudAttempts) || cloudAttempts.length === 0) {
-    return local;
-  }
+  const cloudList = Array.isArray(cloudAttempts) ? cloudAttempts : [];
 
-  const sanitizedCloud = sanitizeDailyChallengeHistory(cloudAttempts, userId);
-  const map = new Map<string, DailyChallengeAttempt>();
+  const sanitizedCloud = sanitizeDailyChallengeHistory(cloudList, userId);
+  const combined = [...local, ...sanitizedCloud];
+  const merged = deduplicateDailyChallengeHistory(combined);
 
-  // 1. Ingest local records
-  local.forEach(item => {
-    if (item && item.date) map.set(item.date, item);
-  });
-
-  // 2. Ingest cloud records, keeping best/most recent for each date
-  sanitizedCloud.forEach(item => {
-    if (item && item.date) {
-      const existing = map.get(item.date);
-      if (!existing || (item.score ?? 0) >= (existing.score ?? 0)) {
-        map.set(item.date, item);
-      }
-    }
-  });
-
-  const merged = Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date));
   setDailyChallengeHistoryForUser(userId, merged);
   return merged;
 }
@@ -289,7 +238,14 @@ export function saveDailyChallengeAttempt(
   const isFirstAttemptToday = !existingTodayAttempt;
   const rankPointsGained = isFirstAttemptToday ? (25 + attempt.correctCount * 2) : 0;
 
-  const finalizedAttempt: DailyChallengeAttempt = {
+  const normalized = normalizeDailyChallengeAttempt({
+    ...attempt,
+    rankPointsAwarded: isFirstAttemptToday ? rankPointsGained : (existingTodayAttempt?.rankPointsAwarded || 0),
+    userId: effectiveUid || undefined,
+    userEmail: effectiveEmail || undefined,
+  });
+
+  const finalizedAttempt: DailyChallengeAttempt = normalized || {
     ...attempt,
     rankPointsAwarded: isFirstAttemptToday ? rankPointsGained : (existingTodayAttempt?.rankPointsAwarded || 0),
     userId: effectiveUid || undefined,
@@ -298,7 +254,7 @@ export function saveDailyChallengeAttempt(
 
   // Replace any existing attempt for today while keeping all other dates intact
   const filteredHistory = existingHistory.filter(a => a.date !== attempt.date);
-  const updatedHistory = [...filteredHistory, finalizedAttempt].sort((a, b) => a.date.localeCompare(b.date));
+  const updatedHistory = deduplicateDailyChallengeHistory([...filteredHistory, finalizedAttempt]);
 
   // 1. User-scoped Local Storage persistence
   setDailyChallengeHistoryForUser(effectiveUid, updatedHistory);
@@ -398,16 +354,6 @@ export async function syncDailyChallengeWithBackend(
   }
 
   return localBefore;
-}
-
-/**
- * Formats seconds into MM:SS string (e.g. 1m 24s)
- */
-export function formatDuration(seconds: number): string {
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  if (mins === 0) return `${secs}s`;
-  return `${mins}m ${secs.toString().padStart(2, '0')}s`;
 }
 
 /**

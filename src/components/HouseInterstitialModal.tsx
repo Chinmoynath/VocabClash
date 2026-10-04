@@ -11,6 +11,7 @@ import { recordAdShown } from '../utils/adManager';
 interface HouseInterstitialModalProps {
   onClose: () => void;
   onOpenPremium: () => void;
+  isPremium?: boolean;
 }
 
 export const HouseInterstitialModal: React.FC<HouseInterstitialModalProps> = ({
@@ -56,7 +57,7 @@ export const HouseInterstitialModal: React.FC<HouseInterstitialModalProps> = ({
     >
       <div 
         id="house-interstitial-card"
-        className="w-full max-w-md bg-gradient-to-b from-[#161524] to-[#0c0c16] border border-slate-700/80 rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-[0_0_60px_rgba(0,0,0,0.9)] flex flex-col justify-between relative max-h-[95vh] overflow-y-auto no-scrollbar"
+        className="w-full max-w-md bg-gradient-to-b from-[#161524] to-[#0c0c16] border border-slate-700/80 rounded-2xl sm:rounded-3xl p-4 sm:p-5 shadow-[0_0_60px_rgba(0,0,0,0.9)] flex flex-col justify-between relative max-h-[96vh] overflow-y-auto no-scrollbar"
       >
         {/* Top Bar with Intermission Indicator and 5-Second Countdown / Circled Black Cross Sign */}
         <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
@@ -88,11 +89,25 @@ export const HouseInterstitialModal: React.FC<HouseInterstitialModalProps> = ({
           </div>
         </div>
 
-        {/* Centered Total Black Screen Area (Nothing written in this part) */}
+        {/* Real Static Study Break Banner Asset */}
         <div 
           id="house-interstitial-ad-area"
-          className="my-4 bg-black border border-slate-900 rounded-2xl w-full h-64 sm:h-72 shadow-inner"
-        />
+          className="my-3 rounded-2xl overflow-hidden border border-slate-700/80 shadow-[0_0_30px_rgba(0,0,0,0.8)] bg-black flex items-center justify-center"
+        >
+          <img
+            src="/study-break-promo.png"
+            onError={(e) => {
+              const target = e.currentTarget;
+              if (!target.src.endsWith('/assets/study-break-vip.png')) {
+                target.src = '/assets/study-break-vip.png';
+              }
+            }}
+            alt="Turn preparation into progress. With the right tools. VocabClash English for Govt Exams"
+            className="w-full h-auto object-contain rounded-xl select-none pointer-events-none block"
+            loading="eager"
+            referrerPolicy="no-referrer"
+          />
+        </div>
 
         {/* Bottom VIP CTA: VocabClash VIP */}
         <div 
@@ -108,7 +123,7 @@ export const HouseInterstitialModal: React.FC<HouseInterstitialModalProps> = ({
                 VocabClash VIP
               </div>
               <div className="text-[11px] text-purple-300/80 mt-0.5">
-                Remove ads and practice without interruptions.
+                Practice without interruptions. Boost recall by 2.4x.
               </div>
             </div>
           </div>
@@ -117,15 +132,18 @@ export const HouseInterstitialModal: React.FC<HouseInterstitialModalProps> = ({
             <span className="text-[11px] text-purple-300/90 font-medium">
               Starting at <strong className="text-white font-bold">₹19/month</strong>
             </span>
+            <span className="text-[10px] text-purple-400/80 font-medium">
+              Instant Activation · Cancel Anytime
+            </span>
           </div>
 
           <button
-            id="house-ad-remove-ads-btn"
+            id="house-ad-upgrade-vip-btn"
             onClick={handleGoPremium}
             className="w-full bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-600 hover:from-purple-500 hover:to-indigo-500 active:scale-98 text-white font-black py-2.5 px-4 rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-purple-950/60 border border-purple-400/30 transition-all cursor-pointer"
           >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>REMOVE ADS</span>
+            <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+            <span>UPGRADE TO VIP</span>
             <ArrowRight className="w-3.5 h-3.5" />
           </button>
         </div>

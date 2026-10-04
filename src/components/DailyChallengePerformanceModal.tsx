@@ -14,7 +14,11 @@ import {
   DailyChallengeAttempt, 
   formatDisplayDate, 
   formatDuration, 
-  getTodayDateString 
+  getTodayDateString,
+  getLast30DaysRange,
+  getLast30DaysChallengeAttempts,
+  getCalendarDayOffset,
+  calculateDailyChallengeReportStats
 } from '../services/dailyChallengeService';
 import { soundManager } from '../utils/audio';
 
@@ -36,41 +40,23 @@ export const DailyChallengePerformanceModal: React.FC<DailyChallengePerformanceM
   const [activeTab, setActiveTab] = useState<ReportMetricTab>('accuracy');
   const [hoveredPointIndex, setHoveredPointIndex] = useState<number | null>(null);
 
-  // Take the last 7 to 10 entries for a clean, readable chart
-  const chartData = useMemo(() => {
-    if (!history || history.length === 0) return [];
-    return history.slice(-8);
+  // 1. Rolling 30 calendar days range ending today in India Standard Time
+  const thirtyDayRange = useMemo(() => {
+    return getLast30DaysRange();
+  }, []);
+
+  // Strictly normalize and filter history to the rolling LAST 30 CALENDAR DAYS
+  const thirtyDayAttempts = useMemo(() => {
+    return getLast30DaysChallengeAttempts(history);
   }, [history]);
 
-  // Metric aggregates
+  // Chart data plots all completed attempts in the last 30 calendar days chronologically
+  const chartData = thirtyDayAttempts;
+
+  // 2. Compute deterministic aggregate statistics for the last 30 calendar days
   const stats = useMemo(() => {
-    if (!history || history.length === 0) {
-      return {
-        avgAccuracy: 0,
-        bestScore: 0,
-        avgScore: 0,
-        totalAttempts: 0,
-        bestAccuracy: 0,
-        avgTimeTaken: 0,
-      };
-    }
-
-    const total = history.length;
-    const sumAcc = history.reduce((acc, curr) => acc + curr.percentage, 0);
-    const sumScore = history.reduce((acc, curr) => acc + curr.score, 0);
-    const sumTime = history.reduce((acc, curr) => acc + curr.timeTakenSeconds, 0);
-    const maxScore = Math.max(...history.map(h => h.score));
-    const maxAcc = Math.max(...history.map(h => h.percentage));
-
-    return {
-      avgAccuracy: Math.round((sumAcc / total) * 10) / 10,
-      bestScore: maxScore,
-      avgScore: Math.round((sumScore / total) * 10) / 10,
-      totalAttempts: total,
-      bestAccuracy: maxAcc,
-      avgTimeTaken: Math.round(sumTime / total),
-    };
-  }, [history]);
+    return calculateDailyChallengeReportStats(thirtyDayAttempts);
+  }, [thirtyDayAttempts]);
 
   if (!isOpen) return null;
 
@@ -89,18 +75,24 @@ export const DailyChallengePerformanceModal: React.FC<DailyChallengePerformanceM
   const maxY = isAccuracy ? 100 : 20;
   const minY = 0;
 
-  // Build points
-  const points = chartData.map((item, index) => {
-    const val = isAccuracy ? item.percentage : item.score;
-    const x = chartData.length === 1 
-      ? padLeft + chartWidth / 2 
-      : padLeft + (index / (chartData.length - 1)) * chartWidth;
-    const y = padTop + chartHeight - ((val - minY) / (maxY - minY)) * chartHeight;
+  // Build points with calendar-date x-positioning across the 30-calendar-day window
+  const points = chartData.map((item) => {
+    const rawVal = isAccuracy ? item.percentage : item.score;
+    const val = typeof rawVal === 'number' && isFinite(rawVal) ? rawVal : 0;
+
+    // Calendar day offset from startDate (0 to 29 across 30 calendar days)
+    const dayOffset = getCalendarDayOffset(item.date, thirtyDayRange.startDate);
+    const x = padLeft + (dayOffset / 29) * chartWidth;
+
+    const yRatio = (val - minY) / (maxY - minY);
+    const safeRatio = Math.max(0, Math.min(1, isFinite(yRatio) ? yRatio : 0));
+    const y = padTop + chartHeight - safeRatio * chartHeight;
     return {
       x,
       y,
       val,
       item,
+      dayOffset,
       label: formatDisplayDate(item.date),
       isToday: item.date === getTodayDateString(),
     };
@@ -139,7 +131,7 @@ export const DailyChallengePerformanceModal: React.FC<DailyChallengePerformanceM
 
   const hoveredPoint = hoveredPointIndex !== null && points[hoveredPointIndex] ? points[hoveredPointIndex] : (points.length === 1 ? points[0] : null);
 
-  const columnWidth = points.length > 0 ? chartWidth / Math.max(points.length, 1) : chartWidth;
+  const slotWidth = Math.max(22, chartWidth / 29);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-sm animate-fadeIn">
@@ -163,7 +155,7 @@ export const DailyChallengePerformanceModal: React.FC<DailyChallengePerformanceM
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                20 Questions in 2 Minutes • Historical Trend & Stats
+                20 Questions in 2 Minutes • Last 30 Days Trend & Stats
               </p>
             </div>
           </div>
@@ -191,7 +183,7 @@ export const DailyChallengePerformanceModal: React.FC<DailyChallengePerformanceM
                 <span>Avg Accuracy</span>
               </div>
               <div className="text-lg font-black text-emerald-400 font-mono mt-0.5">
-                {stats.avgAccuracy}%
+                {stats.avgAccuracy !== null ? `${stats.avgAccuracy}%` : '—'}
               </div>
             </div>
 
@@ -201,7 +193,7 @@ export const DailyChallengePerformanceModal: React.FC<DailyChallengePerformanceM
                 <span>Best Score</span>
               </div>
               <div className="text-lg font-black text-amber-400 font-mono mt-0.5">
-                {stats.bestScore} / 20
+                {stats.totalAttempts > 0 ? `${stats.bestScore} / 20` : '—'}
               </div>
             </div>
 
@@ -211,7 +203,7 @@ export const DailyChallengePerformanceModal: React.FC<DailyChallengePerformanceM
                 <span>Avg Speed</span>
               </div>
               <div className="text-lg font-black text-sky-400 font-mono mt-0.5">
-                {formatDuration(stats.avgTimeTaken)}
+                {stats.totalAttempts > 0 ? formatDuration(stats.avgSpeed) : '—'}
               </div>
             </div>
 
@@ -221,7 +213,7 @@ export const DailyChallengePerformanceModal: React.FC<DailyChallengePerformanceM
                 <span>Completed</span>
               </div>
               <div className="text-lg font-black text-purple-400 font-mono mt-0.5">
-                {stats.totalAttempts} Days
+                {stats.completedDays} Days
               </div>
             </div>
           </div>
@@ -286,7 +278,9 @@ export const DailyChallengePerformanceModal: React.FC<DailyChallengePerformanceM
               </div>
             ) : (
               <div className="absolute top-2 right-3 z-10 text-[11px] text-slate-400 font-medium">
-                {isAccuracy ? `Latest: ${chartData[chartData.length - 1]?.percentage || 0}%` : `Latest: ${chartData[chartData.length - 1]?.score || 0}/20`}
+                {chartData.length > 0 
+                  ? (isAccuracy ? `Latest: ${chartData[chartData.length - 1]?.percentage ?? 0}%` : `Latest: ${chartData[chartData.length - 1]?.score ?? 0}/20`)
+                  : 'No attempts in last 30 days'}
               </div>
             )}
 
@@ -355,7 +349,7 @@ export const DailyChallengePerformanceModal: React.FC<DailyChallengePerformanceM
                 {/* Interactive Columns and Data Points */}
                 {points.map((pt, idx) => {
                   const isHovered = hoveredPointIndex === idx || (hoveredPointIndex === null && points.length === 1);
-                  const colX = Math.max(padLeft, pt.x - columnWidth / 2);
+                  const colX = Math.max(padLeft, pt.x - slotWidth / 2);
 
                   return (
                     <g key={idx}>
@@ -363,7 +357,7 @@ export const DailyChallengePerformanceModal: React.FC<DailyChallengePerformanceM
                       <rect
                         x={colX}
                         y={0}
-                        width={columnWidth}
+                        width={slotWidth}
                         height={height}
                         fill="transparent"
                         className="cursor-pointer"
@@ -413,7 +407,7 @@ export const DailyChallengePerformanceModal: React.FC<DailyChallengePerformanceM
                       />
 
                       {/* Floating Badge above point with value */}
-                      <g transform={`translate(${pt.x}, ${pt.y - 14})`}>
+                      <g transform={`translate(${isFinite(pt.x) ? pt.x : padLeft}, ${isFinite(pt.y) ? pt.y - 14 : padTop})`}>
                         <rect
                           x={-24}
                           y={-14}
@@ -438,17 +432,31 @@ export const DailyChallengePerformanceModal: React.FC<DailyChallengePerformanceM
                         </text>
                       </g>
 
-                      {/* X-axis Date Label */}
-                      <text
-                        x={pt.x}
-                        y={padTop + chartHeight + 16}
-                        fill={pt.isToday ? '#fbbf24' : '#94a3b8'}
-                        fontSize="9.5"
-                        fontWeight={pt.isToday ? 'bold' : 'normal'}
-                        textAnchor="middle"
-                      >
-                        {pt.label}
-                      </text>
+                      {/* X-axis Date Label: rendered clearly without text overlap */}
+                      {(() => {
+                        const isSelected = isHovered;
+                        const isFirst = idx === 0;
+                        const isLast = idx === points.length - 1;
+                        const isToday = pt.isToday;
+                        const hasSpacing = idx === 0 || Math.abs(pt.x - points[idx - 1].x) >= 26;
+
+                        if (!isSelected && !isFirst && !isLast && !isToday && !hasSpacing) {
+                          return null;
+                        }
+
+                        return (
+                          <text
+                            x={pt.x}
+                            y={padTop + chartHeight + 16}
+                            fill={pt.isToday ? '#fbbf24' : isSelected ? '#ffffff' : '#94a3b8'}
+                            fontSize="9"
+                            fontWeight={pt.isToday || isSelected ? 'bold' : 'normal'}
+                            textAnchor="middle"
+                          >
+                            {pt.label}
+                          </text>
+                        );
+                      })()}
                     </g>
                   );
                 })}
@@ -513,11 +521,11 @@ export const DailyChallengePerformanceModal: React.FC<DailyChallengePerformanceM
           {/* Recent History Table */}
           <div className="space-y-2">
             <div className="text-xs font-bold text-slate-300 uppercase tracking-wider">
-              Recent Challenge Attempts
+              Recent Challenge Attempts (Last 30 Days)
             </div>
             <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-              {history && history.length > 0 ? (
-                [...history].reverse().map((att, idx) => {
+              {thirtyDayAttempts && thirtyDayAttempts.length > 0 ? (
+                [...thirtyDayAttempts].reverse().map((att, idx) => {
                   const isToday = att.date === getTodayDateString();
                   return (
                     <div 
@@ -561,7 +569,7 @@ export const DailyChallengePerformanceModal: React.FC<DailyChallengePerformanceM
                 })
               ) : (
                 <div className="p-4 rounded-xl bg-slate-900/40 border border-slate-800/80 text-center text-xs text-slate-400">
-                  No challenge attempts recorded yet. Complete today's drill to start your graph!
+                  No challenge attempts recorded in the last 30 days. Complete today&apos;s drill to start your graph!
                 </div>
               )}
             </div>

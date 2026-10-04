@@ -1,4 +1,5 @@
 import { ADS_ENABLED } from '../services/adSenseService';
+import { isAndroidCapacitor } from './platform';
 
 /**
  * =======================================================================
@@ -20,8 +21,16 @@ export { ADS_ENABLED };
 const STORAGE_KEY_LAST_AD = 'vocabclash_last_ad_ts_v1';
 export const AD_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes (600,000 ms)
 
+/**
+ * Checks whether the advertising system is active:
+ * - On Native Android (Capacitor): Always active (Native AdMob primary + House fallback)
+ * - On Web: Active if House Interstitial is enabled OR AdSense is enabled
+ */
 export function isAdSystemActive(): boolean {
-  return ADS_ENABLED || USE_HOUSE_INTERSTITIAL;
+  if (isAndroidCapacitor()) {
+    return true;
+  }
+  return USE_HOUSE_INTERSTITIAL || ADS_ENABLED;
 }
 
 export function getLastAdTimestamp(): number {
@@ -41,6 +50,7 @@ export function recordAdShown(): void {
   if (!isAdSystemActive()) return;
   if (typeof window === 'undefined') return;
   localStorage.setItem(STORAGE_KEY_LAST_AD, Date.now().toString());
+  console.log('[AdMob:cooldown-recorded] 10-minute cooldown timestamp recorded');
 }
 
 export function resetAdTimerForTest(): void {

@@ -43,6 +43,10 @@ import {
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { isAndroidCapacitor, isAndroidTWA } from '../utils/platform';
+import { 
+  normalizeDailyChallengeAttempt, 
+  deduplicateDailyChallengeHistory 
+} from '../utils/dailyChallengeHistoryUtils';
 import { PlayerProfile, UserSubscription, DailyStreakState, SavedWord, QuestionCategory, ExamType } from '../types';
 import { DailyTargetState } from '../utils/dailyTargetManager';
 import { validateProperEmail } from '../utils/emailValidator';
@@ -1097,14 +1101,17 @@ export async function saveDailyChallengeToFirestore(
 
     const normalizedAttempt = cleanAttempt ? {
       completed: true,
-      score: cleanAttempt.score ?? 0,
-      correct: cleanAttempt.correctCount ?? cleanAttempt.correct ?? 0,
-      total: cleanAttempt.totalQuestions ?? cleanAttempt.total ?? 20,
-      accuracy: cleanAttempt.percentage ?? cleanAttempt.accuracy ?? 0,
-      speed: cleanAttempt.timeTakenSeconds ?? cleanAttempt.speed ?? 0,
-      completedAt: cleanAttempt.timestamp ?? Date.now(),
-      lpEarned: cleanAttempt.rankPointsAwarded ?? cleanAttempt.lpEarned ?? 0,
       date: cleanAttempt.date,
+      timestamp: cleanAttempt.timestamp ?? Date.now(),
+      totalQuestions: cleanAttempt.totalQuestions ?? 20,
+      answeredCount: cleanAttempt.answeredCount ?? cleanAttempt.totalQuestions ?? 20,
+      correctCount: cleanAttempt.correctCount ?? cleanAttempt.score ?? 0,
+      wrongCount: cleanAttempt.wrongCount ?? 0,
+      score: cleanAttempt.score ?? 0,
+      maxMarks: cleanAttempt.maxMarks ?? cleanAttempt.totalQuestions ?? 20,
+      percentage: cleanAttempt.percentage ?? 0,
+      timeTakenSeconds: cleanAttempt.timeTakenSeconds ?? 0,
+      rankPointsAwarded: cleanAttempt.rankPointsAwarded ?? 0,
       uid,
       userEmail: cleanAttempt.userEmail || auth.currentUser?.email || null,
       updatedAt: Date.now(),
@@ -1184,29 +1191,26 @@ export async function fetchDailyChallengeHistoryFromFirestore(uid: string): Prom
       const data = snap.data();
       if (Array.isArray(data?.dailyChallengeHistory)) {
         data.dailyChallengeHistory.forEach((item: any) => {
-          if (item && item.date) {
-            map.set(item.date, item);
+          if (item) {
+            const normalized = normalizeDailyChallengeAttempt(item);
+            if (normalized && normalized.date) {
+              const existing = map.get(normalized.date);
+              if (!existing || normalized.score >= existing.score) {
+                map.set(normalized.date, normalized);
+              }
+            }
           }
         });
       }
       if (data?.dailyChallenges && typeof data.dailyChallenges === 'object') {
         Object.entries(data.dailyChallenges).forEach(([d, item]: [string, any]) => {
           if (item && typeof item === 'object') {
-            const dateKey = item.date || d;
-            const existing = map.get(dateKey);
-            if (!existing || (item.score ?? 0) >= (existing.score ?? 0)) {
-              map.set(dateKey, {
-                ...item,
-                date: dateKey,
-                correctCount: item.correct ?? item.correctCount ?? 0,
-                totalQuestions: item.total ?? item.totalQuestions ?? 20,
-                percentage: item.accuracy ?? item.percentage ?? 0,
-                timeTakenSeconds: item.speed ?? item.timeTakenSeconds ?? 0,
-                score: item.score ?? 0,
-                maxMarks: item.total ?? item.maxMarks ?? 20,
-                timestamp: item.completedAt ?? item.timestamp ?? Date.now(),
-                rankPointsAwarded: item.lpEarned ?? item.rankPointsAwarded ?? 0,
-              });
+            const normalized = normalizeDailyChallengeAttempt({ ...item, date: item.date || d });
+            if (normalized && normalized.date) {
+              const existing = map.get(normalized.date);
+              if (!existing || normalized.score >= existing.score) {
+                map.set(normalized.date, normalized);
+              }
             }
           }
         });
@@ -1219,22 +1223,13 @@ export async function fetchDailyChallengeHistoryFromFirestore(uid: string): Prom
     if (subSnap1 && !subSnap1.empty) {
       subSnap1.forEach((docItem) => {
         const item = docItem.data();
-        if (item && (item.date || docItem.id)) {
-          const dateKey = item.date || docItem.id;
-          const existing = map.get(dateKey);
-          if (!existing || (item.score ?? 0) >= (existing.score ?? 0)) {
-            map.set(dateKey, {
-              ...item,
-              date: dateKey,
-              correctCount: item.correct ?? item.correctCount ?? 0,
-              totalQuestions: item.total ?? item.totalQuestions ?? 20,
-              percentage: item.accuracy ?? item.percentage ?? 0,
-              timeTakenSeconds: item.speed ?? item.timeTakenSeconds ?? 0,
-              score: item.score ?? 0,
-              maxMarks: item.total ?? item.maxMarks ?? 20,
-              timestamp: item.completedAt ?? item.timestamp ?? Date.now(),
-              rankPointsAwarded: item.lpEarned ?? item.rankPointsAwarded ?? 0,
-            });
+        if (item) {
+          const normalized = normalizeDailyChallengeAttempt({ ...item, date: item.date || docItem.id });
+          if (normalized && normalized.date) {
+            const existing = map.get(normalized.date);
+            if (!existing || normalized.score >= existing.score) {
+              map.set(normalized.date, normalized);
+            }
           }
         }
       });
@@ -1246,22 +1241,13 @@ export async function fetchDailyChallengeHistoryFromFirestore(uid: string): Prom
     if (subSnap2 && !subSnap2.empty) {
       subSnap2.forEach((docItem) => {
         const item = docItem.data();
-        if (item && (item.date || docItem.id)) {
-          const dateKey = item.date || docItem.id;
-          const existing = map.get(dateKey);
-          if (!existing || (item.score ?? 0) >= (existing.score ?? 0)) {
-            map.set(dateKey, {
-              ...item,
-              date: dateKey,
-              correctCount: item.correct ?? item.correctCount ?? 0,
-              totalQuestions: item.total ?? item.totalQuestions ?? 20,
-              percentage: item.accuracy ?? item.percentage ?? 0,
-              timeTakenSeconds: item.speed ?? item.timeTakenSeconds ?? 0,
-              score: item.score ?? 0,
-              maxMarks: item.total ?? item.maxMarks ?? 20,
-              timestamp: item.completedAt ?? item.timestamp ?? Date.now(),
-              rankPointsAwarded: item.lpEarned ?? item.rankPointsAwarded ?? 0,
-            });
+        if (item) {
+          const normalized = normalizeDailyChallengeAttempt({ ...item, date: item.date || docItem.id });
+          if (normalized && normalized.date) {
+            const existing = map.get(normalized.date);
+            if (!existing || normalized.score >= existing.score) {
+              map.set(normalized.date, normalized);
+            }
           }
         }
       });
@@ -1270,8 +1256,7 @@ export async function fetchDailyChallengeHistoryFromFirestore(uid: string): Prom
     console.warn('[DAILY CHALLENGE FIRESTORE] Notice fetching history:', err);
   }
 
-  const merged = Array.from(map.values()).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-  return merged;
+  return deduplicateDailyChallengeHistory(Array.from(map.values()));
 }
 
 /**

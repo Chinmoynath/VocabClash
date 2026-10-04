@@ -143,7 +143,7 @@ function attachGlobalListeners(): void {
     });
 
     AdMob.addListener(InterstitialAdPluginEvents.FailedToLoad, (err) => {
-      console.warn('[AdMob] Interstitial failed to load:', err);
+      console.warn('[AdMob:no-fill] Interstitial failed to load:', err);
       isInterstitialLoaded = false;
       isPreparingInterstitial = false;
     });
@@ -151,16 +151,14 @@ function attachGlobalListeners(): void {
     AdMob.addListener(InterstitialAdPluginEvents.Dismissed, () => {
       console.log('[AdMob] Interstitial dismissed');
       isInterstitialLoaded = false;
-      recordAdShown();
-      // Pre-warm the next interstitial ad in background
+      // Pre-warm next interstitial once in background for the next interval
       prepareInterstitial(false).catch(() => {});
     });
 
     AdMob.addListener(InterstitialAdPluginEvents.FailedToShow, (err) => {
-      console.warn('[AdMob] Interstitial failed to show:', err);
+      console.warn('[AdMob:show-failed] Interstitial failed to show:', err);
       isInterstitialLoaded = false;
-      // Pre-warm next attempt
-      prepareInterstitial(false).catch(() => {});
+      // Do not enter an immediate retry loop
     });
   }
 }
@@ -245,11 +243,13 @@ export async function prepareInterstitial(isPremium: boolean): Promise<boolean> 
 /**
  * Shows a native interstitial ad if ready, respecting frequency cooldowns.
  * Guaranteed never to throw or block product flow if unavailable.
+ * Returns true if native ad actually displayed; false if unavailable/failed.
  */
 export async function showNativeInterstitialIfDue(
   isPremium: boolean,
   matchesPlayed?: number
 ): Promise<boolean> {
+  console.log('[AdMob:trigger] Evaluating ad eligibility');
   if (!isAndroidCapacitor() || isPremium) {
     return false;
   }
@@ -263,27 +263,29 @@ export async function showNativeInterstitialIfDue(
   if (!isAdDue(isPremium, matchesPlayed)) {
     return false;
   }
+  console.log('[AdMob:due] 10-minute cooldown reached');
 
   try {
     // If not prepared yet, attempt rapid preparation
     if (!isInterstitialLoaded) {
+      console.log('[AdMob:not-ready] Interstitial not in memory, attempting load');
       const prepared = await prepareInterstitial(isPremium);
-      if (!prepared) {
+      if (!prepared || !isInterstitialLoaded) {
+        console.log('[AdMob:no-fill] Interstitial could not be prepared in time');
         return false;
       }
     }
 
+    console.log('[AdMob:show-attempt] Presenting native interstitial');
     await AdMob.showInterstitial();
+    console.log('[AdMob:show-success] Native interstitial displayed successfully');
     isInterstitialLoaded = false;
     recordAdShown();
     return true;
   } catch (error) {
-    console.warn('[AdMob] showInterstitial failed to display (continuing normally):', error);
+    console.warn('[AdMob:show-failed] showInterstitial failed to display (continuing normally):', error);
     isInterstitialLoaded = false;
-    // Pre-warm next attempt if free user
-    if (!isPremium) {
-      prepareInterstitial(false).catch(() => {});
-    }
+    // Do not immediately loop retry here; fallback house modal handles this trigger
     return false;
   }
 }
@@ -294,12 +296,14 @@ export async function showNativeInterstitialIfDue(
 export async function showTestNativeInterstitial(): Promise<boolean> {
   if (!isAndroidCapacitor()) return false;
   try {
+    console.log('[AdMob:show-attempt] Showing test native interstitial');
     await prepareInterstitial(false);
     await AdMob.showInterstitial();
+    console.log('[AdMob:show-success] Test native interstitial displayed');
     recordAdShown();
     return true;
   } catch (error) {
-    console.warn('[AdMob] showTestNativeInterstitial error:', error);
+    console.warn('[AdMob:show-failed] showTestNativeInterstitial error:', error);
     return false;
   }
 }

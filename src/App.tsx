@@ -2101,7 +2101,7 @@ export default function App() {
   };
 
   // Check 10-minute ad trigger safely at natural breaks (never during active play, modals, or offline)
-  const triggerAdIfDue = (overrideMatchesPlayed?: number) => {
+  const triggerAdIfDue = async (overrideMatchesPlayed?: number) => {
     if (!isAdSystemActive() || subscription.isPremium) {
       return;
     }
@@ -2120,18 +2120,20 @@ export default function App() {
       return;
     }
     
-    if (USE_HOUSE_INTERSTITIAL) {
-      if (isAdDue(subscription.isPremium, overrideMatchesPlayed)) {
+    if (!isAdDue(subscription.isPremium, overrideMatchesPlayed)) {
+      return;
+    }
+
+    if (isAndroidCapacitor()) {
+      console.log('[AdMob:trigger] Natural break reached on Android');
+      const showedNative = await showNativeInterstitialIfDue(subscription.isPremium, overrideMatchesPlayed);
+      if (!showedNative) {
+        console.log('[AdMob:fallback-house] Native AdMob unavailable; opening Study Break fallback');
         setShowHouseAdModal(true);
       }
     } else {
-      if (isAndroidCapacitor()) {
-        showNativeInterstitialIfDue(subscription.isPremium, overrideMatchesPlayed);
-      } else {
-        if (isAdDue(subscription.isPremium, overrideMatchesPlayed)) {
-          setShowAdModal(true);
-        }
-      }
+      // Web / non-native environment: Study Break modal is primary ad experience
+      setShowHouseAdModal(true);
     }
   };
 
@@ -2505,30 +2507,22 @@ export default function App() {
         // Cleanly start their ad timer cooldown so they get a full grace period going forward
         recordAdShown();
       } else {
-        if (USE_HOUSE_INTERSTITIAL) {
-          if (isAdDue(subscription.isPremium, nextMatchesPlayed)) {
-            setTimeout(() => {
-              if (!showPremiumModal && !showProfileModal && !showEditProfileModal && !showHouseAdModal) {
+        if (isAdDue(subscription.isPremium, nextMatchesPlayed)) {
+          setTimeout(async () => {
+            if (showPremiumModal || showProfileModal || showEditProfileModal || showHouseAdModal) {
+              return;
+            }
+            if (isAndroidCapacitor()) {
+              console.log('[AdMob:trigger] Match completion natural break on Android');
+              const showedNative = await showNativeInterstitialIfDue(subscription.isPremium, nextMatchesPlayed);
+              if (!showedNative) {
+                console.log('[AdMob:fallback-house] Match completion native ad unavailable; opening Study Break fallback');
                 setShowHouseAdModal(true);
               }
-            }, 700);
-          }
-        } else if (isAndroidCapacitor()) {
-          // Native Capacitor Interstitial: natural break after completed 1v1 match
-          setTimeout(() => {
-            if (!showPremiumModal && !showProfileModal && !showEditProfileModal) {
-              showNativeInterstitialIfDue(subscription.isPremium, nextMatchesPlayed);
+            } else {
+              setShowHouseAdModal(true);
             }
           }, 700);
-        } else {
-          // Web AdSense Interstitial Mock
-          if (isAdDue(subscription.isPremium, nextMatchesPlayed)) {
-            setTimeout(() => {
-              if (!showPremiumModal && !showProfileModal && !showEditProfileModal) {
-                setShowAdModal(true);
-              }
-            }, 700);
-          }
         }
       }
     }
@@ -2691,15 +2685,17 @@ export default function App() {
     triggerAdIfDue();
   };
 
-  const handleTriggerTestAd = () => {
+  const handleTriggerTestAd = async () => {
     if (!isAdSystemActive()) return;
     resetAdTimerForTest();
-    if (USE_HOUSE_INTERSTITIAL) {
-      setShowHouseAdModal(true);
-    } else if (isAndroidCapacitor()) {
-      showTestNativeInterstitial();
+    if (isAndroidCapacitor()) {
+      const showed = await showTestNativeInterstitial();
+      if (!showed) {
+        console.log('[AdMob:fallback-house] Test native ad failed; showing Study Break modal fallback');
+        setShowHouseAdModal(true);
+      }
     } else {
-      setShowAdModal(true);
+      setShowHouseAdModal(true);
     }
   };
 
@@ -3791,7 +3787,12 @@ export default function App() {
           currentUser={currentUser}
           currentUserEmail={currentUser?.email || undefined}
           onClose={() => setShowPremiumModal(false)}
-          onUpdateSubscription={updated => setSubscription(updated)}
+          onUpdateSubscription={updated => {
+            setSubscription(updated);
+            if (updated.isPremium) {
+              setShowHouseAdModal(false);
+            }
+          }}
           onOpenProfile={() => {
             setShowPremiumModal(false);
             setShowProfileModal(true);
@@ -3815,14 +3816,15 @@ export default function App() {
         />
       )}
 
-      {/* VocabClash House Interstitial (Cross-platform Web & Capacitor Android) */}
-      {USE_HOUSE_INTERSTITIAL && showHouseAdModal && !subscription.isPremium && (
+      {/* VocabClash House Interstitial (Web Primary & Android Fallback) */}
+      {showHouseAdModal && !subscription.isPremium && (
         <HouseInterstitialModal
           onClose={() => setShowHouseAdModal(false)}
           onOpenPremium={() => {
             setShowHouseAdModal(false);
             setShowPremiumModal(true);
           }}
+          isPremium={subscription.isPremium}
         />
       )}
 
