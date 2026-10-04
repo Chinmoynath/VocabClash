@@ -58,6 +58,7 @@ import {
   saveUserDataToFirestore, 
   saveUserProfileFieldsToFirestore,
   fetchUserDataFromFirestore,
+  fetchUserDataWithStatus,
   subscribeToUserCloudData,
   checkRedirectAuthResult,
   getPendingRegistrationDisplayName,
@@ -289,113 +290,16 @@ export function sanitizeAndRepairPlayerProfile(
   rawProfile: PlayerProfile,
   authUser: { uid: string; email?: string | null; displayName?: string | null }
 ): { player: PlayerProfile; wasRepaired: boolean } {
-  const isChinmoy = 
-    authUser.email?.toLowerCase() === 'nathchinmoy777@gmail.com' ||
-    authUser.email?.toLowerCase().includes('nathchinmoy777');
-
-  const isSuraj = 
-    authUser.email?.toLowerCase().includes('suraj') ||
-    authUser.displayName?.toLowerCase().includes('suraj') ||
-    rawProfile.name?.toLowerCase().includes('suraj');
-
-  // Case 1: Chinmoy Nath (admin/owner account)
-  if (isChinmoy) {
-    const minLP = 1265;
-    const finalLP = Math.max(rawProfile.rankPoints || 0, minLP, 1340);
-    const finalMatches = Math.max(rawProfile.matchesPlayed || 0, 32);
-    const finalWins = Math.max(rawProfile.matchesWon || 0, 28);
-    const finalTier = getTierFromLP(finalLP);
-    return {
-      player: {
-        ...rawProfile,
-        id: authUser.uid,
-        name: 'Chinmoy Nath',
-        email: 'nathchinmoy777@gmail.com',
-        rankPoints: finalLP,
-        matchesPlayed: finalMatches,
-        matchesWon: finalWins,
-        winStreak: Math.max(rawProfile.winStreak || 0, 5),
-        pyqScore: Math.max(rawProfile.pyqScore || 0, 730),
-        accuracyRate: Math.round((finalWins / finalMatches) * 100),
-        level: Math.max(rawProfile.level || 1, 34),
-        tier: finalTier,
-        tierTitle: getTierTitle(finalTier),
-        targetExam: rawProfile.targetExam || 'SSC CGL - Assistant Section Officer (ASO - CSS / MEA / IB / 4600 GP)',
-        badges: ['🏛️ SSC CGL Aspirant'],
-      },
-      wasRepaired: false,
-    };
-  }
-
-  // Case 2: Non-Chinmoy account contaminated with Chinmoy's stats
-  const isContaminated = 
-    rawProfile.tierTitle?.includes('Auditor') ||
-    rawProfile.tierTitle?.includes('Accountant') ||
-    (rawProfile.rankPoints >= 1265 && rawProfile.accuracyRate === 29 && rawProfile.matchesWon === 28) ||
-    (rawProfile.rankPoints >= 1200 && rawProfile.level >= 30) ||
-    (isSuraj && rawProfile.rankPoints > 500);
-
-  if (isContaminated) {
-    console.warn(`[ProfileSanitizer] Cross-account contamination detected for ${authUser.email || authUser.uid}. Repairing genuine stats.`);
-    
-    if (isSuraj) {
-      let dailyBonus = 0;
-      try {
-        const todayAttempt = getTodayChallengeAttempt(authUser.uid);
-        if (todayAttempt) {
-          dailyBonus = todayAttempt.rankPointsAwarded || (25 + (todayAttempt.correctCount || 0) * 2);
-        }
-      } catch {}
-
-      const baseLP = 360;
-      const repairedLP = baseLP + dailyBonus;
-      const repairedTier = getTierFromLP(repairedLP);
-      return {
-        player: {
-          ...rawProfile,
-          id: authUser.uid,
-          name: 'Suraj Kumar',
-          email: authUser.email || undefined,
-          rankPoints: repairedLP,
-          level: 20,
-          matchesPlayed: 14,
-          matchesWon: 1,
-          winStreak: 0,
-          accuracyRate: 7,
-          pyqScore: Math.min(rawProfile.pyqScore || 0, 150),
-          tier: repairedTier,
-          tierTitle: getTierTitle(repairedTier),
-          targetExam: rawProfile.targetExam || 'SSC CGL - Assistant Section Officer (ASO - CSS / MEA / IB / 4600 GP)',
-          badges: ['🏛️ SSC CGL Aspirant'],
-        },
-        wasRepaired: true,
-      };
-    } else {
-      const clampedLP = Math.min(rawProfile.rankPoints || 0, 350);
-      const clampedTier = getTierFromLP(clampedLP);
-      return {
-        player: {
-          ...rawProfile,
-          id: authUser.uid,
-          rankPoints: clampedLP,
-          level: Math.min(rawProfile.level || 1, 10),
-          tier: clampedTier,
-          tierTitle: getTierTitle(clampedTier),
-          accuracyRate: Math.min(rawProfile.accuracyRate || 0, 60),
-          badges: ['🏛️ SSC CGL Aspirant'],
-        },
-        wasRepaired: true,
-      };
-    }
-  }
-
-  // Case 3: Clean, non-contaminated user
+  const currentLP = typeof rawProfile.rankPoints === 'number' ? Math.max(0, rawProfile.rankPoints) : 0;
+  const currentTier = getTierFromLP(currentLP);
   return {
     player: {
       ...rawProfile,
       id: authUser.uid,
-      tier: getTierFromLP(rawProfile.rankPoints || 0),
-      tierTitle: getTierTitle(getTierFromLP(rawProfile.rankPoints || 0)),
+      email: authUser.email || rawProfile.email || undefined,
+      rankPoints: currentLP,
+      tier: currentTier,
+      tierTitle: getTierTitle(currentTier),
     },
     wasRepaired: false,
   };
@@ -446,24 +350,6 @@ function sanitizeProfile(raw: any, googleUser?: FirebaseUser | null): PlayerProf
     authDisplayName: googleUser?.displayName,
     email: userEmail,
   });
-
-  // Restore progress for Chinmoy Nath (admin/owner account) ONLY if authenticated as Chinmoy
-  const isChinmoy = 
-    userEmail?.toLowerCase() === 'nathchinmoy777@gmail.com' || 
-    userEmail?.toLowerCase().includes('nathchinmoy777');
-
-  if (isChinmoy) {
-    effectiveName = 'Chinmoy Nath';
-    if (rankPoints < 1265) {
-      rankPoints = 1265; // Restore Auditor / Accountant 2800 GP tier (1200+ LP)
-      matchesPlayed = Math.max(matchesPlayed, 32);
-      matchesWon = Math.max(matchesWon, 28);
-      winStreak = Math.max(winStreak, 5);
-      pyqScore = Math.max(pyqScore, 730);
-      accuracyRate = Math.round((matchesWon / matchesPlayed) * 100);
-      level = Math.max(level, 12);
-    }
-  }
 
   const tier = getTierFromLP(rankPoints);
   const tierTitle = getTierTitle(tier);
@@ -1337,7 +1223,8 @@ export default function App() {
         setDailyTargetAuthUid(user.uid);
         setUserStatsAuthUid(user.uid);
 
-        // FAST VISUAL RESTORATION: Check if safe UID-scoped visual cache exists for this specific authenticated UID
+        // FAST VISUAL RESTORATION & IMMEDIATE SYNCHRONOUS HYDRATION:
+        // Check if safe UID-scoped visual cache exists for this specific authenticated UID
         const cachedVisual = !isSwitchingUser ? (getHeaderCache(user.uid) || (() => {
           try {
             const raw = localStorage.getItem(getPlayerStorageKey(user.uid));
@@ -1359,24 +1246,54 @@ export default function App() {
           return null;
         })()) : null;
 
-        if (cachedVisual) {
-          // Immediately show the user's cached profile in the UI to prevent any visual delay or flash
-          setPlayer(prev => ({
-            ...prev,
-            id: user.uid,
-            name: cachedVisual.displayName,
-            avatar: cachedVisual.avatar,
-            photoURL: cachedVisual.photoURL === null ? null : (cachedVisual.photoURL || user.photoURL || undefined),
-            level: cachedVisual.level,
-            rankPoints: cachedVisual.rankPoints,
-            tierTitle: cachedVisual.tierTitle || prev.tierTitle,
-            email: cachedVisual.email || user.email || prev.email,
-          }));
-          setIsProfileReady(true);
-        } else {
-          // Keep skeleton active until Firebase data loads if no valid UID cache exists
-          setIsProfileReady(false);
-        }
+        const pendingRegName = getPendingRegistrationDisplayName();
+        const effectiveAuthDisplayName = user.displayName?.trim() || pendingRegName;
+        const cleanAuthName = effectiveAuthDisplayName || extractCleanUserName(user.displayName, user.email);
+
+        // Immediate canonical name & avatar resolution:
+        // 1. Valid user-scoped cached profile if present and not default
+        // 2. Authenticated Firebase user displayName / cleanAuthName
+        // 3. Generic INITIAL_PLAYER fallback
+        const immediateName = (cachedVisual && cachedVisual.displayName && cachedVisual.displayName !== INITIAL_PLAYER.name)
+          ? cachedVisual.displayName
+          : (cleanAuthName && cleanAuthName !== INITIAL_PLAYER.name
+              ? cleanAuthName
+              : (user.displayName || extractCleanUserName(null, user.email) || INITIAL_PLAYER.name));
+
+        const immediateAvatar = cachedVisual?.avatar || INITIAL_PLAYER.avatar;
+        const immediatePhoto = user.photoURL || cachedVisual?.photoURL || null;
+        const immediateLP = cachedVisual?.rankPoints ?? (playerRef.current.rankPoints > 0 ? playerRef.current.rankPoints : INITIAL_PLAYER.rankPoints);
+        const immediateLevel = cachedVisual?.level ?? (playerRef.current.level > 1 ? playerRef.current.level : INITIAL_PLAYER.level);
+        const immediateTier = getTierFromLP(immediateLP);
+        const immediateTierTitle = getTierTitle(immediateTier);
+
+        const immediatePlayer: PlayerProfile = {
+          ...INITIAL_PLAYER,
+          ...playerRef.current,
+          id: user.uid,
+          name: immediateName || INITIAL_PLAYER.name,
+          avatar: immediateAvatar,
+          photoURL: immediatePhoto,
+          email: user.email || playerRef.current.email || undefined,
+          rankPoints: immediateLP,
+          level: immediateLevel,
+          tier: immediateTier,
+          tierTitle: immediateTierTitle,
+        };
+
+        // Immediately update React player state: TopBar and all tabs update INSTANTLY!
+        setPlayer(immediatePlayer);
+        setIsProfileReady(true);
+        rankStore.updatePlayer(immediatePlayer);
+        setHeaderCache(user.uid, {
+          displayName: immediatePlayer.name,
+          avatar: immediatePlayer.avatar,
+          photoURL: immediatePlayer.photoURL,
+          level: immediatePlayer.level,
+          rankPoints: immediatePlayer.rankPoints,
+          tierTitle: immediatePlayer.tierTitle,
+          email: immediatePlayer.email,
+        });
 
         console.log(`[Sync] User authenticated: ${user.uid} (${user.email || 'no-email'})`);
 
@@ -1397,17 +1314,18 @@ export default function App() {
             } catch { /* ignore */ }
           }
 
-          // Try to load existing cloud data for this user
-          const cloudData = await fetchUserDataFromFirestore(user.uid);
+          // Try to load existing cloud data for this user with explicit status distinction
+          const fetchResult = await fetchUserDataWithStatus(user.uid, 4500);
+          const cloudData = fetchResult.data;
           const cloudLP = cloudData?.player?.rankPoints ?? 0;
           const localLP = localPlayer?.rankPoints ?? 0;
-          console.log(`[Sync] Cloud LP: ${cloudLP}, Local LP: ${localLP}`);
+          console.log(`[Sync] Profile fetch status: ${fetchResult.status}, Cloud LP: ${cloudLP}, Local LP: ${localLP}`);
 
           const pendingRegName = getPendingRegistrationDisplayName();
           const effectiveAuthDisplayName = user.displayName?.trim() || pendingRegName;
           const cleanAuthName = effectiveAuthDisplayName || extractCleanUserName(user.displayName, user.email);
           
-          if (cloudData && cloudData.player) {
+          if (fetchResult.status === 'FOUND' && cloudData && cloudData.player) {
             const cloudP = cloudData.player;
             // Clean up cloud name by prioritizing authenticated identity and fixing synthetic email artifacts
             let resolvedName = resolvePlayerName({
@@ -1479,10 +1397,6 @@ export default function App() {
 
             if (cloudData.subscription) setSubscription(cloudData.subscription);
 
-            const isChinmoyUser = 
-              user.email?.toLowerCase() === 'nathchinmoy777@gmail.com' ||
-              user.email?.toLowerCase().includes('nathchinmoy777');
-
             // Intelligently merge streak states across devices using union of active days
             // CRITICAL ACCOUNT ISOLATION: Local streak MUST be read for this specific user, not from previous user's in-memory streak!
             const userLocalStreak = !isSwitchingUser ? getInitialStreak(user.uid) : getInitialStreak('guest');
@@ -1515,14 +1429,6 @@ export default function App() {
             mergedStreak.currentStreak = Math.max(mergedStreak.currentStreak, recalc.currentStreak);
             mergedStreak.longestStreak = Math.max(mergedStreak.longestStreak, recalc.longestStreak);
 
-            if (isChinmoyUser) {
-              mergedStreak.history['2026-09-15'] = true;
-              mergedStreak.history['2026-09-16'] = true;
-              mergedStreak.currentStreak = Math.max(mergedStreak.currentStreak, 2);
-              mergedStreak.longestStreak = Math.max(mergedStreak.longestStreak, 4);
-              mergedStreak.lastActiveDate = '2026-09-16';
-            }
-
             setStreak(mergedStreak);
             saveStreakState(mergedStreak, user.uid);
 
@@ -1546,12 +1452,10 @@ export default function App() {
               user
             ).catch((err) => console.warn('Background sync notice:', err));
             syncUserToLeaderboard(resolvedPlayer, user.uid).catch((err) => console.warn('Leaderboard sync notice:', err));
-          } else {
-            // First time sign-in with Google or Email: Carry over only genuine anonymous guest progress
-            const isChinmoy = 
-              user.email?.toLowerCase() === 'nathchinmoy777@gmail.com' ||
-              user.email?.toLowerCase().includes('nathchinmoy777');
-
+          } else if (fetchResult.status === 'NOT_FOUND') {
+            // CRITICAL SAFETY GUARD:
+            // Positively confirmed that Firestore document does NOT exist (docSnap.exists() === false).
+            // ONLY in this verified state is a first-time user profile created and written to Firestore!
             const isGenuineGuest = 
               !localPlayer.email && 
               typeof localPlayer.id === 'string' && 
@@ -1564,18 +1468,10 @@ export default function App() {
             let initialWins = isGenuineGuest ? (localPlayer.matchesWon || 0) : 0;
             let initialWinStreak = isGenuineGuest ? (localPlayer.winStreak || 0) : 0;
 
-            if (isChinmoy) {
-              initialLP = 1340;
-              initialMatches = Math.max(initialMatches, 32);
-              initialWins = Math.max(initialWins, 28);
-              initialWinStreak = Math.max(initialWinStreak, 5);
-              initialPYQScore = Math.max(initialPYQScore, 730);
-            }
-
             const initialAccuracy = initialMatches > 0 ? Math.round((initialWins / initialMatches) * 100) : 0;
             const initialTier = getTierFromLP(initialLP);
             const initialTierTitle = getTierTitle(initialTier);
-            const initialLevel = Math.max(1, localPlayer.level || 1, Math.floor(initialMatches / 3) + 1, isChinmoy ? 12 : 1);
+            const initialLevel = Math.max(1, localPlayer.level || 1, Math.floor(initialMatches / 3) + 1);
 
             const resolvedTargetExam = resolveTargetExam(null, localPlayer.targetExam);
             if (typeof window !== 'undefined') {
@@ -1594,8 +1490,8 @@ export default function App() {
             const newPlayer: PlayerProfile = {
               ...INITIAL_PLAYER,
               id: user.uid,
-              name: isChinmoy ? 'Chinmoy Nath' : resolvedNewName,
-              avatar: localPlayer.avatar || '👨‍💼',
+              name: resolvedNewName || immediateName || INITIAL_PLAYER.name,
+              avatar: localPlayer.avatar || immediateAvatar,
               country: localPlayer.country || 'India',
               countryCode: localPlayer.countryCode || 'IN',
               targetExam: resolvedTargetExam,
@@ -1652,6 +1548,26 @@ export default function App() {
               user
             ).catch((err) => console.warn('Initial save notice:', err));
             syncUserToLeaderboard(newPlayer, user.uid).catch((err) => console.warn('Leaderboard sync notice:', err));
+          } else {
+            // fetchResult.status === 'ERROR_OR_TIMEOUT'
+            // Timeout, network failure, or Firestore error.
+            // CRITICAL SAFETY RULE: NEVER overwrite cloud data with default values (0 LP / Level 1)!
+            console.warn(`[Sync] Cloud profile fetch timed out or failed for ${user.uid} (${fetchResult.status}). Preserving authenticated UI state without cloud overwrite.`);
+            
+            // If user had local player cache with positive progress, keep it active
+            if (localPlayer && typeof localPlayer.rankPoints === 'number' && localPlayer.rankPoints > 0) {
+              setPlayer(prev => ({
+                ...prev,
+                ...localPlayer,
+                id: user.uid,
+                name: (prev.name && prev.name !== INITIAL_PLAYER.name) ? prev.name : localPlayer.name,
+                photoURL: user.photoURL || localPlayer.photoURL || prev.photoURL,
+                email: user.email || prev.email,
+              }));
+            }
+            // Do NOT call saveUserDataToFirestore here.
+            // Do NOT sign the user out.
+            // When connection recovers or app resumes, safe background hydration will reconcile.
           }
         } catch (error) {
           console.warn('Session cloud data fetch failed, keeping local state safe:', error);
@@ -1663,14 +1579,17 @@ export default function App() {
         }
       } else {
         // If transitioning from a logged-in user to null (e.g. sign out occurred or token revoked)
-        const signingOutUid = previousUserUidRef.current;
+        const signingOutUid = previousUserUidRef.current || (typeof window !== 'undefined' ? localStorage.getItem('vocabclash_last_active_user_uid') : null);
         if (signingOutUid) {
           clearUserDataOnSignOut(signingOutUid);
-          setPlayer({ ...INITIAL_PLAYER });
-          setSubscription({ ...INITIAL_SUBSCRIPTION });
-          setSavedWords([]);
-          setStreak(getInitialStreak('guest'));
         }
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('vocabclash_last_active_user_uid');
+        }
+        setPlayer({ ...INITIAL_PLAYER });
+        setSubscription({ ...INITIAL_SUBSCRIPTION });
+        setSavedWords([]);
+        setStreak(getInitialStreak('guest'));
         setActiveStreakUser(null);
         setDailyTargetAuthUid(null);
         setUserStatsAuthUid(null);
@@ -2040,13 +1959,61 @@ export default function App() {
     }, 400);
   };
 
+  // Canonical reactive handler for user auth changes across all modals and screens
+  const handleUserAuthChange = (user: FirebaseUser | null) => {
+    if (user) {
+      const cleanAuthName = extractCleanUserName(user.displayName, user.email);
+      const effectiveName = (cleanAuthName && cleanAuthName !== INITIAL_PLAYER.name) 
+        ? cleanAuthName 
+        : (user.displayName || extractCleanUserName(null, user.email) || INITIAL_PLAYER.name);
+      const effectivePhoto = user.photoURL || null;
+
+      setCurrentUser(user);
+      previousUserUidRef.current = user.uid;
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('vocabclash_last_active_user_uid', user.uid);
+      }
+      setPlayer(prev => {
+        const nextName = (prev.name && prev.name !== INITIAL_PLAYER.name && prev.id === user.uid)
+          ? prev.name
+          : effectiveName;
+        const nextAvatar = prev.avatar || INITIAL_PLAYER.avatar;
+        const nextPhoto = effectivePhoto || prev.photoURL;
+        const updatedPlayer: PlayerProfile = {
+          ...prev,
+          id: user.uid,
+          name: nextName,
+          avatar: nextAvatar,
+          photoURL: nextPhoto,
+          email: user.email || prev.email,
+        };
+        rankStore.updatePlayer(updatedPlayer);
+        if (typeof window !== 'undefined') {
+          setHeaderCache(user.uid, {
+            displayName: nextName,
+            avatar: nextAvatar,
+            photoURL: nextPhoto,
+            level: updatedPlayer.level,
+            rankPoints: updatedPlayer.rankPoints,
+            tierTitle: updatedPlayer.tierTitle,
+            email: user.email || undefined,
+          });
+        }
+        return updatedPlayer;
+      });
+      setIsProfileReady(true);
+    } else {
+      handleSignOutUser();
+    }
+  };
+
   // Sign out user: instant non-blocking logout with background sync
   const handleSignOutUser = async () => {
     setIsSyncing(false);
     const userToSignOut = currentUser;
 
     // Immediately clear active user's identity from UI so their avatar/name vanishes instantly
-    setIsProfileReady(false);
+    setIsProfileReady(true);
     setPlayer({ ...INITIAL_PLAYER });
     setSubscription({ ...INITIAL_SUBSCRIPTION });
     setSavedWords([]);
@@ -2057,8 +2024,12 @@ export default function App() {
     setCurrentUser(null);
     previousUserUidRef.current = null;
     questionReviewScheduler.setAuthUser(null);
+    rankStore.handleLogout(userToSignOut?.uid);
     if (typeof window !== 'undefined') {
       localStorage.removeItem('vocabclash_last_active_user_uid');
+      if (userToSignOut?.uid) {
+        clearUserDataOnSignOut(userToSignOut.uid);
+      }
     }
 
     // 1. Immediately save snapshot in background with max 800ms race so UI is never blocked
@@ -3276,7 +3247,7 @@ export default function App() {
                 bookmarkedIds={bookmarkedIds}
                 isPremium={subscription.isPremium}
                 currentUser={currentUser}
-                onUserChange={user => setCurrentUser(user)}
+                onUserChange={handleUserAuthChange}
                 onOpenPremium={() => setShowPremiumModal(true)}
               />
             </ErrorBoundary>
@@ -3346,7 +3317,7 @@ export default function App() {
                 bookmarkedIds={bookmarkedIds}
                 isPremium={subscription.isPremium}
                 currentUser={currentUser}
-                onUserChange={user => setCurrentUser(user)}
+                onUserChange={handleUserAuthChange}
                 customTargetQueue={practiceCustomQueue}
                 customSessionTitle={practiceModeBannerTitle}
                 customInitialIndex={activeSscTop100Category ? sscTop100InitialIndex : 0}
@@ -3530,7 +3501,7 @@ export default function App() {
           initialCategory={selectedCategory}
           initialExam={selectedExam}
           initialCode={friendLobbyInitialCode}
-          onUserChange={user => setCurrentUser(user)}
+          onUserChange={handleUserAuthChange}
           onSelectPlayOnline={() => {
             setShowFriendLobbyModal(false);
             setFriendLobbyInitialCode('');
@@ -3640,7 +3611,7 @@ export default function App() {
             setEditProfileReturnToProfile(true);
             setShowEditProfileModal(true);
           }}
-          onUserChange={user => setCurrentUser(user)}
+          onUserChange={handleUserAuthChange}
           onManualSync={handleManualSync}
           onSignOut={handleSignOutUser}
         />
@@ -3797,7 +3768,7 @@ export default function App() {
             setShowPremiumModal(false);
             setShowProfileModal(true);
           }}
-          onUserChange={user => setCurrentUser(user)}
+          onUserChange={handleUserAuthChange}
         />
       )}
 

@@ -50,15 +50,6 @@ export function getDailyChallengeStorageKey(userId?: string | null): string {
 }
 
 /**
- * Checks if the account belongs to developer Chinmoy Nath
- */
-export function isChinmoyAccount(email?: string | null, name?: string | null): boolean {
-  const e = (email || '').toLowerCase().trim();
-  const n = (name || '').toLowerCase().trim();
-  return e === 'nathchinmoy777@gmail.com' || e.includes('nathchinmoy777') || n === 'chinmoy nath';
-}
-
-/**
  * Strips any leaked attempts that belong to another account without deleting genuine user history
  */
 export function sanitizeDailyChallengeHistory(
@@ -68,19 +59,10 @@ export function sanitizeDailyChallengeHistory(
 ): DailyChallengeAttempt[] {
   if (!Array.isArray(history)) return [];
 
-  const effectiveEmail = userEmail || auth.currentUser?.email;
-  const isChinmoy = isChinmoyAccount(effectiveEmail);
+  const effectiveEmail = (userEmail || auth.currentUser?.email || '').toLowerCase().trim();
 
   const filtered = history.filter(attempt => {
     if (!attempt || !attempt.date) return false;
-
-    // Chinmoy's genuine attempts are preserved
-    if (isChinmoy) return true;
-
-    // Filter attempts explicitly tagged with Chinmoy's email if viewing on another account
-    if (attempt.userEmail && isChinmoyAccount(attempt.userEmail)) {
-      return false;
-    }
 
     // Filter attempts with mismatching user IDs if explicitly tagged with another authenticated user
     if (
@@ -89,6 +71,15 @@ export function sanitizeDailyChallengeHistory(
       attempt.userId !== userId && 
       !attempt.userId.startsWith('guest_') && 
       !userId.startsWith('guest_')
+    ) {
+      return false;
+    }
+
+    // Filter attempts with mismatching user email if explicitly tagged with another account
+    if (
+      attempt.userEmail &&
+      effectiveEmail &&
+      attempt.userEmail.toLowerCase().trim() !== effectiveEmail
     ) {
       return false;
     }
@@ -114,26 +105,9 @@ function cleanAndGetLocalHistory(userId?: string | null): DailyChallengeAttempt[
       }
     }
 
-    // One-time migration for Chinmoy Nath only
-    const isChinmoy = isChinmoyAccount(auth.currentUser?.email);
-    if (isChinmoy) {
-      const legacyRaw = localStorage.getItem(STORAGE_KEY_V2_LEGACY);
-      if (legacyRaw) {
-        try {
-          const parsed = JSON.parse(legacyRaw);
-          if (Array.isArray(parsed)) {
-            const sorted = parsed.sort((a: any, b: any) => a.date.localeCompare(b.date));
-            localStorage.setItem(key, JSON.stringify(sorted));
-            localStorage.removeItem(STORAGE_KEY_V2_LEGACY);
-            return sorted;
-          }
-        } catch {}
-      }
-    } else {
-      // For any non-Chinmoy user (like Suraj Kumar), delete legacy un-scoped key so it never leaks
-      localStorage.removeItem(STORAGE_KEY_V2_LEGACY);
-      localStorage.removeItem(OLD_STORAGE_KEY);
-    }
+    // Clean legacy un-scoped keys so they never leak between accounts
+    localStorage.removeItem(STORAGE_KEY_V2_LEGACY);
+    localStorage.removeItem(OLD_STORAGE_KEY);
 
     return [];
   } catch (err) {

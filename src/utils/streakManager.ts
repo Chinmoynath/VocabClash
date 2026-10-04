@@ -197,19 +197,6 @@ export function mergeStreakStates(
   if (local.lastActiveDate) mergedHistory[local.lastActiveDate] = true;
   if (cloud?.lastActiveDate) mergedHistory[cloud.lastActiveDate] = true;
 
-  // Chinmoy Nath (Admin / Developer) account recovery:
-  // Preserves active streak (yesterday & today) if account matches
-  const isChinmoy = userEmail && (
-    userEmail.toLowerCase() === 'nathchinmoy777@gmail.com' ||
-    userEmail.toLowerCase().includes('nathchinmoy777')
-  );
-
-  if (isChinmoy) {
-    // Both Sep 15 and Sep 16 were active solves across phone and laptop
-    mergedHistory['2026-09-15'] = true;
-    mergedHistory['2026-09-16'] = true;
-  }
-
   const calculated = calculateStreakFromHistory(mergedHistory, today);
 
   let currentStreak = Math.max(
@@ -218,16 +205,11 @@ export function mergeStreakStates(
     cloud && calculateDayDifference(cloud.lastActiveDate, today) <= 1 ? (cloud.currentStreak || 0) : 0
   );
 
-  if (isChinmoy) {
-    currentStreak = Math.max(currentStreak, 2);
-  }
-
   const longestStreak = Math.max(
     local.longestStreak || 0,
     cloud?.longestStreak || 0,
     calculated.longestStreak,
-    currentStreak,
-    isChinmoy ? 4 : 0
+    currentStreak
   );
 
   const isClaimedToday = 

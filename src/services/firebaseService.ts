@@ -39,7 +39,8 @@ import {
   getDocFromServer,
   onSnapshot,
   collection,
-  getDocs
+  getDocs,
+  DocumentSnapshot
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { isAndroidCapacitor, isAndroidTWA } from '../utils/platform';
@@ -1307,30 +1308,75 @@ export async function saveUserProfileFieldsToFirestore(
   }
 }
 
-// Fetch user state from Firestore (with local cloud backup fallback)
-export async function fetchUserDataFromFirestore(uid: string, timeoutMs: number = 4500): Promise<UserCloudData | null> {
+export type ProfileFetchStatus = 'FOUND' | 'NOT_FOUND' | 'ERROR_OR_TIMEOUT';
+
+export interface ProfileFetchResult {
+  status: ProfileFetchStatus;
+  data: UserCloudData | null;
+  error?: unknown;
+}
+
+/**
+ * Fetch user state from Firestore with explicit status distinction:
+ * - FOUND: docSnap.exists() === true (authoritative cloud profile found)
+ * - NOT_FOUND: Positively confirmed docSnap.exists() === false (confirmed new user)
+ * - ERROR_OR_TIMEOUT: Network error, timeout, or Firestore permission issue (NEVER create default profile)
+ */
+export async function fetchUserDataWithStatus(
+  uid: string,
+  timeoutMs: number = 4500
+): Promise<ProfileFetchResult> {
+  if (!uid) return { status: 'ERROR_OR_TIMEOUT', data: null };
   const path = `users/${uid}`;
+  
   try {
     if (isFirestoreQuotaExhausted() && typeof window !== 'undefined') {
       const cached = localStorage.getItem(`vocabclash_cloud_backup_${uid}`);
       if (cached) {
-        return JSON.parse(cached) as UserCloudData;
+        return { status: 'FOUND', data: JSON.parse(cached) as UserCloudData };
       }
     }
 
     const userDocRef = doc(db, 'users', uid);
-    const [docSnap, challengeHistory] = await Promise.all([
-      withTimeout(getDoc(userDocRef), timeoutMs, null),
-      fetchDailyChallengeHistoryFromFirestore(uid).catch(() => [])
-    ]);
+    const TIMEOUT_TOKEN = Symbol('FETCH_TIMEOUT');
 
+    let docSnapResult: any;
+    try {
+      docSnapResult = await Promise.race([
+        getDoc(userDocRef),
+        new Promise(resolve => setTimeout(() => resolve(TIMEOUT_TOKEN), timeoutMs))
+      ]);
+    } catch (getDocErr) {
+      console.warn(`[Firestore] getDoc failed with error for ${uid}:`, getDocErr);
+      return { status: 'ERROR_OR_TIMEOUT', data: null, error: getDocErr };
+    }
+
+    // 1. Timeout occurred - do NOT interpret as NOT_FOUND!
+    if (docSnapResult === TIMEOUT_TOKEN) {
+      console.warn(`[Firestore] getDoc timed out after ${timeoutMs}ms for ${uid}`);
+      if (typeof window !== 'undefined') {
+        const cached = localStorage.getItem(`vocabclash_cloud_backup_${uid}`);
+        if (cached) {
+          try {
+            return { status: 'ERROR_OR_TIMEOUT', data: JSON.parse(cached) as UserCloudData };
+          } catch {}
+        }
+      }
+      return { status: 'ERROR_OR_TIMEOUT', data: null };
+    }
+
+    const docSnap = docSnapResult as DocumentSnapshot;
+
+    // 2. Document exists: positively confirmed FOUND
     if (docSnap && docSnap.exists()) {
       const data = docSnap.data() as UserCloudData;
 
-      // Attach complete subcollection daily challenge history to the user cloud data
-      if (Array.isArray(challengeHistory) && challengeHistory.length > 0) {
-        data.dailyChallengeHistory = challengeHistory;
-      }
+      try {
+        const challengeHistory = await fetchDailyChallengeHistoryFromFirestore(uid).catch(() => []);
+        if (Array.isArray(challengeHistory) && challengeHistory.length > 0) {
+          data.dailyChallengeHistory = challengeHistory;
+        }
+      } catch {}
 
       if (data.player && typeof data.player.rankPoints === 'number') {
         latestCloudLPMap.set(uid, {
@@ -1353,29 +1399,34 @@ export async function fetchUserDataFromFirestore(uid: string, timeoutMs: number 
           localStorage.setItem(`vocabclash_cloud_backup_${uid}`, JSON.stringify(data));
         } catch { /* ignore */ }
       }
-      return data;
+      return { status: 'FOUND', data };
     }
 
-    // Check if local backup exists
-    if (typeof window !== 'undefined') {
-      const cached = localStorage.getItem(`vocabclash_cloud_backup_${uid}`);
-      if (cached) {
-        return JSON.parse(cached) as UserCloudData;
-      }
+    // 3. Positively confirmed that document does NOT exist in Firestore
+    if (docSnap && !docSnap.exists()) {
+      console.log(`[Sync] Positively confirmed: User doc for ${uid} does NOT exist (docSnap.exists() === false)`);
+      return { status: 'NOT_FOUND', data: null };
     }
-    return null;
+
+    return { status: 'ERROR_OR_TIMEOUT', data: null };
   } catch (err) {
     handleFirestoreError(err, OperationType.GET, path);
     if (typeof window !== 'undefined') {
       try {
         const cached = localStorage.getItem(`vocabclash_cloud_backup_${uid}`);
         if (cached) {
-          return JSON.parse(cached) as UserCloudData;
+          return { status: 'ERROR_OR_TIMEOUT', data: JSON.parse(cached) as UserCloudData, error: err };
         }
       } catch { /* ignore */ }
     }
-    return null;
+    return { status: 'ERROR_OR_TIMEOUT', data: null, error: err };
   }
+}
+
+// Fetch user state from Firestore (backward-compatible wrapper returning UserCloudData | null)
+export async function fetchUserDataFromFirestore(uid: string, timeoutMs: number = 4500): Promise<UserCloudData | null> {
+  const result = await fetchUserDataWithStatus(uid, timeoutMs);
+  return result.data;
 }
 
 /**
