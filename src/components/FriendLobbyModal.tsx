@@ -799,7 +799,7 @@ export const FriendLobbyModal: React.FC<FriendLobbyModalProps> = ({
                   </button>
                 </div>
 
-                <form onSubmit={handleEmailAuthSubmit} className="space-y-2.5">
+                <form onSubmit={handleEmailAuthSubmit} onKeyDown={e => e.stopPropagation()} className="space-y-2.5">
                   {/* Name field for Registration */}
                   {emailAuthMode === 'signup' && (
                     <div>

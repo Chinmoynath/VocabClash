@@ -389,7 +389,7 @@ export const AuthCard: React.FC<AuthCardProps> = ({
 
           {/* TAB 1: SIGN IN (Email & Password for existing accounts) */}
           {authMode === 'signin' && (
-            <form onSubmit={handleEmailSignIn} className="space-y-2.5">
+            <form onSubmit={handleEmailSignIn} onKeyDown={e => e.stopPropagation()} className="space-y-2.5">
               <div className="space-y-2">
                 {/* Email input */}
                 <div className="relative">
@@ -465,7 +465,7 @@ export const AuthCard: React.FC<AuthCardProps> = ({
 
           {/* TAB 2: SIGN UP (Direct registration with Name, Email & Password) */}
           {authMode === 'signup' && (
-            <form onSubmit={handleDirectSignUp} className="space-y-2.5 animate-fadeIn">
+            <form onSubmit={handleDirectSignUp} onKeyDown={e => e.stopPropagation()} className="space-y-2.5 animate-fadeIn">
               <div className="space-y-2">
                 {/* Name */}
                 <div className="relative">
@@ -559,7 +559,7 @@ export const AuthCard: React.FC<AuthCardProps> = ({
 
           {/* TAB 3: FORGOT PASSWORD */}
           {authMode === 'forgot_password' && (
-            <form onSubmit={handlePasswordReset} className="space-y-2.5 animate-fadeIn">
+            <form onSubmit={handlePasswordReset} onKeyDown={e => e.stopPropagation()} className="space-y-2.5 animate-fadeIn">
               <div className="space-y-1 text-center">
                 <div className="text-xs font-bold text-slate-200">Reset Your Password</div>
                 <div className="text-[10px] text-slate-400">

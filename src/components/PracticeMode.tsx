@@ -586,6 +586,18 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
   // Desktop keyboard controls (1-4 for options, S/B for bookmark, Space/Enter/N for Next question)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Never intercept keystrokes when typing into any input, textarea, or contenteditable field
+      const target = e.target as HTMLElement | null;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target?.isContentEditable ||
+        target?.tagName === 'INPUT' ||
+        target?.tagName === 'TEXTAREA'
+      ) {
+        return;
+      }
+
       if (!isActive) return;
       if (showReportModal || showSupportModal) return;
 

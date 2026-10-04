@@ -847,6 +847,18 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
   // Keyboard hotkeys for fast desktop gameplay (1, 2, 3, 4 or A, B, C, D)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Never intercept keystrokes when typing into any input, textarea, or contenteditable field
+      const target = e.target as HTMLElement | null;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target?.isContentEditable ||
+        target?.tagName === 'INPUT' ||
+        target?.tagName === 'TEXTAREA'
+      ) {
+        return;
+      }
+
       if (isAnswered || !currentQuestion || isWaitingForOpponent || isDisconnected || isForfeitedDueToDisconnect) return;
       if (e.key === '1' || e.key === 'a' || e.key === 'A') {
         handleSelectOption(0);

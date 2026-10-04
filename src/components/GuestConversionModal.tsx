@@ -406,7 +406,7 @@ export const GuestConversionModal: React.FC<GuestConversionModalProps> = ({
             </>
           ) : (
             /* Email Sign In / Sign Up Form */
-            <form onSubmit={handleEmailAuthSubmit} className="space-y-3 text-left">
+            <form onSubmit={handleEmailAuthSubmit} onKeyDown={e => e.stopPropagation()} className="space-y-3 text-left">
               {/* Mode Toggle: Sign In vs Create Account */}
               <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800">
                 <button
