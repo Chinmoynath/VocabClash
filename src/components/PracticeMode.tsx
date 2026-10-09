@@ -79,6 +79,8 @@ interface PracticeModeProps {
   onOpenStats?: () => void;
   onBatchComplete?: () => void;
   onSolveQuestion?: () => void;
+  onPyqAnswered?: (question: Question) => void;
+  onPyqAdvance?: () => void;
   onRecordMistake?: (question: Question) => void;
   bookmarkedIds: string[];
   isPremium?: boolean;
@@ -226,6 +228,8 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
   onOpenStats,
   onBatchComplete,
   onSolveQuestion,
+  onPyqAnswered,
+  onPyqAdvance,
   onRecordMistake,
   bookmarkedIds,
   isPremium = false,
@@ -679,6 +683,9 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     if (onSolveQuestion) {
       onSolveQuestion();
     }
+    if (onPyqAnswered && currentQ) {
+      onPyqAnswered(currentQ);
+    }
 
     const elapsedMs = Date.now() - questionStartTimeRef.current;
     const isCorrect = idx === currentQ.correctIndex;
@@ -811,6 +818,10 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     // Batch interval ad trigger (every 15 questions solved)
     if ((sessionSolvedCount + 1) % 15 === 0 && onBatchComplete) {
       onBatchComplete();
+    }
+
+    if (onPyqAdvance) {
+      onPyqAdvance();
     }
 
     // Handle Custom Targeted Coaching Queue if active and matches current exam filter

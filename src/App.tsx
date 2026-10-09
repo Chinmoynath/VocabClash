@@ -123,6 +123,14 @@ import { networkManager } from './utils/networkManager';
 import { recordQuestionAttempt, resetUserStats, hydrateStatsFromCloud, setUserStatsAuthUid } from './utils/userStatsManager';
 import { resetAuthoritativeAttempts } from './services/attemptTrackingService';
 import { clearSeenHistory } from './utils/questionHistoryManager';
+import {
+  recordPyqAnswered,
+  recordDuelCompleted,
+  recordDailyQuizCompleted,
+  recordMistakeVaultCompleted,
+  isStudyVipPromoEligible,
+  markStudyVipPromoShown,
+} from './services/studyVipPromoService';
 import { ArticlesDashboard } from './components/admin/ArticlesDashboard';
 import { ArticleEditor } from './components/admin/ArticleEditor';
 import { PublicArticlesIndex } from './components/public/PublicArticlesIndex';
@@ -405,6 +413,7 @@ export function clearUserDataOnSignOut(specificUid?: string | null) {
     localStorage.removeItem(STORAGE_KEY_SUBSCRIPTION);
     localStorage.removeItem('vocabclash_daily_streak_v2');
     localStorage.removeItem(STORAGE_KEY_STREAK_BONUS_CLAIMED_DATE);
+    localStorage.removeItem('vocabclash_study_vip_promo_v1_guest');
     cleanupLegacyUnscopedPlayerStorage();
 
     if (specificUid) {
@@ -2335,10 +2344,87 @@ export default function App() {
     }
   };
 
+  // Safe check & trigger for mobile-app-only study-triggered VIP promotion
+  const checkAndTriggerStudyVipPromo = (delayMs: number = 0): boolean => {
+    if (!isAndroidCapacitor() || subscription.isPremium) {
+      return false;
+    }
+
+    if (
+      showPremiumModal ||
+      showProfileModal ||
+      showEditProfileModal ||
+      showAiModal ||
+      showStatsModal ||
+      showHouseAdModal ||
+      showAdModal ||
+      showStreakModal ||
+      showAppGuideModal ||
+      showTourModal ||
+      showPlayModeModal ||
+      showFriendLobbyModal ||
+      showOfflineWarningModal ||
+      showDueRevisionModal ||
+      showAdminArticles ||
+      showAdminImporter ||
+      showBattleAnalytics ||
+      showSscTop100CompletionModal ||
+      isMatchmaking ||
+      (matchState && !isMatchCompleted)
+    ) {
+      return false;
+    }
+
+    if (!isStudyVipPromoEligible(currentUser?.uid, subscription.isPremium)) {
+      return false;
+    }
+
+    const firePromo = () => {
+      // Re-verify modal & battle guards immediately prior to presentation
+      if (
+        showPremiumModal ||
+        showProfileModal ||
+        showEditProfileModal ||
+        showAiModal ||
+        showStatsModal ||
+        showHouseAdModal ||
+        showAdModal ||
+        showStreakModal ||
+        showAppGuideModal ||
+        showTourModal ||
+        showPlayModeModal ||
+        showFriendLobbyModal ||
+        showOfflineWarningModal ||
+        showDueRevisionModal ||
+        isMatchmaking ||
+        (matchState && !isMatchCompleted)
+      ) {
+        return;
+      }
+
+      if (!isStudyVipPromoEligible(currentUser?.uid, subscription.isPremium)) {
+        return;
+      }
+
+      console.log('[StudyVipPromo] Displaying existing Study Break VIP banner on native Android');
+      markStudyVipPromoShown(currentUser?.uid);
+      setShowHouseAdModal(true);
+    };
+
+    if (delayMs > 0) {
+      setTimeout(firePromo, delayMs);
+    } else {
+      firePromo();
+    }
+
+    return true;
+  };
+
   // Switch navigation tabs with natural break interstitial check
   const handleNavigateTab = (newTab: TabType) => {
     if (newTab !== currentTab) {
       triggerAdIfDue();
+      checkAndTriggerStudyVipPromo(250);
       setCurrentTab(newTab);
     }
   };
@@ -2703,15 +2789,19 @@ export default function App() {
       ).catch(err => console.warn('Instant cloud save after match completion failed:', err));
     }
 
+    // Record completed 1v1 duel as 1 study block for mobile VIP promo
+    recordDuelCompleted(currentUser?.uid, subscription.isPremium);
+
     // Trigger 10-min interval ad safely after match completion (only for free tier at natural break)
     // NEVER show ad after the user's first duel (to maximize new player retention)
+    const isAdDueForMatch = isAdSystemActive() && !subscription.isPremium && networkManager.isOnline() && (player.matchesPlayed > 0 && nextMatchesPlayed > 1) && isAdDue(subscription.isPremium, nextMatchesPlayed);
     if (isAdSystemActive() && !subscription.isPremium && networkManager.isOnline()) {
       const isFirstDuel = player.matchesPlayed === 0 || nextMatchesPlayed <= 1;
       if (isFirstDuel) {
         // Cleanly start their ad timer cooldown so they get a full grace period going forward
         recordAdShown();
       } else {
-        if (isAdDue(subscription.isPremium, nextMatchesPlayed)) {
+        if (isAdDueForMatch) {
           setTimeout(async () => {
             if (showPremiumModal || showProfileModal || showEditProfileModal || showHouseAdModal) {
               return;
@@ -2729,6 +2819,11 @@ export default function App() {
           }, 700);
         }
       }
+    }
+
+    // If no ad is scheduled to display, evaluate study-triggered VIP promotion
+    if (!isAdDueForMatch) {
+      checkAndTriggerStudyVipPromo(800);
     }
   };
 
@@ -3541,6 +3636,16 @@ export default function App() {
                 }}
                 onBatchComplete={triggerAdIfDue}
                 onSolveQuestion={handleRecordQuestionSolved}
+                onPyqAnswered={(q) => {
+                  if (!isAndroidCapacitor() || subscription.isPremium) return;
+                  const { completedBlock } = recordPyqAnswered(q.id, currentUser?.uid, subscription.isPremium);
+                  if (completedBlock) {
+                    checkAndTriggerStudyVipPromo(1000);
+                  }
+                }}
+                onPyqAdvance={() => {
+                  checkAndTriggerStudyVipPromo(0);
+                }}
                 onRecordMistake={handleRecordMistake}
                 bookmarkedIds={bookmarkedIds}
                 isPremium={subscription.isPremium}
@@ -3649,7 +3754,11 @@ export default function App() {
               <LeaderboardView
                 player={player}
                 isPremium={subscription.isPremium}
-                onChallengeCompleted={triggerAdIfDue}
+                onChallengeCompleted={() => {
+                  recordDailyQuizCompleted(currentUser?.uid, subscription.isPremium);
+                  triggerAdIfDue();
+                  checkAndTriggerStudyVipPromo(600);
+                }}
                 onLpUpdated={() => {
                   if (currentUser?.uid) {
                     fetchUserDataFromFirestore(currentUser.uid, 3000).then(fresh => {
@@ -4099,9 +4208,11 @@ export default function App() {
           dueWords={dueRevisionWords}
           onClose={() => setShowDueRevisionModal(false)}
           onSessionFinished={() => {
+            recordMistakeVaultCompleted(currentUser?.uid, subscription.isPremium);
             if (typeof window !== 'undefined') {
               window.dispatchEvent(new CustomEvent('user-stats-updated'));
             }
+            checkAndTriggerStudyVipPromo(500);
           }}
         />
       )}
