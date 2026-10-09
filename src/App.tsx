@@ -74,6 +74,7 @@ import {
   sanitizeDailyChallengeHistory,
   getTodayChallengeAttempt
 } from './services/dailyChallengeService';
+import { resolveManualEntitlement } from './services/subscriptionEntitlements';
 import { syncUserToLeaderboard } from './services/leaderboardService';
 import { rankStore } from './services/rankStore';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
@@ -111,7 +112,6 @@ import { AdminPyqImporter } from './components/AdminPyqImporter';
 import { UserStatsModal } from './components/UserStatsModal';
 import { OfflineWarningModal } from './components/OfflineWarningModal';
 import { SeoPublicPage } from './components/SeoPublicPage';
-import { SeoGuidesModal } from './components/SeoGuidesModal';
 import { SEO_PAGES } from './data/seoContentData';
 import { updatePageSeo } from './utils/seoMetaManager';
 import { networkManager } from './utils/networkManager';
@@ -815,7 +815,6 @@ export default function App() {
   const [showPlayModeModal, setShowPlayModeModal] = useState<boolean>(false);
   const [showFriendLobbyModal, setShowFriendLobbyModal] = useState<boolean>(false);
   const [showOfflineWarningModal, setShowOfflineWarningModal] = useState<boolean>(false);
-  const [showSeoGuidesModal, setShowSeoGuidesModal] = useState<boolean>(false);
   const [showDueRevisionModal, setShowDueRevisionModal] = useState<boolean>(false);
   const [dueRevisionWords, setDueRevisionWords] = useState<SavedWord[]>([]);
 
@@ -1395,7 +1394,17 @@ export default function App() {
               } catch {}
             }
 
-            if (cloudData.subscription) setSubscription(cloudData.subscription);
+            const manualEntitlement = resolveManualEntitlement(user.uid, user.email);
+            const resolvedSub: UserSubscription = (manualEntitlement && (!cloudData.subscription?.isPremium || (cloudData.subscription?.expiresAt && cloudData.subscription.expiresAt < Date.now())))
+              ? manualEntitlement
+              : (cloudData.subscription || manualEntitlement || subscription);
+
+            if (resolvedSub) {
+              setSubscription(resolvedSub);
+              try {
+                localStorage.setItem(STORAGE_KEY_SUBSCRIPTION, JSON.stringify(resolvedSub));
+              } catch {}
+            }
 
             // Intelligently merge streak states across devices using union of active days
             // CRITICAL ACCOUNT ISOLATION: Local streak MUST be read for this specific user, not from previous user's in-memory streak!
@@ -1443,7 +1452,7 @@ export default function App() {
               user.uid,
               { 
                 player: resolvedPlayer, 
-                subscription: cloudData.subscription || subscription, 
+                subscription: resolvedSub, 
                 streak: mergedStreak, 
                 savedWords: (cloudData.savedWords && cloudData.savedWords.length > 0) ? cloudData.savedWords : savedWords,
                 dailyTarget: cloudData.dailyTarget || getDailyTargetState(user.uid),
@@ -1535,11 +1544,17 @@ export default function App() {
             });
             setIsProfileReady(true);
 
+            const manualEntitlement = resolveManualEntitlement(user.uid, user.email);
+            const initialSub = manualEntitlement || subscription;
+            if (manualEntitlement) {
+              setSubscription(manualEntitlement);
+            }
+
             saveUserDataToFirestore(
               user.uid,
               { 
                 player: newPlayer, 
-                subscription, 
+                subscription: initialSub, 
                 streak: freshUserStreak, 
                 savedWords, 
                 dailyTarget: getDailyTargetState(user.uid),
@@ -1554,6 +1569,11 @@ export default function App() {
             // CRITICAL SAFETY RULE: NEVER overwrite cloud data with default values (0 LP / Level 1)!
             console.warn(`[Sync] Cloud profile fetch timed out or failed for ${user.uid} (${fetchResult.status}). Preserving authenticated UI state without cloud overwrite.`);
             
+            const manualEntitlement = resolveManualEntitlement(user.uid, user.email);
+            if (manualEntitlement) {
+              setSubscription(manualEntitlement);
+            }
+
             // If user had local player cache with positive progress, keep it active
             if (localPlayer && typeof localPlayer.rankPoints === 'number' && localPlayer.rankPoints > 0) {
               setPlayer(prev => ({
@@ -2846,7 +2866,6 @@ export default function App() {
       if (showPlayModeModal) { setShowPlayModeModal(false); return; }
       if (showFriendLobbyModal) { setShowFriendLobbyModal(false); return; }
       if (showOfflineWarningModal) { setShowOfflineWarningModal(false); return; }
-      if (showSeoGuidesModal) { setShowSeoGuidesModal(false); return; }
       if (showDueRevisionModal) { setShowDueRevisionModal(false); return; }
       if (showAdminArticles) { setShowAdminArticles(false); return; }
       if (showAdminImporter) { setShowAdminImporter(false); return; }
@@ -2900,7 +2919,7 @@ export default function App() {
   }, [
     showAiModal, showProfileModal, showEditProfileModal, showPremiumModal, showAdModal, showHouseAdModal,
     showStreakModal, showStatsModal, showAppGuideModal, showTourModal, showPlayModeModal,
-    showFriendLobbyModal, showOfflineWarningModal, showSeoGuidesModal, showDueRevisionModal,
+    showFriendLobbyModal, showOfflineWarningModal, showDueRevisionModal,
     showAdminArticles, showAdminImporter, showBattleAnalytics, showSscTop100CompletionModal,
     activeAiQuestion, activeArticleSlug, activeSeoSlug, isViewingArticlesIndex,
     practiceCustomQueue, activeSscTop100Category, isMatchmaking, matchState, currentTab, player.id
@@ -3095,10 +3114,6 @@ export default function App() {
           onOpenTour={() => {
             soundManager.playTap();
             setShowTourModal(true);
-          }}
-          onOpenGuides={() => {
-            soundManager.playTap();
-            setShowSeoGuidesModal(true);
           }}
           onOpenArticles={() => {
             soundManager.playTap();
@@ -3852,28 +3867,6 @@ export default function App() {
             />
           </div>
         </div>
-      )}
-
-      {/* SSC Vocab Guides & PYQ Hub Modal */}
-      {showSeoGuidesModal && (
-        <SeoGuidesModal
-          isOpen={showSeoGuidesModal}
-          onClose={() => setShowSeoGuidesModal(false)}
-          onSelectGuide={(slug) => {
-            setShowSeoGuidesModal(false);
-            if (typeof window !== 'undefined') {
-              window.history.pushState(null, '', slug);
-            }
-            setActiveSeoSlug(slug);
-          }}
-          onSelectArticlesIndex={() => {
-            setShowSeoGuidesModal(false);
-            setIsViewingArticlesIndex(true);
-            if (typeof window !== 'undefined') {
-              window.history.pushState(null, '', '/articles');
-            }
-          }}
-        />
       )}
 
       {/* Due Mistake Revision Session Modal */}

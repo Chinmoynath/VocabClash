@@ -24,12 +24,12 @@ service cloud.firestore {
       );
     }
 
-    // 1. Private User Profile Documents (Owner access only)
+    // 1. Private User Profile Documents (Owner access only, or Admin management)
     match /users/{userId} {
-      allow read, write: if isOwner(userId);
+      allow read, write: if isOwner(userId) || isPyqAdmin();
     }
     match /users/{userId}/{document=**} {
-      allow read, write: if isOwner(userId);
+      allow read, write: if isOwner(userId) || isPyqAdmin();
     }
 
     // 2. AI Vocab Mentor Explanation Cache (Public read, Admin-only write)

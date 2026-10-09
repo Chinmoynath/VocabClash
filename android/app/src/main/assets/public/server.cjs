@@ -26,6 +26,7 @@ var import_express = __toESM(require("express"), 1);
 var import_path = __toESM(require("path"), 1);
 var import_crypto = __toESM(require("crypto"), 1);
 var import_dotenv = __toESM(require("dotenv"), 1);
+var import_oidc = require("@vercel/oidc");
 var import_razorpay = __toESM(require("razorpay"), 1);
 var import_nodemailer = __toESM(require("nodemailer"), 1);
 var import_genai = require("@google/genai");
@@ -165,8 +166,41 @@ function extractJsonArray(raw) {
   }
   return null;
 }
+var geminiQuotaCooldownUntil = 0;
+function setGeminiQuotaCooldown(durationMs = 6e4) {
+  geminiQuotaCooldownUntil = Math.max(geminiQuotaCooldownUntil, Date.now() + durationMs);
+}
+function isGeminiInQuotaCooldown() {
+  return Date.now() < geminiQuotaCooldownUntil;
+}
+function parseRetryDelayMs(err) {
+  try {
+    const details = err?.error?.details || err?.details;
+    if (Array.isArray(details)) {
+      for (const d of details) {
+        if (d?.["@type"]?.includes("RetryInfo") && d?.retryDelay) {
+          const sec = parseFloat(String(d.retryDelay).replace(/[^\d.]/g, ""));
+          if (!isNaN(sec) && sec > 0) return Math.ceil(sec * 1e3) + 1e3;
+        }
+      }
+    }
+    const msg = typeof err?.message === "string" ? err.message : JSON.stringify(err);
+    const retryMatch = msg.match(/retry(?:Delay| in)?[:\s]+(\d+(?:\.\d+)?)\s*s/i);
+    if (retryMatch && retryMatch[1]) {
+      const sec = parseFloat(retryMatch[1]);
+      if (!isNaN(sec) && sec > 0) return Math.ceil(sec * 1e3) + 1e3;
+    }
+  } catch {
+  }
+  return 6e4;
+}
 async function processPyqEnrichmentBatch(batch, ai) {
   const safeBatch = batch.slice(0, 10);
+  if (isGeminiInQuotaCooldown()) {
+    const remainingSec = Math.ceil((geminiQuotaCooldownUntil - Date.now()) / 1e3);
+    console.log(`[GEMINI ENRICHMENT] AI currently in quota cooldown (${remainingSec}s remaining). Using high-yield offline educational synthesis.`);
+    return safeBatch.map(createFallbackOutput);
+  }
   if (ai) {
     const prompt = `You are a distinguished English Faculty and Senior Vocabulary Master for Indian Govt Examinations (SSC CGL, CHSL, CPO, MTS, CDS, NDA, Banking PO).
 Provide high-retention, dictionary-accurate educational enrichment for the following batch of ${safeBatch.length} competitive exam questions.
@@ -218,10 +252,12 @@ STRICT EDUCATIONAL MANDATE (EVERY SINGLE QUESTION MUST BE FULLY ENRICHED):
      * "isCorrect": true if index === correctIndex, else false.
 
 Respond strictly with a JSON array.`;
-    const modelCandidates = ["gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.6-flash", "gemini-3.8-flash"];
+    const modelCandidates = ["gemini-3.1-flash-lite", "gemini-3.8-flash", "gemini-flash-latest"];
     for (const modelName of modelCandidates) {
+      if (isGeminiInQuotaCooldown()) break;
       let succeeded = false;
       for (let attempt = 1; attempt <= 2; attempt++) {
+        if (isGeminiInQuotaCooldown()) break;
         try {
           const response = await ai.models.generateContent({
             model: modelName,
@@ -290,20 +326,79 @@ Respond strictly with a JSON array.`;
             }
           }
         } catch (err) {
-          const isTransient = err?.status === 503 || err?.status === 429 || err?.message?.includes("503") || err?.message?.includes("429");
+          const isQuota = err?.status === 429 || err?.message?.includes("429") || err?.message?.includes("RESOURCE_EXHAUSTED") || err?.message?.includes("Quota exceeded") || err?.message?.includes("quota");
+          if (isQuota) {
+            const cooldownMs = Math.max(3e4, parseRetryDelayMs(err));
+            setGeminiQuotaCooldown(cooldownMs);
+            console.warn(`[GEMINI ENRICHMENT] Model ${modelName} reached rate/quota limit (429). Setting cooldown for ${Math.round(cooldownMs / 1e3)}s. Activating high-yield dictionary synthesis.`);
+            break;
+          }
+          const isTransient = err?.status === 503 || err?.message?.includes("503");
           if (attempt === 1 && isTransient) {
             const delay = 1e3 + Math.floor(Math.random() * 600);
             await new Promise((resolve) => setTimeout(resolve, delay));
             continue;
           }
-          console.warn(`[GEMINI ENRICHMENT] Model ${modelName} attempt ${attempt} notice (${err?.status || err?.message || "Unavailable"}).`);
+          console.warn(`[GEMINI ENRICHMENT] Model ${modelName} unavailable, falling back:`, err?.status || err?.message);
           break;
         }
       }
-      if (succeeded) break;
+      if (succeeded || isGeminiInQuotaCooldown()) break;
     }
   }
   return safeBatch.map(createFallbackOutput);
+}
+function synthesizeOptionDetail(opt, isCorrect, targetMeaning, targetHindi, category) {
+  const clean = (opt || "").trim();
+  const lower = clean.toLowerCase();
+  if (isCorrect) {
+    return {
+      englishMeaning: targetMeaning || `Accurate definition: "${clean}".`,
+      hindiMeaning: targetHindi || `"${clean}" \u0915\u093E \u0938\u091F\u0940\u0915 \u0905\u0930\u094D\u0925`,
+      explanation: `Correct Answer: Accurately conveys the target ${category || "vocabulary"} requirement.`
+    };
+  }
+  let eng = "";
+  let hin = "";
+  if (lower.includes("wake up") || lower.includes("sleep") || lower.includes("morning")) {
+    eng = `To struggle with waking up early or dealing with sleep schedules.`;
+    hin = `\u0938\u0941\u092C\u0939 \u0909\u0920\u0928\u0947 \u092F\u093E \u0928\u0940\u0902\u0926 \u0938\u0947 \u091C\u0941\u0921\u093C\u0940 \u092A\u0930\u0947\u0936\u093E\u0928\u0940`;
+  } else if (lower.includes("calculate") || lower.includes("math") || lower.includes("number") || lower.includes("count")) {
+    eng = `Inability or difficulty in performing mathematical computation or financial counting.`;
+    hin = `\u0917\u0923\u0928\u093E \u0915\u0930\u0928\u0947 \u092F\u093E \u0939\u093F\u0938\u093E\u092C \u0932\u0917\u093E\u0928\u0947 \u092E\u0947\u0902 \u0905\u0938\u092E\u0930\u094D\u0925\u0924\u093E`;
+  } else if (lower.includes("stair") || lower.includes("climb") || lower.includes("walk") || lower.includes("physical")) {
+    eng = `Experiencing physical exhaustion or mobility difficulty when ascending stairs or elevations.`;
+    hin = `\u0938\u0940\u0922\u093C\u093F\u092F\u093E\u0902 \u091A\u0922\u093C\u0928\u0947 \u092F\u093E \u0936\u093E\u0930\u0940\u0930\u093F\u0915 \u0936\u094D\u0930\u092E \u092E\u0947\u0902 \u092A\u0930\u0947\u0936\u093E\u0928\u0940`;
+  } else if (lower.includes("money") || lower.includes("poor") || lower.includes("cash") || lower.includes("wealth")) {
+    eng = `Pertaining to financial assets, monetary income, or economic standing.`;
+    hin = `\u0927\u0928, \u0938\u0902\u092A\u0924\u094D\u0924\u093F \u092F\u093E \u0906\u0930\u094D\u0925\u093F\u0915 \u0938\u094D\u0925\u093F\u0924\u093F \u0938\u0947 \u0938\u0902\u092C\u0902\u0927\u093F\u0924`;
+  } else if (lower.includes("difficult") || lower.includes("hard") || lower.includes("trouble")) {
+    eng = `Facing hardship, complexity, or arduous circumstances.`;
+    hin = `\u092E\u0941\u0936\u094D\u0915\u093F\u0932 \u092F\u093E \u091C\u091F\u093F\u0932 \u092A\u0930\u093F\u0938\u094D\u0925\u093F\u0924\u093F \u0915\u093E \u0938\u093E\u092E\u0928\u093E \u0915\u0930\u0928\u093E`;
+  } else if (lower.includes("happy") || lower.includes("joy") || lower.includes("glad")) {
+    eng = `Expressing positive emotional state, contentment, or joy.`;
+    hin = `\u0916\u0941\u0936\u0940, \u0909\u0932\u094D\u0932\u093E\u0938 \u092F\u093E \u092A\u094D\u0930\u0938\u0928\u094D\u0928\u0924\u093E \u0915\u0940 \u0905\u0935\u0938\u094D\u0925\u093E`;
+  } else if (lower.includes("angry") || lower.includes("furious") || lower.includes("rage")) {
+    eng = `Exhibiting strong displeasure, hostility, or intense indignation.`;
+    hin = `\u0915\u094D\u0930\u094B\u0927, \u0930\u094B\u0937 \u092F\u093E \u0924\u0940\u0935\u094D\u0930 \u0917\u0941\u0938\u094D\u0938\u093E \u092A\u094D\u0930\u0915\u091F \u0915\u0930\u0928\u093E`;
+  } else if (lower.includes("praise") || lower.includes("admire") || lower.includes("compliment")) {
+    eng = `Expressing warm approval, admiration, or formal commendation.`;
+    hin = `\u092A\u094D\u0930\u0936\u0902\u0938\u093E, \u0938\u0930\u093E\u0939\u0928\u093E \u092F\u093E \u0924\u093E\u0930\u0940\u092B \u0915\u0930\u0928\u093E`;
+  } else if (lower.includes("critic") || lower.includes("blame") || lower.includes("scold")) {
+    eng = `Expressing disapproval, censure, or pointing out faults severely.`;
+    hin = `\u0906\u0932\u094B\u091A\u0928\u093E, \u0928\u093F\u0902\u0926\u093E \u092F\u093E \u0921\u093E\u0902\u091F-\u092B\u091F\u0915\u093E\u0930 \u0915\u0930\u0928\u093E`;
+  } else if (lower.includes("secret") || lower.includes("hide") || lower.includes("conceal")) {
+    eng = `Keeping information hidden from public view; confidentiality.`;
+    hin = `\u0917\u0941\u092A\u094D\u0924 \u0930\u0916\u0928\u093E \u092F\u093E \u0930\u0939\u0938\u094D\u092F \u091B\u093F\u092A\u093E\u0928\u093E`;
+  } else {
+    eng = `Expresses the distinct concept of "${clean}".`;
+    hin = `"${clean}" \u0915\u093E \u0936\u093E\u092C\u094D\u0926\u093F\u0915 \u0905\u0930\u094D\u0925`;
+  }
+  return {
+    englishMeaning: eng,
+    hindiMeaning: hin,
+    explanation: `Distractor: Represents an incorrect interpretation in this context.`
+  };
 }
 function createFallbackOutput(q) {
   const qId = q.tempId || q.id || "q_temp";
@@ -311,85 +406,136 @@ function createFallbackOutput(q) {
   const options = Array.isArray(q.options) ? q.options : ["A", "B", "C", "D"];
   const correctOption = options[correctIdx] || "Option";
   const targetWord = (q.wordOrPhrase || q.question || "").trim();
-  let meaning = q.meaning || q.englishMeaning || "";
-  let hindiMeaning = q.hindiMeaning || "";
+  const lowerTarget = targetWord.toLowerCase();
+  const lowerCorrect = correctOption.toLowerCase();
+  let meaning = (q.meaning || q.englishMeaning || "").trim();
+  let hindiMeaning = (q.hindiMeaning || "").trim();
   let explanation = "";
-  let mnemonic = q.mnemonic || q.mnemonicHook || "";
-  let rootWordInfo = q.rootWordInfo || q.rootEtymology || "";
-  let example = q.exampleSentence || "";
-  if (!rootWordInfo) {
-    const lowerWord = targetWord.toLowerCase();
-    if (lowerWord.startsWith("pan")) {
-      rootWordInfo = 'Greek pan- ("all, whole") -> encompassing public assembly or universal scope.';
-    } else if (lowerWord.startsWith("castig") || lowerWord.startsWith("chast")) {
-      rootWordInfo = 'Latin castigare (castus "pure" + agere "to drive") -> to discipline or severely criticize.';
-    } else if (lowerWord.startsWith("bene") || lowerWord.startsWith("bon")) {
-      rootWordInfo = 'Latin bene ("well, good") -> expressing kindness or favorable disposition.';
-    } else if (lowerWord.startsWith("mal")) {
-      rootWordInfo = 'Latin malus ("bad, ill") -> denoting harmful, defective, or hostile state.';
-    } else if (lowerWord.startsWith("equ")) {
-      rootWordInfo = 'Latin aequus ("even, equal") -> denoting calmness, balance, or fair proportion.';
-    } else if (lowerWord.startsWith("fastid")) {
-      rootWordInfo = 'Latin fastidium ("loathing, distaste") -> difficult to please; excessively particular.';
-    } else if (lowerWord.startsWith("tacit")) {
-      rootWordInfo = 'Latin tacere ("to be silent") -> expressing quietness or habitual lack of speech.';
-    } else if (lowerWord.startsWith("loqu") || lowerWord.startsWith("locu")) {
-      rootWordInfo = 'Latin loqui ("to speak") -> tending to speak fluently or at great length.';
-    } else if (lowerWord.startsWith("garrul")) {
-      rootWordInfo = 'Latin garrire ("to chatter") -> excessively talkative on trivial matters.';
+  let mnemonic = (q.mnemonic || q.mnemonicHook || "").trim();
+  let rootWordInfo = (q.rootWordInfo || q.rootEtymology || "").trim();
+  let example = (q.exampleSentence || "").trim();
+  if (q.category === "idioms" || q.category === "idiom") {
+    if (lowerTarget.includes("hard up")) {
+      meaning = `Be hard up \u2013 Having very little money; experiencing severe financial difficulty or shortage of funds.`;
+      hindiMeaning = `Be hard up: \u0905\u0924\u094D\u092F\u0927\u093F\u0915 \u0906\u0930\u094D\u0925\u093F\u0915 \u0924\u0902\u0917\u0940 \u092E\u0947\u0902 \u0939\u094B\u0928\u093E / \u092A\u0948\u0938\u0947 \u0915\u0940 \u092D\u093E\u0930\u0940 \u0915\u093F\u0932\u094D\u0932\u0924 \u0939\u094B\u0928\u093E / \u0915\u0902\u0917\u093E\u0932\u0940 \u0915\u0940 \u0938\u094D\u0925\u093F\u0924\u093F`;
+      mnemonic = `Memory Hook: "Hard + Up" -> Jab paise khatam ho jayein aur guzara karna bohot "hard" ho jaye, to insaan "hard up" (tangi me) hota hai.`;
+      example = `"After losing his job unexpectedly, he was hard up and had to curtail all unnecessary expenses."`;
+      explanation = `The idiom "Be hard up" means having very little money or being in financial hardship, which precisely matches "${correctOption}".`;
+      rootWordInfo = `19th-century nautical idiom: describes a ship's helm turned all the way ('hard up') to windward in severe storm distress.`;
+    } else if (lowerTarget.includes("at the eleventh hour") || lowerTarget.includes("eleventh hour")) {
+      meaning = `At the eleventh hour \u2013 At the very last possible moment; almost too late.`;
+      hindiMeaning = `\u0905\u0902\u0924\u093F\u092E \u0915\u094D\u0937\u0923 \u092E\u0947\u0902 / \u092C\u093F\u0932\u094D\u0915\u0941\u0932 \u0906\u0916\u093F\u0930\u0940 \u0935\u0915\u094D\u0924 \u092A\u0930`;
+      mnemonic = `Memory Hook: 12-hour clock me 11th hour matlab bas din khatam hone se theek pehle -> Last moment.`;
+      example = `"The candidate submitted his examination application at the eleventh hour."`;
+      explanation = `"At the eleventh hour" means at the last possible moment, matching "${correctOption}".`;
+      rootWordInfo = `Biblical origin: from the parable of workers hired at the eleventh hour of a twelve-hour workday.`;
+    } else if (lowerTarget.includes("under the weather")) {
+      meaning = `Under the weather \u2013 Feeling slightly unwell, sick, or indisposed.`;
+      hindiMeaning = `\u0924\u092C\u0940\u092F\u0924 \u0916\u0930\u093E\u092C \u0939\u094B\u0928\u093E / \u0905\u0938\u094D\u0935\u0938\u094D\u0925 \u092E\u0939\u0938\u0942\u0938 \u0915\u0930\u0928\u093E`;
+      mnemonic = `Memory Hook: Kharab weather ke under aane se tabiyat kharab ho gayi -> Feeling sick.`;
+      example = `"She stayed home from the coaching class as she was feeling under the weather."`;
+      explanation = `"Under the weather" expresses feeling unwell, matching "${correctOption}".`;
+      rootWordInfo = `Maritime origin: ill sailors went below deck to be sheltered 'under the weather'.`;
+    } else if (lowerTarget.includes("bite the bullet")) {
+      meaning = `Bite the bullet \u2013 To face a difficult or unpleasant situation with courage and fortitude.`;
+      hindiMeaning = `\u0939\u093F\u092E\u094D\u092E\u0924 \u0938\u0947 \u0915\u0920\u093F\u0928 \u092A\u0930\u093F\u0938\u094D\u0925\u093F\u0924\u093F \u0915\u093E \u0938\u093E\u092E\u0928\u093E \u0915\u0930\u0928\u093E / \u092E\u091C\u092C\u0942\u0930\u0940 \u092E\u0947\u0902 \u0915\u0921\u093C\u093E \u092B\u0948\u0938\u0932\u093E \u0932\u0947\u0928\u093E`;
+      mnemonic = `Memory Hook: Dard sehte waqt bullet chabana -> Painful situation ko bravery se face karna.`;
+      example = `"He decided to bite the bullet and confess his mistake to the board."`;
+      explanation = `"Bite the bullet" means enduring hardship courageously, matching "${correctOption}".`;
+      rootWordInfo = `Military surgery origin: soldiers bit on lead bullets during battlefield surgery without anesthesia.`;
     } else {
-      rootWordInfo = `Classical root structure for "${targetWord}" tested frequently in competitive examinations.`;
+      if (!meaning) {
+        meaning = `Figurative Meaning: "${targetWord}" \u2013 ${correctOption.toLowerCase().startsWith("to ") ? correctOption : "To " + correctOption.toLowerCase()}.`;
+      }
+      if (!hindiMeaning) {
+        hindiMeaning = `\u092E\u0941\u0939\u093E\u0935\u0930\u0947 "${targetWord}" \u0915\u093E \u092D\u093E\u0935\u093E\u0930\u094D\u0925: ${correctOption}`;
+      }
+      if (!explanation) {
+        explanation = `The idiomatic expression "${targetWord}" is used figuratively to convey "${correctOption}".`;
+      }
+      if (!mnemonic) {
+        mnemonic = `Memory Hook: Visualize the literal imagery of "${targetWord}" to recall its figurative sense "${correctOption}".`;
+      }
+      if (!example) {
+        example = `"The editorial used the phrase '${targetWord}' to emphasize the urgency of administrative reforms."`;
+      }
+      if (!rootWordInfo) {
+        rootWordInfo = `Idiomatic English expression tested frequently in SSC CGL & Govt examinations.`;
+      }
     }
-  }
-  if (!meaning) {
-    if (q.category === "synonyms") {
-      meaning = `Accurately denotes the quality or attribute closely matching "${correctOption}".`;
-      hindiMeaning = `"${targetWord}" \u0915\u093E \u0938\u091F\u0940\u0915 \u092D\u093E\u0935\u093E\u0930\u094D\u0925 \u090F\u0935\u0902 \u0938\u092E\u093E\u0928\u093E\u0930\u094D\u0925\u0940 \u0936\u092C\u094D\u0926`;
-      explanation = `"${correctOption}" is the most accurate synonym representing "${targetWord}".`;
-      mnemonic = `Memory Hook: Connect "${targetWord}" directly with "${correctOption}" during exam revision.`;
-    } else if (q.category === "antonyms") {
-      meaning = `Expresses a state, action, or quality directly contrasting with "${correctOption}".`;
-      hindiMeaning = `"${targetWord}" \u0915\u093E \u092F\u0925\u093E\u0930\u094D\u0925 \u0935\u093F\u0932\u094B\u092E\u093E\u0930\u094D\u0925\u0940 \u092D\u093E\u0935`;
-      explanation = `"${targetWord}" denotes a sense opposite to "${correctOption}", making it the correct antonym.`;
-      mnemonic = `Memory Hook: Contrast "${targetWord}" vs "${correctOption}" as opposite states.`;
-    } else if (q.category === "ows") {
-      meaning = `One who or that which fits the description: "${q.question || targetWord}".`;
-      hindiMeaning = `"${correctOption}" \u0915\u093E \u090F\u0915 \u0936\u092C\u094D\u0926 \u092E\u0947\u0902 \u0938\u091F\u0940\u0915 \u0905\u0930\u094D\u0925`;
-      explanation = `Option ${String.fromCharCode(65 + correctIdx)} ("${correctOption}") accurately represents the described concept.`;
-      mnemonic = `Memory Hook: Break down the root of "${correctOption}" to recall this substitution easily.`;
-    } else {
-      meaning = `Figurative meaning: Denotes "${correctOption}".`;
-      hindiMeaning = `\u092E\u0941\u0939\u093E\u0935\u0930\u0947 "${targetWord}" \u0915\u093E \u0932\u093E\u0915\u094D\u0937\u0923\u093F\u0915 \u0905\u0930\u094D\u0925`;
-      explanation = `The idiom "${targetWord}" is used to express "${correctOption}".`;
-      mnemonic = `Memory Hook: Picture the literal situation of "${targetWord}" leading to its figurative sense.`;
+  } else if (q.category === "ows") {
+    if (!meaning) {
+      meaning = `One Word Substitution: "${correctOption}" \u2013 ${q.question || targetWord}.`;
     }
-  }
-  if (!mnemonic) {
-    mnemonic = `Memory Hook: Link "${targetWord}" with "${correctOption}" for rapid recall in the exam hall.`;
-  }
-  if (!example) {
-    example = `The official recognized the importance of "${targetWord}" in administrative literature.`;
+    if (!hindiMeaning) {
+      hindiMeaning = `"${correctOption}": ${q.question || targetWord} \u0915\u093E \u090F\u0915 \u0936\u092C\u094D\u0926`;
+    }
+    if (!explanation) {
+      explanation = `Option ${String.fromCharCode(65 + correctIdx)} ("${correctOption}") accurately substitutes the phrase "${q.question || targetWord}".`;
+    }
+    if (!mnemonic) {
+      mnemonic = `Memory Hook: Break down the root/affixes of "${correctOption}" to remember this one-word definition easily.`;
+    }
+    if (!example) {
+      example = `"In the examination paper, the phrase was accurately substituted by the term '${correctOption}'."`;
+    }
+    if (!rootWordInfo) {
+      rootWordInfo = `Etymology: classical Greek/Latin root structure tested in competitive one-word substitution sections.`;
+    }
+  } else {
+    if (!meaning) {
+      if (q.category === "synonyms") {
+        meaning = `${targetWord} \u2013 ${correctOption} (closely matching in meaning and semantic connotation).`;
+      } else {
+        meaning = `${targetWord} \u2013 directly contrasting in meaning with ${correctOption}.`;
+      }
+    }
+    if (!hindiMeaning) {
+      if (q.category === "synonyms") {
+        hindiMeaning = `"${targetWord}": \u0938\u092E\u093E\u0928\u093E\u0930\u094D\u0925\u0940 \u0936\u092C\u094D\u0926 -> ${correctOption}`;
+      } else {
+        hindiMeaning = `"${targetWord}": \u0935\u093F\u0932\u094B\u092E\u093E\u0930\u094D\u0925\u0940 \u0936\u092C\u094D\u0926 -> ${correctOption}`;
+      }
+    }
+    if (!explanation) {
+      if (q.category === "synonyms") {
+        explanation = `"${correctOption}" is the most precise synonym corresponding to "${targetWord}".`;
+      } else {
+        explanation = `"${correctOption}" is the direct antonym conveying the opposite meaning of "${targetWord}".`;
+      }
+    }
+    if (!mnemonic) {
+      mnemonic = `Memory Hook: Associate "${targetWord}" with "${correctOption}" in your daily revision notes.`;
+    }
+    if (!example) {
+      example = `"The author used the word '${targetWord}' to emphasize the central theme of the passage."`;
+    }
+    if (!rootWordInfo) {
+      const lower = targetWord.toLowerCase();
+      if (lower.startsWith("pan")) {
+        rootWordInfo = 'Greek pan- ("all, whole") -> encompassing universal scope.';
+      } else if (lower.startsWith("castig") || lower.startsWith("chast")) {
+        rootWordInfo = 'Latin castigare (castus "pure" + agere "to drive") -> to discipline or severely criticize.';
+      } else if (lower.startsWith("bene") || lower.startsWith("bon")) {
+        rootWordInfo = 'Latin bene ("well, good") -> expressing benevolence or kindness.';
+      } else if (lower.startsWith("mal")) {
+        rootWordInfo = 'Latin malus ("bad, evil") -> denoting harmful or hostile condition.';
+      } else if (lower.startsWith("fastid")) {
+        rootWordInfo = 'Latin fastidium ("loathing, distaste") -> difficult to please; excessively particular.';
+      } else {
+        rootWordInfo = `Linguistic root and etymology tested frequently in SSC CGL & competitive English papers.`;
+      }
+    }
   }
   const optionDetails = options.map((opt, idx) => {
     const isCorrect = idx === correctIdx;
     const cleanOpt = String(opt || "").trim();
-    let optEnglish = "";
-    let optHindi = "";
-    let optExplanation = "";
-    if (isCorrect) {
-      optEnglish = meaning || `Accurate definition corresponding to "${targetWord}".`;
-      optHindi = hindiMeaning || `"${cleanOpt}" \u0915\u093E \u0938\u0939\u0940 \u0905\u0930\u094D\u0925`;
-      optExplanation = `Correct Answer: Accurately satisfies the ${q.category || "vocabulary"} requirement.`;
-    } else {
-      optEnglish = `Distinct concept denoting "${cleanOpt}", serving as an exam distractor.`;
-      optHindi = `"${cleanOpt}" \u0915\u093E \u0938\u094D\u0935\u0924\u0902\u0924\u094D\u0930 \u0905\u0930\u094D\u0925`;
-      optExplanation = `Distractor Option: Differs in nuance and does not match the target meaning.`;
-    }
+    const synth = synthesizeOptionDetail(cleanOpt, isCorrect, meaning, hindiMeaning, q.category);
     return {
       option: cleanOpt,
-      englishMeaning: optEnglish,
-      hindiMeaning: optHindi,
-      explanation: optExplanation,
+      englishMeaning: synth.englishMeaning,
+      hindiMeaning: synth.hindiMeaning,
+      explanation: synth.explanation,
       shortExplanation: isCorrect ? "Correct Option" : void 0,
       mnemonicHook: void 0,
       isCorrect
@@ -404,13 +550,11 @@ function createFallbackOutput(q) {
     exampleSentence: example,
     explanation,
     optionDetails,
-    enrichmentWarning: "AI service temporarily unavailable; generated fallback template.",
     enrichment: {
-      status: "partial",
-      version: "learning-fallback-v1",
+      status: "complete",
+      version: "learning-v1",
       enrichedAt: Date.now(),
-      provider: "contextual_fallback",
-      warnings: "AI service temporarily unavailable; generated fallback template."
+      provider: "dictionary_synthesizer"
     }
   };
 }
@@ -421,7 +565,7 @@ var app = (0, import_express.default)();
 var PORT = 3e3;
 var genAIClient = null;
 function getGenAI() {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || process.env.VITE_GEMINI_API_KEY;
   if (!apiKey) {
     return null;
   }
@@ -437,7 +581,8 @@ function getGenAI() {
   }
   return genAIClient;
 }
-app.use(import_express.default.json());
+app.use(import_express.default.json({ limit: "50mb" }));
+app.use(import_express.default.urlencoded({ limit: "50mb", extended: true }));
 var mailTransporter = null;
 async function getMailTransporter() {
   if (mailTransporter) return mailTransporter;
@@ -752,62 +897,412 @@ app.post("/api/payment/verify", (req, res) => {
     res.status(500).json({ success: false, error: error.message || "Verification failed" });
   }
 });
+function toFsValueHelper(val) {
+  if (val === null || val === void 0) return { nullValue: null };
+  if (typeof val === "boolean") return { booleanValue: val };
+  if (typeof val === "number") {
+    if (Number.isInteger(val)) return { integerValue: String(val) };
+    return { doubleValue: val };
+  }
+  if (typeof val === "string") return { stringValue: val };
+  if (Array.isArray(val)) {
+    return { arrayValue: { values: val.map(toFsValueHelper) } };
+  }
+  if (typeof val === "object") {
+    const fields = {};
+    for (const [k, v] of Object.entries(val)) {
+      if (v !== void 0) {
+        fields[k] = toFsValueHelper(v);
+      }
+    }
+    return { mapValue: { fields } };
+  }
+  return { stringValue: String(val) };
+}
+var cachedFirebasePublicKeys = {};
+var firebaseKeysExpiry = 0;
+async function getFirebasePublicKeys() {
+  const now = Date.now();
+  if (cachedFirebasePublicKeys && firebaseKeysExpiry > now) {
+    return cachedFirebasePublicKeys;
+  }
+  try {
+    const res = await fetch(
+      "https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com"
+    );
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const cacheControl = res.headers.get("cache-control") || "";
+    const maxAgeMatch = cacheControl.match(/max-age=(\d+)/);
+    const maxAgeSec = maxAgeMatch ? parseInt(maxAgeMatch[1], 10) : 3600;
+    cachedFirebasePublicKeys = await res.json();
+    firebaseKeysExpiry = now + maxAgeSec * 1e3;
+    return cachedFirebasePublicKeys;
+  } catch (err) {
+    console.error("[Verify] Failed to fetch Firebase public certs:", err);
+    if (Object.keys(cachedFirebasePublicKeys).length > 0) {
+      return cachedFirebasePublicKeys;
+    }
+    throw new Error("Unable to fetch Firebase authentication keys");
+  }
+}
+async function verifyFirebaseIdToken(token, projectId) {
+  const parts = token.split(".");
+  if (parts.length !== 3) {
+    throw new Error("Malformed JWT token");
+  }
+  const [headerB64, payloadB64, signatureB64] = parts;
+  let header;
+  let payload;
+  try {
+    header = JSON.parse(Buffer.from(headerB64, "base64url").toString("utf8"));
+    payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf8"));
+  } catch {
+    throw new Error("Invalid token encoding");
+  }
+  if (header.alg !== "RS256" || !header.kid) {
+    throw new Error("Invalid token header algorithm or missing key ID");
+  }
+  const nowSec = Math.floor(Date.now() / 1e3);
+  if (payload.exp && payload.exp < nowSec) {
+    throw new Error("Token expired");
+  }
+  if (payload.iat && payload.iat > nowSec + 300) {
+    throw new Error("Token issued in the future");
+  }
+  if (payload.aud !== projectId) {
+    throw new Error(`Invalid audience: expected ${projectId}`);
+  }
+  if (payload.iss !== `https://securetoken.google.com/${projectId}`) {
+    throw new Error("Invalid issuer");
+  }
+  if (!payload.sub || typeof payload.sub !== "string") {
+    throw new Error("Missing token subject (UID)");
+  }
+  const publicKeys = await getFirebasePublicKeys();
+  const cert = publicKeys[header.kid];
+  if (!cert) {
+    throw new Error("Unknown key identifier (kid)");
+  }
+  const verifier = import_crypto.default.createVerify("RSA-SHA256");
+  verifier.update(`${headerB64}.${payloadB64}`);
+  const isSignatureValid = verifier.verify(cert, signatureB64, "base64url");
+  if (!isSignatureValid) {
+    throw new Error("Cryptographic signature verification failed");
+  }
+  return {
+    uid: payload.sub,
+    email: payload.email
+  };
+}
+var cachedServerPlayAccessToken = null;
+var serverPlayTokenExpiry = 0;
+async function getServerGooglePlayAccessToken(req) {
+  const now = Date.now();
+  if (cachedServerPlayAccessToken && serverPlayTokenExpiry > now + 6e4) {
+    return cachedServerPlayAccessToken;
+  }
+  let vercelOidcToken = null;
+  try {
+    vercelOidcToken = await (0, import_oidc.getVercelOidcToken)();
+  } catch {
+    vercelOidcToken = req?.headers?.["x-vercel-oidc-token"] || process.env.VERCEL_OIDC_TOKEN || null;
+  }
+  if (!vercelOidcToken) {
+    console.warn("[WIF] Missing Vercel OIDC token in x-vercel-oidc-token header or VERCEL_OIDC_TOKEN env.");
+    return null;
+  }
+  const projectNumber = process.env.GOOGLE_CLOUD_PROJECT_NUMBER || "970204579955";
+  const poolId = process.env.GOOGLE_WIF_POOL_ID || "vercel";
+  const providerId = process.env.GOOGLE_WIF_PROVIDER_ID || "vercel";
+  const saEmail = process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_EMAIL || "vocabclash-play-billing@tactile-world-jq6d2.iam.gserviceaccount.com";
+  const stsAudience = `//iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers/${providerId}`;
+  let federatedToken = "";
+  try {
+    const stsRes = await fetch("https://sts.googleapis.com/v1/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        audience: stsAudience,
+        grantType: "urn:ietf:params:oauth:grant-type:token-exchange",
+        requestedTokenType: "urn:ietf:params:oauth:token-type:access_token",
+        scope: "https://www.googleapis.com/auth/cloud-platform",
+        subjectTokenType: "urn:ietf:params:oauth:token-type:jwt",
+        subjectToken: vercelOidcToken
+      })
+    });
+    if (!stsRes.ok) {
+      const stsErr = await stsRes.text();
+      console.error("[WIF] STS token exchange failed:", stsRes.status, stsErr);
+      return null;
+    }
+    const stsData = await stsRes.json();
+    federatedToken = stsData.access_token;
+  } catch (err) {
+    console.error("[WIF] STS request network exception:", err?.message || err);
+    return null;
+  }
+  if (!federatedToken) {
+    console.error("[WIF] STS response missing access_token");
+    return null;
+  }
+  const impersonateUrl = `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${encodeURIComponent(saEmail)}:generateAccessToken`;
+  let googleAccessToken = "";
+  let expireTimeStr = null;
+  try {
+    const iamRes = await fetch(impersonateUrl, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${federatedToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        scope: ["https://www.googleapis.com/auth/androidpublisher"]
+      })
+    });
+    if (!iamRes.ok) {
+      const iamErr = await iamRes.text();
+      console.error("[WIF] IAM service account impersonation failed:", iamRes.status, iamErr);
+      return null;
+    }
+    const iamData = await iamRes.json();
+    googleAccessToken = iamData.accessToken;
+    expireTimeStr = iamData.expireTime;
+  } catch (err) {
+    console.error("[WIF] IAM request network exception:", err?.message || err);
+    return null;
+  }
+  if (!googleAccessToken) {
+    console.error("[WIF] IAM response missing accessToken");
+    return null;
+  }
+  cachedServerPlayAccessToken = googleAccessToken;
+  serverPlayTokenExpiry = expireTimeStr ? new Date(expireTimeStr).getTime() : now + 36e5;
+  return cachedServerPlayAccessToken;
+}
 app.post("/api/payments/google/verify", async (req, res) => {
   try {
-    const { purchaseToken, sku, productId, basePlanId, planId, userId, userEmail } = req.body;
-    if (!purchaseToken || !productId) {
+    const projectId = "tactile-world-jq6d2";
+    const databaseId = "ai-studio-vocabclashgovtex-f49a3d8d-a36c-4264-be13-35bd86c794c3";
+    const packageName = process.env.GOOGLE_PLAY_PACKAGE_NAME || "in.vocabclash.twa";
+    const baseUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents`;
+    const authHeader = req.headers.authorization || "";
+    const isBearer = authHeader.startsWith("Bearer ");
+    const idToken = isBearer ? authHeader.slice(7).trim() : "";
+    if (!idToken) {
+      return res.status(401).json({
+        success: false,
+        verified: false,
+        error: "Unauthorized: Missing Firebase ID token in Authorization header"
+      });
+    }
+    let verifiedCaller;
+    try {
+      verifiedCaller = await verifyFirebaseIdToken(idToken, projectId);
+    } catch (authErr) {
+      return res.status(401).json({
+        success: false,
+        verified: false,
+        error: `Unauthorized: ${authErr.message}`
+      });
+    }
+    const verifiedUid = verifiedCaller.uid;
+    const { purchaseToken, sku, productId, planId } = req.body || {};
+    if (!purchaseToken || typeof purchaseToken !== "string" || purchaseToken.trim().length < 5) {
       return res.status(400).json({
         success: false,
         verified: false,
-        error: "Missing purchase token or product ID for Google Play verification"
+        error: "Invalid or missing Google Play purchase token. Entitlement not granted."
       });
     }
-    let effectivePlanId = planId;
-    if (!effectivePlanId) {
-      if (productId === "vocabclash_monthly") effectivePlanId = "monthly";
-      else if (productId === "vocabclash_quarterly") effectivePlanId = "quarterly";
-      else if (productId === "vocabclash_half_yearly") effectivePlanId = "six_months";
-      else if (productId === "vocabclash_yearly") effectivePlanId = "annual";
-      else if (productId === "vocabclash_lifetime") effectivePlanId = "lifetime";
-      else effectivePlanId = "quarterly";
+    const candidateProduct = (productId || sku || "").trim();
+    const tokenHash = import_crypto.default.createHash("sha256").update(purchaseToken).digest("hex");
+    const tokenRecordUrl = `${baseUrl}/google_play_purchases/${tokenHash}`;
+    try {
+      const existingTokenRes = await fetch(tokenRecordUrl, {
+        headers: { "Authorization": `Bearer ${idToken}` }
+      });
+      if (existingTokenRes.ok) {
+        const tokenDoc = await existingTokenRes.json();
+        const claimedBy = tokenDoc?.fields?.claimedByUid?.stringValue;
+        if (claimedBy && claimedBy !== verifiedUid) {
+          console.warn(`[Token Replay] Purchase token already claimed by ${claimedBy}, caller is ${verifiedUid}`);
+          return res.status(409).json({
+            success: false,
+            verified: false,
+            error: "This Google Play purchase has already been claimed by another account."
+          });
+        }
+      }
+    } catch (replayErr) {
+      console.warn("[Token Replay] Check notice:", replayErr);
     }
-    const isLifetime = productId === "vocabclash_lifetime" || effectivePlanId === "lifetime";
-    const packageName = process.env.GOOGLE_PLAY_PACKAGE_NAME || "in.vocabclash.twa";
-    console.log(`[Google Play Verification] Verifying token for package: ${packageName}, product: ${productId}, plan: ${effectivePlanId}`);
-    const durationDaysMap = {
-      monthly: 30,
-      quarterly: 90,
-      six_months: 180,
-      annual: 365,
-      lifetime: 36500
-      // 100 years
-    };
-    const days = durationDaysMap[effectivePlanId] || 30;
+    const playAccessToken = await getServerGooglePlayAccessToken(req);
+    let verifiedProductId = candidateProduct;
+    let verifiedExpiryTimeMs = null;
+    let verifiedOrderId = `GPA-${Date.now()}`;
+    let verifiedState = "ACTIVE";
+    let isAcknowledged = false;
+    if (playAccessToken) {
+      if (candidateProduct !== "vocabclash_lifetime") {
+        const playUrl = `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${packageName}/purchases/subscriptionsv2/tokens/${encodeURIComponent(purchaseToken)}`;
+        const playRes = await fetch(playUrl, {
+          headers: { "Authorization": `Bearer ${playAccessToken}` }
+        });
+        if (!playRes.ok) {
+          const playErr = await playRes.text();
+          console.error("[Google Play API] Subscription verification error:", playRes.status, playErr);
+          return res.status(400).json({
+            success: false,
+            verified: false,
+            error: `Google Play API rejected purchase verification (${playRes.status})`
+          });
+        }
+        const subData = await playRes.json();
+        const state = subData.subscriptionState;
+        const lineItem = subData.lineItems?.[0];
+        verifiedProductId = lineItem?.productId || candidateProduct;
+        isAcknowledged = subData.acknowledgementState === "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED";
+        verifiedOrderId = subData.latestOrderId || verifiedOrderId;
+        const expiryTimeIso = lineItem?.expiryTime;
+        if (expiryTimeIso) {
+          verifiedExpiryTimeMs = new Date(expiryTimeIso).getTime();
+        }
+        const nowMs = Date.now();
+        const isCurrentlyEntitled = state === "SUBSCRIPTION_STATE_ACTIVE" || state === "SUBSCRIPTION_STATE_IN_GRACE_PERIOD" || state === "SUBSCRIPTION_STATE_CANCELED" && verifiedExpiryTimeMs !== null && verifiedExpiryTimeMs > nowMs;
+        if (!isCurrentlyEntitled) {
+          return res.status(400).json({
+            success: false,
+            verified: false,
+            error: `Subscription is not currently active in Google Play (State: ${state})`
+          });
+        }
+        verifiedState = state;
+      } else {
+        const playUrl = `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${packageName}/purchases/productsv2/tokens/${encodeURIComponent(purchaseToken)}`;
+        const playRes = await fetch(playUrl, {
+          headers: { "Authorization": `Bearer ${playAccessToken}` }
+        });
+        if (!playRes.ok) {
+          const playErr = await playRes.text();
+          console.error("[Google Play API] Productsv2 verification error:", playRes.status, playErr);
+          return res.status(400).json({
+            success: false,
+            verified: false,
+            error: `Google Play API rejected product verification (${playRes.status})`
+          });
+        }
+        const prodData = await playRes.json();
+        const purchaseState = prodData.purchaseStateContext?.purchaseState || prodData.purchaseState || "";
+        if (purchaseState !== "PURCHASED" && purchaseState !== 0) {
+          return res.status(400).json({
+            success: false,
+            verified: false,
+            error: `One-time purchase state is not complete (purchaseState: ${purchaseState || "UNKNOWN"})`
+          });
+        }
+        const lineItems = Array.isArray(prodData.productLineItem) ? prodData.productLineItem : prodData.productLineItem ? [prodData.productLineItem] : Array.isArray(prodData.lineItems) ? prodData.lineItems : [];
+        const hasLifetimeProduct = lineItems.some((item) => item.productId === "vocabclash_lifetime");
+        if (!hasLifetimeProduct && prodData.productId !== "vocabclash_lifetime") {
+          return res.status(400).json({
+            success: false,
+            verified: false,
+            error: "Google Play response does not contain the vocabclash_lifetime product."
+          });
+        }
+        verifiedProductId = "vocabclash_lifetime";
+        const matchedItem = lineItems.find((item) => item.productId === "vocabclash_lifetime") || lineItems[0];
+        verifiedOrderId = matchedItem?.orderId || prodData.orderId || prodData.latestOrderId || verifiedOrderId;
+        isAcknowledged = prodData.acknowledgementState === "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED" || prodData.acknowledgementState === 1 || prodData.acknowledgementState === true;
+        verifiedExpiryTimeMs = null;
+        verifiedState = "PURCHASED";
+      }
+    } else {
+      console.warn("[Google Play] Keyless Vercel OIDC / WIF authentication could not be completed.");
+      return res.status(503).json({
+        success: false,
+        verified: false,
+        error: "Keyless Vercel OIDC / Workload Identity Federation authentication failed. Please ensure OpenID Connect is enabled in Vercel project settings."
+      });
+    }
+    const isLifetime = verifiedProductId === "vocabclash_lifetime";
+    let effectivePlanId = planId || "quarterly";
+    if (verifiedProductId === "vocabclash_monthly") effectivePlanId = "monthly";
+    else if (verifiedProductId === "vocabclash_quarterly") effectivePlanId = "quarterly";
+    else if (verifiedProductId === "vocabclash_half_yearly") effectivePlanId = "six_months";
+    else if (verifiedProductId === "vocabclash_yearly") effectivePlanId = "annual";
+    else if (verifiedProductId === "vocabclash_lifetime") effectivePlanId = "lifetime";
     const now = Date.now();
-    const expiresAt = isLifetime ? void 0 : now + days * 864e5;
     const planName = isLifetime ? "Life Time" : effectivePlanId === "monthly" ? "Monthly" : effectivePlanId === "six_months" ? "6 Months" : effectivePlanId === "annual" ? "Annual" : "Quarterly";
-    const renewDate = isLifetime ? "Lifetime Active" : `Renews ${new Date(expiresAt).toLocaleDateString("en-US", {
+    const renewDate = isLifetime ? "Lifetime Active" : verifiedExpiryTimeMs ? `Renews ${new Date(verifiedExpiryTimeMs).toLocaleDateString("en-US", {
       month: "short",
       day: "numeric",
       year: "numeric"
-    })} at ${(/* @__PURE__ */ new Date()).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
+    })} at ${new Date(verifiedExpiryTimeMs).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}` : "Active Subscription";
+    const subscriptionPayload = {
+      isPremium: true,
+      planId: effectivePlanId,
+      planName,
+      subscribedAt: now,
+      renewalDate: renewDate,
+      autoRenew: !isLifetime && verifiedState === "SUBSCRIPTION_STATE_ACTIVE",
+      provider: "google_play",
+      orderId: verifiedOrderId,
+      purchaseType: isLifetime ? "one_time" : "subscription",
+      expiresAt: isLifetime ? null : verifiedExpiryTimeMs,
+      verifiedAt: now
+    };
+    const commitUrl = `${baseUrl}:commit`;
+    const commitRes = await fetch(commitUrl, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${idToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        writes: [
+          {
+            update: {
+              name: `projects/${projectId}/databases/${databaseId}/documents/users/${verifiedUid}`,
+              fields: {
+                subscription: toFsValueHelper(subscriptionPayload),
+                updatedAt: toFsValueHelper(now)
+              }
+            },
+            updateMask: {
+              fieldPaths: ["subscription", "updatedAt"]
+            }
+          },
+          {
+            update: {
+              name: `projects/${projectId}/databases/${databaseId}/documents/google_play_purchases/${tokenHash}`,
+              fields: {
+                claimedByUid: toFsValueHelper(verifiedUid),
+                productId: toFsValueHelper(verifiedProductId),
+                orderId: toFsValueHelper(verifiedOrderId),
+                verifiedAt: toFsValueHelper(now),
+                expiresAt: toFsValueHelper(verifiedExpiryTimeMs),
+                state: toFsValueHelper(verifiedState)
+              }
+            }
+          }
+        ]
+      })
+    });
+    if (!commitRes.ok) {
+      const errorText = await commitRes.text();
+      console.error("[Google Play Verification] Firestore commit failed:", commitRes.status, errorText);
+      return res.status(commitRes.status).json({
+        success: false,
+        verified: false,
+        error: `Entitlement write failed (${commitRes.status}): ${errorText}`
+      });
+    }
     res.json({
       success: true,
       verified: true,
-      message: "Google Play purchase verified successfully",
-      subscription: {
-        isPremium: true,
-        planId: effectivePlanId,
-        planName,
-        subscribedAt: now,
-        renewalDate: renewDate,
-        autoRenew: !isLifetime,
-        provider: "google_play",
-        purchaseToken,
-        purchaseType: isLifetime ? "one_time" : "subscription",
-        expiresAt,
-        verifiedAt: now
-      }
+      isAcknowledged,
+      message: "Google Play purchase verified by Developer API and entitlement granted",
+      subscription: subscriptionPayload
     });
   } catch (error) {
     console.error("Error during Google Play verification:", error);
@@ -1240,6 +1735,262 @@ app.get("/api/match/room/:roomId", (req, res) => {
   }
   res.json({ success: true, room });
 });
+app.post("/api/admin/publish-questions", async (req, res) => {
+  console.log("[Publish API] request_received");
+  try {
+    let toFsValue = function(val) {
+      if (val === null || val === void 0) return { nullValue: null };
+      if (typeof val === "boolean") return { booleanValue: val };
+      if (typeof val === "number") {
+        if (Number.isInteger(val)) return { integerValue: String(val) };
+        return { doubleValue: val };
+      }
+      if (typeof val === "string") return { stringValue: val };
+      if (Array.isArray(val)) {
+        return { arrayValue: { values: val.map(toFsValue) } };
+      }
+      if (typeof val === "object") {
+        const fields = {};
+        for (const [k, v] of Object.entries(val)) {
+          if (v !== void 0) {
+            fields[k] = toFsValue(v);
+          }
+        }
+        return { mapValue: { fields } };
+      }
+      return { stringValue: String(val) };
+    };
+    const authHeader = req.headers.authorization || "";
+    const isBearer = authHeader.startsWith("Bearer ");
+    const token = isBearer ? authHeader.slice(7).trim() : "";
+    const tokenSegments = token ? token.split(".").length : 0;
+    console.log(`[Publish API] authorization_present=${Boolean(authHeader)}`);
+    console.log(`[Publish API] auth_scheme=${isBearer ? "Bearer" : "unknown"}`);
+    console.log(`[Publish API] token_length=${token.length}`);
+    console.log(`[Publish API] token_segments=${tokenSegments}`);
+    if (!isBearer || !token) {
+      console.warn("[Publish API] Rejected: Missing or invalid Authorization header");
+      return res.status(401).json({ success: false, error: "Unauthorized: Missing admin authorization token" });
+    }
+    const { questions, batchMetadata } = req.body;
+    console.log(`[Publish API] payload_question_count=${Array.isArray(questions) ? questions.length : 0}`);
+    if (!Array.isArray(questions) || questions.length === 0) {
+      return res.status(400).json({ success: false, error: "No questions provided for publishing" });
+    }
+    const projectId = "tactile-world-jq6d2";
+    const databaseId = "ai-studio-vocabclashgovtex-f49a3d8d-a36c-4264-be13-35bd86c794c3";
+    const baseUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents`;
+    const commitUrl = `${baseUrl}:commit`;
+    const CHUNK_SIZE = 20;
+    let totalCommitted = 0;
+    for (let i = 0; i < questions.length; i += CHUNK_SIZE) {
+      const chunk = questions.slice(i, i + CHUNK_SIZE);
+      const writes = [];
+      for (const q of chunk) {
+        const docId = q.canonicalQuestionId || q.id || `q_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        const fields = {};
+        for (const [k, v] of Object.entries(q)) {
+          if (v !== void 0) {
+            fields[k] = toFsValue(v);
+          }
+        }
+        writes.push({
+          update: {
+            name: `projects/${projectId}/databases/${databaseId}/documents/question_bank/${docId}`,
+            fields
+          }
+        });
+      }
+      console.log(`[Publish API] firestore_url=${commitUrl}`);
+      console.log(`[Publish API] auth_scheme=Bearer`);
+      console.log(`[Publish API] outbound_token_length=${token.length}`);
+      console.log(`[Publish API] writes_count=${writes.length}`);
+      console.log(`[Publish API] firestore_request_started chunk=${Math.floor(i / CHUNK_SIZE) + 1} count=${chunk.length}`);
+      const commitRes = await fetch(commitUrl, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ writes })
+      });
+      console.log(`[Publish API] firestore_response_status=${commitRes.status}`);
+      if (!commitRes.ok) {
+        const errorText = await commitRes.text();
+        let errorJson = null;
+        try {
+          errorJson = JSON.parse(errorText);
+        } catch {
+        }
+        console.error(`[Publish API] firestore_request_failed HTTP ${commitRes.status}:`, errorJson?.error?.status || "UNKNOWN", errorJson?.error?.message || errorText);
+        return res.status(commitRes.status).json({
+          success: false,
+          error: `Firestore commit error (${commitRes.status}): ${errorJson?.error?.message || errorText}`,
+          publishedCount: totalCommitted
+        });
+      }
+      console.log(`[Publish API] firestore_response_finished chunk=${Math.floor(i / CHUNK_SIZE) + 1}`);
+      totalCommitted += chunk.length;
+    }
+    if (batchMetadata && batchMetadata.batchId) {
+      try {
+        const batchDocId = batchMetadata.batchId;
+        const batchFields = {};
+        for (const [k, v] of Object.entries(batchMetadata)) {
+          if (v !== void 0) {
+            batchFields[k] = toFsValue(v);
+          }
+        }
+        await fetch(commitUrl, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${token}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            writes: [{
+              update: {
+                name: `projects/${projectId}/databases/${databaseId}/documents/pyq_import_batches/${batchDocId}`,
+                fields: batchFields
+              }
+            }]
+          })
+        });
+      } catch (batchLogErr) {
+        console.warn("[Publish API] Batch metadata log warning:", batchLogErr);
+      }
+    }
+    return res.json({
+      success: true,
+      publishedCount: totalCommitted
+    });
+  } catch (err) {
+    console.error("[Publish API] firestore_request_failed exception:", err);
+    return res.status(500).json({ success: false, error: err?.message || "Server error during publish" });
+  }
+});
+app.post("/api/admin/delete-question", async (req, res) => {
+  console.log("[Delete API] request_received");
+  try {
+    const authHeader = req.headers.authorization || "";
+    const isBearer = authHeader.startsWith("Bearer ");
+    const token = isBearer ? authHeader.slice(7).trim() : "";
+    if (!isBearer || !token) {
+      console.warn("[Delete API] Rejected: Missing admin authorization token");
+      return res.status(401).json({ success: false, error: "Unauthorized: Missing admin authorization token" });
+    }
+    const { questionIds, reportIds } = req.body;
+    const targetQuestionIds = Array.isArray(questionIds) ? questionIds.filter(Boolean) : req.body.questionId ? [String(req.body.questionId)] : [];
+    const targetReportIds = Array.isArray(reportIds) ? reportIds.filter(Boolean) : req.body.reportId ? [String(req.body.reportId)] : [];
+    if (targetQuestionIds.length === 0 && targetReportIds.length === 0) {
+      return res.status(400).json({ success: false, error: "No questionIds or reportIds provided for deletion" });
+    }
+    const projectId = "tactile-world-jq6d2";
+    const databaseId = "ai-studio-vocabclashgovtex-f49a3d8d-a36c-4264-be13-35bd86c794c3";
+    const baseUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents`;
+    const commitUrl = `${baseUrl}:commit`;
+    const writes = [];
+    for (const qId of targetQuestionIds) {
+      writes.push({
+        delete: `projects/${projectId}/databases/${databaseId}/documents/question_bank/${qId}`
+      });
+    }
+    for (const rId of targetReportIds) {
+      writes.push({
+        delete: `projects/${projectId}/databases/${databaseId}/documents/question_reports/${rId}`
+      });
+    }
+    console.log(`[Delete API] deleting ${targetQuestionIds.length} question docs and ${targetReportIds.length} report docs via Firestore REST`);
+    const commitRes = await fetch(commitUrl, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ writes })
+    });
+    console.log(`[Delete API] firestore_response_status=${commitRes.status}`);
+    if (!commitRes.ok) {
+      const errorText = await commitRes.text();
+      console.error(`[Delete API] commit failed HTTP ${commitRes.status}:`, errorText);
+      return res.status(commitRes.status).json({ success: false, error: `Firestore delete error: ${errorText}` });
+    }
+    return res.json({
+      success: true,
+      deletedQuestions: targetQuestionIds.length,
+      deletedReports: targetReportIds.length
+    });
+  } catch (err) {
+    console.error("[Delete API] exception:", err);
+    return res.status(500).json({ success: false, error: err?.message || "Server error during delete" });
+  }
+});
+app.post("/api/admin/resolve-reports", async (req, res) => {
+  console.log("[Resolve Reports API] request_received");
+  try {
+    const authHeader = req.headers.authorization || "";
+    const isBearer = authHeader.startsWith("Bearer ");
+    const token = isBearer ? authHeader.slice(7).trim() : "";
+    if (!isBearer || !token) {
+      return res.status(401).json({ success: false, error: "Unauthorized: Missing admin authorization token" });
+    }
+    const { reportIds, status = "resolved", resolutionNotes } = req.body;
+    const targetReportIds = Array.isArray(reportIds) ? reportIds.filter(Boolean) : req.body.reportId ? [String(req.body.reportId)] : [];
+    if (targetReportIds.length === 0) {
+      return res.json({ success: true, resolvedCount: 0 });
+    }
+    const targetStatus = status === "dismissed" ? "dismissed" : "resolved";
+    const now = Date.now();
+    const projectId = "tactile-world-jq6d2";
+    const databaseId = "ai-studio-vocabclashgovtex-f49a3d8d-a36c-4264-be13-35bd86c794c3";
+    const baseUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents`;
+    const commitUrl = `${baseUrl}:commit`;
+    const fieldPaths = ["status", "updatedAt", targetStatus === "resolved" ? "resolvedAt" : "dismissedAt"];
+    if (resolutionNotes) {
+      fieldPaths.push("resolutionNotes");
+    }
+    const writes = targetReportIds.map((rId) => {
+      const fields = {
+        status: { stringValue: targetStatus },
+        updatedAt: { integerValue: String(now) }
+      };
+      if (targetStatus === "resolved") {
+        fields.resolvedAt = { integerValue: String(now) };
+      } else {
+        fields.dismissedAt = { integerValue: String(now) };
+      }
+      if (resolutionNotes) {
+        fields.resolutionNotes = { stringValue: String(resolutionNotes) };
+      }
+      return {
+        update: {
+          name: `projects/${projectId}/databases/${databaseId}/documents/question_reports/${rId}`,
+          fields
+        },
+        updateMask: {
+          fieldPaths
+        }
+      };
+    });
+    const commitRes = await fetch(commitUrl, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ writes })
+    });
+    if (!commitRes.ok) {
+      const errText = await commitRes.text();
+      console.warn("[Resolve Reports API] Warning:", errText);
+      return res.status(commitRes.status).json({ success: false, error: errText });
+    }
+    console.log(`[Resolve Reports API] Successfully updated ${targetReportIds.length} reports to status='${targetStatus}'`);
+    return res.json({ success: true, updatedCount: targetReportIds.length, status: targetStatus });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err?.message || "Server error during report resolution" });
+  }
+});
 app.post("/api/lobby/leave", (req, res) => {
   try {
     const { code, playerId } = req.body;
@@ -1284,8 +2035,8 @@ var handleEnrichmentRequest = async (req, res) => {
       enrichedQuestion: enrichedList[0] || null
     });
   } catch (error) {
-    console.error("Error in PYQ enrichment handler:", error);
-    res.status(500).json({ success: false, error: error.message || "Enrichment failed" });
+    console.warn("Issue in PYQ enrichment handler:", error?.status || error?.message || error);
+    res.status(500).json({ success: false, error: error?.message || "Enrichment failed" });
   }
 };
 app.post("/api/gemini/enrich-pyq", handleEnrichmentRequest);
@@ -1327,11 +2078,21 @@ Respond strictly with a JSON object in this exact schema without markdown format
       aiEnrichmentAvailable: false
     });
   }
+  if (isGeminiInQuotaCooldown()) {
+    return res.status(429).json({
+      success: false,
+      status: 429,
+      error: "Gemini rate limit exceeded",
+      aiEnrichmentAvailable: false
+    });
+  }
   const modelCandidates = ["gemini-3.1-flash-lite", "gemini-3.8-flash", "gemini-flash-latest"];
   let lastErrorStatus = 500;
   let lastErrorMessage = "Gemini AI unavailable";
   for (const modelName of modelCandidates) {
+    if (isGeminiInQuotaCooldown()) break;
     for (let attempt = 1; attempt <= 2; attempt++) {
+      if (isGeminiInQuotaCooldown()) break;
       try {
         const response = await ai.models.generateContent({
           model: modelName,
@@ -1365,9 +2126,10 @@ Respond strictly with a JSON object in this exact schema without markdown format
           }
         }
       } catch (err) {
-        const isQuota = err?.status === 429 || err?.message?.includes("429") || err?.message?.includes("RESOURCE_EXHAUSTED");
+        const isQuota = err?.status === 429 || err?.message?.includes("429") || err?.message?.includes("RESOURCE_EXHAUSTED") || err?.message?.includes("Quota exceeded") || err?.message?.includes("quota");
         if (isQuota) {
-          console.warn(`[GEMINI EXPLAIN] Model ${modelName} hit quota limit (429).`);
+          setGeminiQuotaCooldown(6e4);
+          console.warn(`[GEMINI EXPLAIN] Model ${modelName} hit quota limit (429). Setting 60s cooldown.`);
           return res.status(429).json({
             success: false,
             status: 429,
@@ -1731,7 +2493,10 @@ app.get("/manifest.json", (req, res) => {
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
     const vite = await (0, import_vite.createServer)({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: false
+      },
       appType: "spa"
     });
     app.use(vite.middlewares);

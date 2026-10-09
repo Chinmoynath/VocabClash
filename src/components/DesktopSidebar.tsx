@@ -35,7 +35,6 @@ interface DesktopSidebarProps {
   onOpenStats?: () => void;
   onOpenTour?: () => void;
   onOpenAppGuide?: () => void;
-  onOpenGuides?: () => void;
   onOpenArticles?: () => void;
   isAdmin?: boolean;
   onOpenAdminArticles?: () => void;
@@ -58,7 +57,6 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
   onOpenStats,
   onOpenTour,
   onOpenAppGuide,
-  onOpenGuides,
   onOpenArticles,
   isAdmin = false,
   onOpenAdminArticles,
@@ -184,14 +182,14 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
         {/* Bottom: Quick Stats, Admin Tools & User Profile Box */}
         <div className="space-y-3 pt-3 border-t border-slate-800/80 mt-auto">
         
-        {/* Quick Streak, Stats & Tour trigger */}
+        {/* Quick Utility Strip: Streak and Articles side by side */}
         <div className="grid grid-cols-2 gap-2">
           <button
             onClick={() => {
               soundManager.playTap();
               onOpenStreak();
             }}
-            className={`flex items-center gap-1.5 p-2 rounded-xl border text-xs font-bold transition-all ${
+            className={`flex items-center gap-1.5 p-2 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
               dailyStreak.currentStreak > 0
                 ? 'bg-orange-950/40 border-orange-600/50 text-orange-300 hover:border-orange-400'
                 : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-slate-300'
@@ -204,18 +202,18 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
             </div>
           </button>
 
-          {onOpenGuides ? (
+          {onOpenArticles ? (
             <button
               onClick={() => {
                 soundManager.playTap();
-                onOpenGuides();
+                onOpenArticles();
               }}
-              className="flex items-center gap-1.5 p-2 rounded-xl bg-slate-900/80 hover:bg-slate-850 border border-amber-500/30 hover:border-amber-400/70 text-xs font-bold text-slate-200 transition-all text-left group"
-              title="SSC Vocabulary Guides & 2018-2025 PYQ Analysis"
+              className="flex items-center gap-1.5 p-2 rounded-xl bg-slate-900/80 hover:bg-slate-850 border border-amber-500/30 hover:border-amber-400/70 text-xs font-bold text-slate-200 transition-all text-left group cursor-pointer"
+              title="SSC Vocabulary Articles, PYQ Trends & Exam Strategies (/articles)"
             >
               <BookOpen className="w-4 h-4 text-amber-400 shrink-0 group-hover:scale-110 transition-transform" />
               <div className="text-left leading-tight truncate">
-                <span className="text-amber-400 font-bold">Guides</span> Hub
+                <span className="text-amber-400 font-bold">Articles</span>
               </div>
             </button>
           ) : onOpenStats ? (
@@ -224,7 +222,7 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
                 soundManager.playTap();
                 onOpenStats();
               }}
-              className="flex items-center gap-1.5 p-2 rounded-xl bg-slate-900/80 hover:bg-slate-850 border border-amber-500/30 hover:border-amber-400/70 text-xs font-bold text-slate-200 transition-all text-left"
+              className="flex items-center gap-1.5 p-2 rounded-xl bg-slate-900/80 hover:bg-slate-850 border border-amber-500/30 hover:border-amber-400/70 text-xs font-bold text-slate-200 transition-all text-left cursor-pointer"
               title="View Daily Solved Questions, Accuracy & Graph"
             >
               <BarChart3 className="w-4 h-4 text-amber-400 shrink-0" />
@@ -250,35 +248,6 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
             </button>
           ) : null}
         </div>
-
-        {/* Editorial Articles & Guides Hub Trigger */}
-        {onOpenArticles && (
-          <button
-            onClick={() => {
-              soundManager.playTap();
-              onOpenArticles();
-            }}
-            className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-slate-900/70 hover:bg-slate-850 border border-slate-800/80 hover:border-amber-500/40 text-left transition-all group cursor-pointer"
-            title="Read in-depth SSC vocab articles, PYQ trends & exam strategies"
-          >
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="p-1 rounded-lg bg-amber-500/10 text-amber-400 group-hover:scale-105 transition-transform">
-                <BookOpen className="w-3.5 h-3.5" />
-              </div>
-              <div className="min-w-0">
-                <div className="text-xs font-bold text-slate-200 group-hover:text-amber-300 transition-colors truncate">
-                  Articles & Guides
-                </div>
-                <div className="text-[10px] text-slate-500 truncate">
-                  SSC preparation blog
-                </div>
-              </div>
-            </div>
-            <span className="text-[10px] font-bold text-amber-400/80 group-hover:text-amber-300 shrink-0">
-              /articles →
-            </span>
-          </button>
-        )}
 
         {/* Admin Quick Access Trigger (Visible only for admin users) */}
         {isAdmin && (

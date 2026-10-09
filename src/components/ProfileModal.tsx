@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { PlayerProfile, ExamType, UserSubscription, DailyStreakState } from '../types';
+import { PlayerProfile, ExamType, UserSubscription, DailyStreakState, SubscriptionPlanId } from '../types';
 import { soundManager } from '../utils/audio';
 import { User as FirebaseUser } from 'firebase/auth';
+import { MANUAL_ENTITLEMENT_GRANTS, grantAdminUserSubscription } from '../services/subscriptionEntitlements';
 import { GoogleAuthCard } from './GoogleAuthCard';
 import { VocabClashLogo } from './VocabClashLogo';
 import { extractCleanUserName, resolvePlayerName } from '../utils/nameHelper';
@@ -149,6 +150,48 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   const [name, setName] = useState<string>(cleanInitialName !== 'Govt Aspirant' ? cleanInitialName : player.name);
   const [avatar, setAvatar] = useState<string>(player.avatar);
   const [targetExam, setTargetExam] = useState<string>(player.targetExam);
+
+  // Admin VIP Grant Portal state
+  const [showAdminVipModal, setShowAdminVipModal] = useState<boolean>(false);
+  const [targetUidInput, setTargetUidInput] = useState<string>('8jqRHAFvZGhXuXMvVI82Iu1t58F3');
+  const [targetEmailInput, setTargetEmailInput] = useState<string>('technicalrishu737@gmail.com');
+  const [targetPlanId, setTargetPlanId] = useState<SubscriptionPlanId>('monthly');
+  const [grantLoading, setGrantLoading] = useState<boolean>(false);
+  const [grantMessage, setGrantMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const handleGrantVip = async (customUid?: string, customEmail?: string) => {
+    const uidToGrant = (customUid || targetUidInput).trim();
+    const emailToGrant = (customEmail || targetEmailInput).trim();
+    if (!uidToGrant) {
+      setGrantMessage({ type: 'error', text: 'Target user UID is required.' });
+      return;
+    }
+    setGrantLoading(true);
+    setGrantMessage(null);
+    try {
+      const res = await grantAdminUserSubscription(
+        uidToGrant,
+        emailToGrant,
+        targetPlanId,
+        targetPlanId === 'monthly' ? 30 : targetPlanId === 'annual' ? 365 : 3650
+      );
+      if (res.success) {
+        soundManager.playCorrect();
+        setGrantMessage({
+          type: 'success',
+          text: `Successfully granted ${res.subscription.planName} to UID: ${uidToGrant.slice(0, 12)}... in Firestore!`,
+        });
+      } else {
+        soundManager.playWrong();
+        setGrantMessage({ type: 'error', text: res.error || 'Failed to grant VIP subscription.' });
+      }
+    } catch (e: any) {
+      soundManager.playWrong();
+      setGrantMessage({ type: 'error', text: e?.message || 'Error granting VIP subscription.' });
+    } finally {
+      setGrantLoading(false);
+    }
+  };
 
   const avatars = ['👨‍💼', '👩‍🎓', '👮‍♂️', '👨‍🏫', '👩‍⚖️', '🧑‍💻', '👨‍✈️', '👩‍🔬'];
 
@@ -724,6 +767,120 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                 </div>
                 <span className="text-[10px] bg-amber-500/20 px-2 py-0.5 rounded font-mono">Open Portal →</span>
               </button>
+
+              <button
+                onClick={() => {
+                  soundManager.playTap();
+                  setShowAdminVipModal(!showAdminVipModal);
+                }}
+                className="w-full py-2.5 px-3 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/40 rounded-xl text-purple-300 text-xs font-bold flex items-center justify-between transition shadow-sm cursor-pointer"
+              >
+                <div className="flex items-center gap-2">
+                  <span>👑</span>
+                  <span>Admin VIP & Premium Grant Portal</span>
+                </div>
+                <span className="text-[10px] bg-purple-500/20 px-2 py-0.5 rounded font-mono">
+                  {showAdminVipModal ? 'Close ▲' : 'Manage Grants →'}
+                </span>
+              </button>
+
+              {showAdminVipModal && (
+                <div className="bg-slate-900 border border-purple-500/40 rounded-xl p-3 space-y-3 animate-fadeIn text-left">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-purple-300 flex items-center gap-1.5">
+                      <Crown className="w-3.5 h-3.5 text-purple-400" />
+                      Grant User VIP Entitlement
+                    </span>
+                    <span className="text-[9px] bg-purple-500/20 text-purple-300 px-1.5 py-0.5 rounded font-bold">Admin Only</span>
+                  </div>
+
+                  {/* Active Grants List */}
+                  <div className="bg-slate-950 p-2 rounded-lg border border-slate-800 space-y-1.5">
+                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                      Active Configured Grants
+                    </div>
+                    {MANUAL_ENTITLEMENT_GRANTS.map(grant => (
+                      <div key={grant.uid} className="flex items-center justify-between text-[11px] bg-slate-900/80 p-2 rounded border border-slate-800">
+                        <div className="truncate mr-2">
+                          <div className="font-semibold text-slate-200 truncate">{grant.email}</div>
+                          <div className="text-[10px] text-purple-400 font-mono truncate">{grant.uid}</div>
+                          <div className="text-[10px] text-emerald-400 font-medium">
+                            {grant.subscription.planName} • Active 1 Month (Nov 5, 2026)
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={grantLoading}
+                          onClick={() => {
+                            setTargetUidInput(grant.uid);
+                            setTargetEmailInput(grant.email);
+                            handleGrantVip(grant.uid, grant.email);
+                          }}
+                          className="shrink-0 px-2 py-1 bg-purple-600 hover:bg-purple-500 text-white rounded text-[10px] font-bold transition cursor-pointer disabled:opacity-50"
+                        >
+                          {grantLoading ? 'Syncing...' : 'Sync Cloud'}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Manual Input Form */}
+                  <div className="space-y-2">
+                    <div>
+                      <label className="text-[10px] text-slate-400 block mb-0.5 font-semibold">User Firebase UID</label>
+                      <input
+                        type="text"
+                        value={targetUidInput}
+                        onChange={e => setTargetUidInput(e.target.value)}
+                        placeholder="Target Firebase UID"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-purple-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-400 block mb-0.5 font-semibold">User Email (Optional)</label>
+                      <input
+                        type="text"
+                        value={targetEmailInput}
+                        onChange={e => setTargetEmailInput(e.target.value)}
+                        placeholder="aspirant@gmail.com"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-purple-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-400 block mb-0.5 font-semibold">Plan</label>
+                      <select
+                        value={targetPlanId}
+                        onChange={e => setTargetPlanId(e.target.value as SubscriptionPlanId)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-purple-500"
+                      >
+                        <option value="monthly">Monthly VIP (₹19) - 1 Month</option>
+                        <option value="quarterly">Quarterly VIP - 3 Months</option>
+                        <option value="annual">Annual VIP - 1 Year</option>
+                        <option value="lifetime">Lifetime VIP - Permanent</option>
+                      </select>
+                    </div>
+
+                    {grantMessage && (
+                      <div className={`p-2 rounded text-[11px] font-medium ${
+                        grantMessage.type === 'success'
+                          ? 'bg-emerald-950/80 border border-emerald-500 text-emerald-300'
+                          : 'bg-rose-950/80 border border-rose-500 text-rose-300'
+                      }`}>
+                        {grantMessage.text}
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      disabled={grantLoading}
+                      onClick={() => handleGrantVip()}
+                      className="w-full py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-lg text-xs font-black shadow-md transition cursor-pointer disabled:opacity-50"
+                    >
+                      {grantLoading ? 'Writing to Firestore...' : 'Grant VIP in Cloud Firestore'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
