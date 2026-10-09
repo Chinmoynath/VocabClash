@@ -609,7 +609,10 @@ async function getServerGooglePlayAccessToken(req: any): Promise<string | null> 
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        scope: ['https://www.googleapis.com/auth/androidpublisher'],
+        scope: [
+          'https://www.googleapis.com/auth/androidpublisher',
+          'https://www.googleapis.com/auth/datastore',
+        ],
       }),
     });
 
@@ -683,13 +686,24 @@ app.post('/api/payments/google/verify', async (req, res) => {
 
     const candidateProduct = (productId || sku || '').trim();
 
-    // 3. Token Replay Protection: Check if purchaseToken has already been claimed by another account
+    // 3. Obtain Trusted Server Access Token via WIF for Google Play & Firestore Operations
+    const serverAccessToken = await getServerGooglePlayAccessToken(req);
+    if (!serverAccessToken) {
+      console.warn('[Google Play] Keyless Vercel OIDC / WIF authentication could not be completed.');
+      return res.status(503).json({
+        success: false,
+        verified: false,
+        error: 'Keyless Vercel OIDC / Workload Identity Federation authentication failed. Please ensure OpenID Connect is enabled in Vercel project settings.',
+      });
+    }
+
+    // 4. Token Replay Protection (Server Identity): Check if purchaseToken has already been claimed
     const tokenHash = crypto.createHash('sha256').update(purchaseToken).digest('hex');
     const tokenRecordUrl = `${baseUrl}/google_play_purchases/${tokenHash}`;
 
     try {
       const existingTokenRes = await fetch(tokenRecordUrl, {
-        headers: { 'Authorization': `Bearer ${idToken}` },
+        headers: { 'Authorization': `Bearer ${serverAccessToken}` },
       });
 
       if (existingTokenRes.ok) {
@@ -708,20 +722,18 @@ app.post('/api/payments/google/verify', async (req, res) => {
       console.warn('[Token Replay] Check notice:', replayErr);
     }
 
-    // 4. Verify purchase with Google Play Developer API (Android Publisher v3)
-    const playAccessToken = await getServerGooglePlayAccessToken(req);
+    // 5. Verify purchase with Google Play Developer API (Android Publisher v3)
     let verifiedProductId = candidateProduct;
     let verifiedExpiryTimeMs: number | null = null;
     let verifiedOrderId: string = `GPA-${Date.now()}`;
     let verifiedState: string = 'ACTIVE';
     let isAcknowledged = false;
 
-    if (playAccessToken) {
-      if (candidateProduct !== 'vocabclash_lifetime') {
-        const playUrl = `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${packageName}/purchases/subscriptionsv2/tokens/${encodeURIComponent(purchaseToken)}`;
-        const playRes = await fetch(playUrl, {
-          headers: { 'Authorization': `Bearer ${playAccessToken}` },
-        });
+    if (candidateProduct !== 'vocabclash_lifetime') {
+      const playUrl = `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${packageName}/purchases/subscriptionsv2/tokens/${encodeURIComponent(purchaseToken)}`;
+      const playRes = await fetch(playUrl, {
+        headers: { 'Authorization': `Bearer ${serverAccessToken}` },
+      });
 
         if (!playRes.ok) {
           const playErr = await playRes.text();
@@ -764,7 +776,7 @@ app.post('/api/payments/google/verify', async (req, res) => {
         // Branch B: One-Time Lifetime Product Verification via purchases.productsv2.getproductpurchasev2
         const playUrl = `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${packageName}/purchases/productsv2/tokens/${encodeURIComponent(purchaseToken)}`;
         const playRes = await fetch(playUrl, {
-          headers: { 'Authorization': `Bearer ${playAccessToken}` },
+          headers: { 'Authorization': `Bearer ${serverAccessToken}` },
         });
 
         if (!playRes.ok) {
@@ -826,14 +838,6 @@ app.post('/api/payments/google/verify', async (req, res) => {
         verifiedExpiryTimeMs = null;
         verifiedState = 'PURCHASED';
       }
-    } else {
-      console.warn('[Google Play] Keyless Vercel OIDC / WIF authentication could not be completed.');
-      return res.status(503).json({
-        success: false,
-        verified: false,
-        error: 'Keyless Vercel OIDC / Workload Identity Federation authentication failed. Please ensure OpenID Connect is enabled in Vercel project settings.',
-      });
-    }
 
     // 5. Map confirmed product to internal VocabClash plan
     const isLifetime = verifiedProductId === 'vocabclash_lifetime';
@@ -884,7 +888,7 @@ app.post('/api/payments/google/verify', async (req, res) => {
     const commitRes = await fetch(commitUrl, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${idToken}`,
+        'Authorization': `Bearer ${serverAccessToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({

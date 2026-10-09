@@ -323,5 +323,12 @@ service cloud.firestore {
       allow create: if true;
       allow update, delete: if isPyqAdmin();
     }
+
+    // 13. Google Play Purchase Tokens Ledger (Server-only trust boundary)
+    // Direct client reads and writes are strictly forbidden.
+    // Managed exclusively server-side via trusted Workload Identity service account.
+    match /google_play_purchases/{tokenHash} {
+      allow read, write: if false;
+    }
   }
 }
