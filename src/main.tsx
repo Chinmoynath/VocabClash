@@ -11,11 +11,15 @@ if (typeof window !== 'undefined' && isNativeCapacitor()) {
   configureNativeStatusBar().catch(() => {});
 }
 
-// Guard against benign browser iframe IndexedDB teardown / closing events
+// Guard against benign browser iframe IndexedDB teardown / closing events and Vite HMR websocket closure
 if (typeof window !== 'undefined') {
-  const isIndexedDbClosingError = (text: string) => {
+  const isBenignTransientError = (text: string) => {
     const lower = text.toLowerCase();
     return (
+      lower.includes('websocket closed without opened') ||
+      lower.includes('failed to connect to websocket') ||
+      lower.includes('@vite/client') ||
+      lower.includes('vite:ws') ||
       lower.includes('database is closing') ||
       lower.includes('closing/hidden') ||
       lower.includes('connection is closing') ||
@@ -27,18 +31,24 @@ if (typeof window !== 'undefined') {
   window.addEventListener('unhandledrejection', (event) => {
     const reason = event?.reason;
     const msg = reason?.message || String(reason || '');
-    if (isIndexedDbClosingError(msg)) {
-      // Suppress benign iframe IDB connection teardown warnings
+    const stack = reason?.stack || '';
+    if (isBenignTransientError(msg) || isBenignTransientError(stack)) {
+      // Suppress benign iframe IDB connection teardown & Vite HMR WebSocket warnings
       event.preventDefault();
-      console.warn('Recovered from transient IndexedDB connection event:', msg);
+      if (typeof event.stopImmediatePropagation === 'function') {
+        event.stopImmediatePropagation();
+      }
     }
   });
 
   window.addEventListener('error', (event) => {
     const msg = event?.message || String(event?.error?.message || '');
-    if (isIndexedDbClosingError(msg)) {
+    const filename = event?.filename || '';
+    if (isBenignTransientError(msg) || isBenignTransientError(filename)) {
       event.preventDefault();
-      console.warn('Suppressed transient IndexedDB window error:', msg);
+      if (typeof event.stopImmediatePropagation === 'function') {
+        event.stopImmediatePropagation();
+      }
     }
   });
 }

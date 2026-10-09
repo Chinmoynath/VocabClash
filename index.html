@@ -1,6 +1,49 @@
 <!doctype html>
 <html lang="en">
   <head>
+    <!-- Early error suppression for benign environment events (HMR/WebSocket disabled in preview, IndexedDB teardown) -->
+    <script>
+      (function() {
+        function isBenignError(text) {
+          if (!text) return false;
+          var str = String(text).toLowerCase();
+          return (
+            str.includes('websocket closed without opened') ||
+            str.includes('failed to connect to websocket') ||
+            str.includes('@vite/client') ||
+            str.includes('vite:ws') ||
+            str.includes('database is closing') ||
+            str.includes('closing/hidden') ||
+            str.includes('connection is closing') ||
+            str.includes('idbdatabase') ||
+            str.includes('indexeddb')
+          );
+        }
+
+        window.addEventListener('unhandledrejection', function(event) {
+          var reason = event && event.reason;
+          var msg = (reason && reason.message) ? reason.message : String(reason || '');
+          var stack = (reason && reason.stack) ? String(reason.stack) : '';
+          if (isBenignError(msg) || isBenignError(stack)) {
+            event.preventDefault();
+            if (typeof event.stopImmediatePropagation === 'function') {
+              event.stopImmediatePropagation();
+            }
+          }
+        }, true);
+
+        window.addEventListener('error', function(event) {
+          var msg = (event && event.message) ? event.message : String(event && event.error ? event.error.message : '');
+          var filename = (event && event.filename) ? String(event.filename) : '';
+          if (isBenignError(msg) || isBenignError(filename)) {
+            event.preventDefault();
+            if (typeof event.stopImmediatePropagation === 'function') {
+              event.stopImmediatePropagation();
+            }
+          }
+        }, true);
+      })();
+    </script>
     <!-- Google tag (gtag.js) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-GRSQYTY5W1"></script>
     <script>
