@@ -100,7 +100,7 @@ export async function purchasePlan(params: {
     if (provider === 'capacitor_google_play') {
       console.log('[Payments] Executing Native Google Play Billing flow...');
       const result = await purchaseWithCapacitorPlay(plan, userEmail, userId);
-      if (result.success && result.subscription) {
+      if (result.success && result.subscription && result.subscription.isPremium) {
         onSuccess(result.subscription);
       } else {
         throw new Error(result.error || 'Google Play checkout was cancelled or failed.');
@@ -112,7 +112,11 @@ export async function purchasePlan(params: {
     if (provider === 'google_play') {
       // Execute Google Play Billing flow
       const updatedSub = await purchaseWithGooglePlay(plan, userId, userEmail);
-      onSuccess(updatedSub);
+      if (updatedSub && updatedSub.isPremium) {
+        onSuccess(updatedSub);
+      } else {
+        throw new Error('Google Play subscription verification failed. Entitlement not granted.');
+      }
       return;
     }
 

@@ -62,7 +62,7 @@ export async function purchaseWithCapacitorPlay(
       userEmail,
     });
 
-    if (!verifyResult.success || !verifyResult.verified || !verifyResult.subscription) {
+    if (!verifyResult.success || !verifyResult.verified || !verifyResult.subscription || !verifyResult.subscription.isPremium) {
       console.error('[CapacitorPlayBilling] Backend verification failed:', verifyResult.error);
       return {
         success: false,
@@ -106,7 +106,7 @@ export async function purchaseWithCapacitorPlay(
     if (isAlreadyOwned) {
       console.log('[CapacitorPlayBilling] Item already owned in Google Play ledger. Initiating auto-recovery...');
       const restored = await restoreCapacitorPlayPurchases(userId, userEmail);
-      if (restored) {
+      if (restored && restored.isPremium) {
         return {
           success: true,
           subscription: restored,
@@ -114,7 +114,7 @@ export async function purchaseWithCapacitorPlay(
       }
       return {
         success: false,
-        error: "We found your Google Play subscription but couldn't verify it yet. Please tap Restore Purchases.",
+        error: "We found your Google Play subscription but cloud entitlement could not be verified yet. Please tap Restore Purchases or log in.",
       };
     }
 

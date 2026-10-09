@@ -8,6 +8,69 @@ export interface ManualEntitlementGrant {
   subscription: UserSubscription;
 }
 
+export const INITIAL_SUBSCRIPTION: UserSubscription = {
+  isPremium: false,
+  autoRenew: false,
+};
+
+/**
+ * Centrally evaluates whether a subscription is currently active and unexpired.
+ * Preserves all underlying metadata (planId, orderId, provider, expiresAt, etc.)
+ * while calculating whether premium is currently valid.
+ *
+ * Rules:
+ * 1. If null, undefined, or missing -> returns INITIAL_SUBSCRIPTION (free).
+ * 2. If isPremium === false -> returns as non-premium.
+ * 3. Lifetime or one-time purchases (planId === 'lifetime' || purchaseType === 'one_time') never expire.
+ * 4. If expiresAt is absent / undefined, preserves active state.
+ * 5. A time-bounded subscription becomes effectively non-premium when expiresAt <= Date.now().
+ * 6. If expiresAt > Date.now(), retains isPremium: true.
+ */
+export function resolveEffectiveSubscription(
+  sub?: UserSubscription | null,
+  now: number = Date.now()
+): UserSubscription {
+  if (!sub) {
+    return { ...INITIAL_SUBSCRIPTION };
+  }
+
+  if (!sub.isPremium) {
+    return {
+      ...sub,
+      isPremium: false,
+    };
+  }
+
+  // 1. Lifetime / one-time purchases never expire
+  const isLifetime = sub.planId === 'lifetime' || sub.purchaseType === 'one_time';
+  if (isLifetime) {
+    return {
+      ...sub,
+      isPremium: true,
+    };
+  }
+
+  // 2. Check time-bounded expiration if expiresAt is present
+  if (typeof sub.expiresAt === 'number' && sub.expiresAt > 0) {
+    if (sub.expiresAt <= now) {
+      return {
+        ...sub,
+        isPremium: false,
+      };
+    }
+    return {
+      ...sub,
+      isPremium: true,
+    };
+  }
+
+  // 3. If expiresAt is absent / null, preserve existing isPremium state
+  return {
+    ...sub,
+    isPremium: true,
+  };
+}
+
 const ONE_MONTH_MS = 30 * 24 * 60 * 60 * 1000;
 const GRANT_TIMESTAMP = 1759750746000; // Oct 6, 2026
 

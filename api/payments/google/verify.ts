@@ -497,6 +497,45 @@ export default async function handler(req: any, res: any) {
     // 5. Atomic Firestore Commit:
     // Write 1: users/{verifiedUid} -> update subscription & updatedAt (safe entitlement)
     // Write 2: google_play_purchases/{tokenHash} -> register ownership binding
+    const userDocUrl = `${FIRESTORE_BASE_URL}/users/${verifiedUid}`;
+    let userDocExists = false;
+    try {
+      const userDocCheckRes = await fetch(userDocUrl, {
+        headers: { 'Authorization': `Bearer ${serverAccessToken}` },
+      });
+      userDocExists = userDocCheckRes.ok;
+    } catch {
+      userDocExists = false;
+    }
+
+    const userWrite = userDocExists
+      ? {
+          update: {
+            name: `projects/${PROJECT_ID}/databases/${DATABASE_ID}/documents/users/${verifiedUid}`,
+            fields: {
+              subscription: toFsValue(subscriptionPayload),
+              updatedAt: toFsValue(now),
+            },
+          },
+          updateMask: {
+            fieldPaths: ['subscription', 'updatedAt'],
+          },
+        }
+      : {
+          update: {
+            name: `projects/${PROJECT_ID}/databases/${DATABASE_ID}/documents/users/${verifiedUid}`,
+            fields: {
+              uid: toFsValue(verifiedUid),
+              ...(verifiedCaller.email ? { email: toFsValue(verifiedCaller.email) } : {}),
+              subscription: toFsValue(subscriptionPayload),
+              updatedAt: toFsValue(now),
+            },
+          },
+          updateMask: {
+            fieldPaths: ['uid', 'subscription', 'updatedAt', ...(verifiedCaller.email ? ['email'] : [])],
+          },
+        };
+
     const commitUrl = `${FIRESTORE_BASE_URL}:commit`;
     const commitRes = await fetch(commitUrl, {
       method: 'POST',
@@ -506,18 +545,7 @@ export default async function handler(req: any, res: any) {
       },
       body: JSON.stringify({
         writes: [
-          {
-            update: {
-              name: `projects/${PROJECT_ID}/databases/${DATABASE_ID}/documents/users/${verifiedUid}`,
-              fields: {
-                subscription: toFsValue(subscriptionPayload),
-                updatedAt: toFsValue(now),
-              },
-            },
-            updateMask: {
-              fieldPaths: ['subscription', 'updatedAt'],
-            },
-          },
+          userWrite,
           {
             update: {
               name: `projects/${PROJECT_ID}/databases/${DATABASE_ID}/documents/google_play_purchases/${tokenHash}`,
@@ -542,6 +570,60 @@ export default async function handler(req: any, res: any) {
         success: false,
         verified: false,
         error: `Entitlement write failed (${commitRes.status}): ${errorText}`,
+      });
+    }
+
+    // Explicit confirmation: verify that BOTH entitlement and purchase token registry persisted
+    try {
+      const verifyDocRes = await fetch(userDocUrl, {
+        headers: { 'Authorization': `Bearer ${serverAccessToken}` },
+      });
+      if (!verifyDocRes.ok) {
+        console.error('[Google Play Verify] Entitlement users/{uid} could not be verified after commit');
+        return res.status(500).json({
+          success: false,
+          verified: false,
+          error: 'Firestore entitlement could not be verified after commit.',
+        });
+      }
+      const verifyDocJson = await verifyDocRes.json();
+      const confirmedSub = verifyDocJson?.fields?.subscription?.mapValue?.fields;
+      if (!confirmedSub || confirmedSub?.isPremium?.booleanValue !== true) {
+        console.error('[Google Play Verify] Entitlement subscription is not active in Firestore');
+        return res.status(500).json({
+          success: false,
+          verified: false,
+          error: 'Firestore entitlement verification failed: subscription is not active.',
+        });
+      }
+    } catch (verifyReadErr: any) {
+      console.error('[Google Play Verify] Post-commit user document read failed:', verifyReadErr);
+      return res.status(500).json({
+        success: false,
+        verified: false,
+        error: 'Firestore entitlement could not be verified after commit.',
+      });
+    }
+
+    const purchaseDocUrl = `${FIRESTORE_BASE_URL}/google_play_purchases/${tokenHash}`;
+    try {
+      const verifyPurchaseRes = await fetch(purchaseDocUrl, {
+        headers: { 'Authorization': `Bearer ${serverAccessToken}` },
+      });
+      if (!verifyPurchaseRes.ok) {
+        console.error('[Google Play Verify] google_play_purchases/{tokenHash} could not be verified after commit');
+        return res.status(500).json({
+          success: false,
+          verified: false,
+          error: 'Google Play token registry could not be confirmed in cloud database.',
+        });
+      }
+    } catch (verifyPurchaseErr: any) {
+      console.error('[Google Play Verify] Post-commit token registry read failed:', verifyPurchaseErr);
+      return res.status(500).json({
+        success: false,
+        verified: false,
+        error: 'Google Play token registry could not be confirmed in cloud database.',
       });
     }
 

@@ -847,13 +847,14 @@ let isWritingUserData = false;
 // Canonical latest cloud profile tracker to prevent stale local cache overwrites
 export const latestCloudLPMap = new Map<string, { rankPoints: number; matchesPlayed: number; matchesWon: number }>();
 export const latestCloudStreakMap = new Map<string, { currentStreak: number; longestStreak: number; lastActiveDate: string; lastActiveTimestamp: number }>();
+export const latestCloudSubscriptionMap = new Map<string, UserSubscription>();
 
 // Save complete user state to Firestore
 export async function saveUserDataToFirestore(
   uid: string,
   data: {
     player: PlayerProfile;
-    subscription: UserSubscription;
+    subscription?: UserSubscription;
     streak: DailyStreakState;
     savedWords: SavedWord[];
     dailyChallengeHistory?: any[];
@@ -869,7 +870,7 @@ export async function saveUserDataToFirestore(
   const path = `users/${uid}`;
   
   try {
-    const rawPayload = {
+    const rawPayload: Record<string, any> = {
       uid,
       email: currentUser?.email || data.player.email || null,
       displayName: currentUser?.displayName || data.player.name || null,
@@ -880,20 +881,6 @@ export async function saveUserDataToFirestore(
         email: currentUser?.email || data.player.email || null,
         practiceFilters: data.practiceFilters || data.player.practiceFilters || null,
       },
-      subscription: {
-        isPremium: Boolean(data.subscription?.isPremium),
-        planId: data.subscription?.planId || null,
-        planName: data.subscription?.planName || null,
-        subscribedAt: data.subscription?.subscribedAt || null,
-        renewalDate: data.subscription?.renewalDate || null,
-        autoRenew: Boolean(data.subscription?.autoRenew),
-        provider: data.subscription?.provider || null,
-        purchaseToken: data.subscription?.purchaseToken || null,
-        orderId: data.subscription?.orderId || null,
-        purchaseType: data.subscription?.purchaseType || null,
-        expiresAt: data.subscription?.expiresAt || null,
-        verifiedAt: data.subscription?.verifiedAt || null,
-      },
       streak: data.streak || null,
       savedWords: data.savedWords || [],
       ...(data.dailyChallengeHistory ? { dailyChallengeHistory: data.dailyChallengeHistory } : {}),
@@ -901,8 +888,43 @@ export async function saveUserDataToFirestore(
       dailyTarget: data.dailyTarget || null,
       updatedAt: Date.now(),
     };
+
+    // Only include subscription field if explicitly provided and actively premium
+    // CRITICAL: A client must NEVER write isPremium: false to Firestore just because client time passed or local state expired.
+    if (data.subscription !== undefined) {
+      const knownSub = latestCloudSubscriptionMap.get(uid);
+      const isKnownSubActive = Boolean(knownSub?.isPremium && (knownSub.planId === 'lifetime' || knownSub.purchaseType === 'one_time' || !knownSub.expiresAt || knownSub.expiresAt > Date.now()));
+
+      // ANTI-DOWNGRADE SAFEGUARD: Never overwrite an active cloud subscription with a local free state
+      if (!data.subscription?.isPremium && isKnownSubActive && knownSub) {
+        console.log(`[Sync] Preserving active cloud subscription for ${uid} against local free state overwrite.`);
+        rawPayload.subscription = knownSub;
+      } else if (data.subscription?.isPremium) {
+        rawPayload.subscription = {
+          isPremium: true,
+          planId: data.subscription?.planId || null,
+          planName: data.subscription?.planName || null,
+          subscribedAt: data.subscription?.subscribedAt || null,
+          renewalDate: data.subscription?.renewalDate || null,
+          autoRenew: Boolean(data.subscription?.autoRenew),
+          provider: data.subscription?.provider || null,
+          purchaseToken: data.subscription?.purchaseToken || null,
+          orderId: data.subscription?.orderId || null,
+          purchaseType: data.subscription?.purchaseType || null,
+          expiresAt: data.subscription?.expiresAt || null,
+          verifiedAt: data.subscription?.verifiedAt || null,
+        };
+      }
+    }
     
     const cleanPayload = sanitizeForFirestore(rawPayload);
+
+    // ANTI-CONFLICT SAFEGUARD: Stale local free state must NEVER downgrade a known active cloud VIP entitlement!
+    const knownSub = latestCloudSubscriptionMap.get(uid);
+    if (knownSub && knownSub.isPremium && cleanPayload.subscription && !cleanPayload.subscription.isPremium) {
+      console.log(`[Sync] Prevented accidental subscription downgrade for ${uid}: preserving known active cloud VIP (${knownSub.planName || knownSub.planId})`);
+      cleanPayload.subscription = knownSub;
+    }
 
     // ANTI-CONFLICT SAFEGUARD: Stale local cache must NEVER overwrite a higher cloud LP
     const knownCloud = latestCloudLPMap.get(uid);
@@ -1386,6 +1408,9 @@ export async function fetchUserDataWithStatus(
         });
         console.log(`[Sync] Fetched authoritative cloud profile for ${uid}: LP=${data.player.rankPoints}`);
       }
+      if (data.subscription) {
+        latestCloudSubscriptionMap.set(uid, data.subscription);
+      }
       if (data.streak && typeof data.streak.currentStreak === 'number') {
         latestCloudStreakMap.set(uid, {
           currentStreak: data.streak.currentStreak,
@@ -1446,6 +1471,12 @@ export function subscribeToUserCloudData(
     const unsubscribe = onSnapshot(
       userDocRef,
       (docSnap) => {
+        // ACTIVE-UID GUARD: Stale callback rejection if account changed or logged out while queued
+        const currentActiveUid = authInstance?.currentUser?.uid;
+        if (!currentActiveUid || currentActiveUid !== uid) {
+          console.warn('[User Cloud Listener] Stale snapshot callback ignored for inactive UID:', uid, 'active is:', currentActiveUid);
+          return;
+        }
         if (docSnap.exists()) {
           const data = docSnap.data() as UserCloudData;
           if (data.player && typeof data.player.rankPoints === 'number') {
@@ -1462,6 +1493,9 @@ export function subscribeToUserCloudData(
               lastActiveDate: data.streak.lastActiveDate || '',
               lastActiveTimestamp: data.streak.lastActiveTimestamp || 0,
             });
+          }
+          if (data.subscription) {
+            latestCloudSubscriptionMap.set(uid, data.subscription);
           }
           onUpdate(data);
         }

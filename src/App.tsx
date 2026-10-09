@@ -36,6 +36,7 @@ import {
   getTodayDateString,
   setActiveStreakUser,
   clearStreakCacheForUser,
+  getStreakStorageKey,
   STORAGE_KEY_STREAK_BONUS_CLAIMED_DATE
 } from './utils/streakManager';
 import { 
@@ -74,7 +75,11 @@ import {
   sanitizeDailyChallengeHistory,
   getTodayChallengeAttempt
 } from './services/dailyChallengeService';
-import { resolveManualEntitlement } from './services/subscriptionEntitlements';
+import { 
+  resolveManualEntitlement, 
+  resolveEffectiveSubscription, 
+  INITIAL_SUBSCRIPTION 
+} from './services/subscriptionEntitlements';
 import { syncUserToLeaderboard } from './services/leaderboardService';
 import { rankStore } from './services/rankStore';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
@@ -152,6 +157,7 @@ import {
   showTestNativeInterstitial
 } from './services/adMobService';
 import { isAndroidCapacitor, isNativeCapacitor, configureNativeStatusBar } from './utils/platform';
+import { restoreCapacitorPlayPurchases } from './services/capacitorPlayBillingService';
 import { App as CapacitorApp } from '@capacitor/app';
 import { SplashScreen } from '@capacitor/splash-screen';
 import { StatusBar, Style } from '@capacitor/status-bar';
@@ -384,11 +390,6 @@ function sanitizeProfile(raw: any, googleUser?: FirebaseUser | null): PlayerProf
   };
 }
 
-const INITIAL_SUBSCRIPTION: UserSubscription = {
-  isPremium: false,
-  autoRenew: false,
-};
-
 /**
  * Purge all user-specific data from local caches and reset all managers upon user sign out
  * Ensures guest starts completely fresh with 0 questions, 0 daily target progress, and no lingering stats
@@ -415,18 +416,19 @@ export function clearUserDataOnSignOut(specificUid?: string | null) {
       localStorage.removeItem(`vocabclash_cloud_backup_${specificUid}`);
     }
 
-    // Clean up any remaining namespaced keys for authenticated user
+    // Clean up session-specific keys while preserving user's own UID-scoped streak cache
     const keysToRemove: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
       if (k) {
         if (specificUid && k.includes(specificUid)) {
-          keysToRemove.push(k);
+          // Keep UID-scoped streak cache intact on logout for future re-login
+          if (!k.startsWith('vocabclash_streak_state_v3_') && !k.startsWith('vocabclash_streak_bonus_v3_')) {
+            keysToRemove.push(k);
+          }
         } else if (!specificUid && (
           k.startsWith('vocabclash:user:') || 
           k.startsWith('vocabclash_player_profile_') ||
-          k.startsWith('vocabclash_streak_state_v3_') ||
-          k.startsWith('vocabclash_streak_bonus_v3_') ||
           k.startsWith('vocabclash_daily_target_') ||
           k.startsWith('vocabclash_daily_stats_v3_') ||
           k.startsWith('vocabclash_stats_totals_v3_') ||
@@ -577,6 +579,11 @@ export default function App() {
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const isInitialCloudLoad = useRef<boolean>(true);
   const previousUserUidRef = useRef<string | null>(null);
+  // Stable ref to track currently active authenticated UID across async operations
+  const activeAuthUidRef = useRef<string | null>(null);
+  // Track one-time native Google Play ownership reconciliation per authenticated login
+  const reconciledGooglePlayUidRef = useRef<string | null>(null);
+  const isReconcilingPlayBillingRef = useRef<boolean>(false);
 
   // Player state persisted in localStorage & Cloud
   const [player, setPlayer] = useState<PlayerProfile>(() => {
@@ -638,7 +645,7 @@ export default function App() {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem(STORAGE_KEY_SUBSCRIPTION);
       if (saved) {
-        try { return JSON.parse(saved); } catch { /* ignore */ }
+        try { return resolveEffectiveSubscription(JSON.parse(saved)); } catch { /* ignore */ }
       }
     }
     return INITIAL_SUBSCRIPTION;
@@ -646,6 +653,9 @@ export default function App() {
 
   // Daily Streak state (evaluates day difference and resets to 0 if 1 day missed)
   const [streak, setStreak] = useState<DailyStreakState>(() => getInitialStreak());
+  // Hydration ownership guard: tracks exactly which UID owns the current in-memory streak state
+  const [streakHydratedUid, setStreakHydratedUid] = useState<string | null>(null);
+  const streakHydratedUidRef = useRef<string | null>(null);
 
   // Navigation & View state (Smart cold-launch routing: opens PYQ Drill if last main section was PYQ Drill, else 1v1 Arena)
   const [currentTab, setCurrentTab] = useState<TabType>(() => {
@@ -1215,12 +1225,26 @@ export default function App() {
         if (typeof window !== 'undefined') {
           localStorage.setItem('vocabclash_last_active_user_uid', user.uid);
         }
+        activeAuthUidRef.current = user.uid;
         previousUserUidRef.current = user.uid;
         setCurrentUser(user);
         questionReviewScheduler.setAuthUser(user.uid);
         setActiveStreakUser(user.uid);
         setDailyTargetAuthUid(user.uid);
         setUserStatsAuthUid(user.uid);
+
+        // IMMEDIATE STREAK ACCOUNT ISOLATION:
+        // Invalidate previous user's streak ownership so old state is never saved under user.uid
+        setStreakHydratedUid(null);
+        streakHydratedUidRef.current = null;
+        // Synchronously load user.uid's own local streak cache (or fresh streak if none exists)
+        const hasExplicitLocalStreak = typeof window !== 'undefined' && Boolean(localStorage.getItem(getStreakStorageKey(user.uid)));
+        const userPreloadStreak = getInitialStreak(user.uid);
+        setStreak(userPreloadStreak);
+        if (hasExplicitLocalStreak && activeAuthUidRef.current === user.uid) {
+          streakHydratedUidRef.current = user.uid;
+          setStreakHydratedUid(user.uid);
+        }
 
         // FAST VISUAL RESTORATION & IMMEDIATE SYNCHRONOUS HYDRATION:
         // Check if safe UID-scoped visual cache exists for this specific authenticated UID
@@ -1315,6 +1339,14 @@ export default function App() {
 
           // Try to load existing cloud data for this user with explicit status distinction
           const fetchResult = await fetchUserDataWithStatus(user.uid, 4500);
+
+          // ACTIVE-UID GUARD: Verify that this UID is STILL the currently active authenticated user!
+          // If the user switched accounts while the request was in flight, reject the result completely.
+          if (activeAuthUidRef.current !== user.uid) {
+            console.log(`[Sync] Stale cloud data response ignored for inactive UID: ${user.uid} (active is: ${activeAuthUidRef.current})`);
+            return;
+          }
+
           const cloudData = fetchResult.data;
           const cloudLP = cloudData?.player?.rankPoints ?? 0;
           const localLP = localPlayer?.rankPoints ?? 0;
@@ -1395,20 +1427,31 @@ export default function App() {
             }
 
             const manualEntitlement = resolveManualEntitlement(user.uid, user.email);
-            const resolvedSub: UserSubscription = (manualEntitlement && (!cloudData.subscription?.isPremium || (cloudData.subscription?.expiresAt && cloudData.subscription.expiresAt < Date.now())))
-              ? manualEntitlement
-              : (cloudData.subscription || manualEntitlement || subscription);
+            let candidateSub: UserSubscription | null = null;
+            if (cloudData.subscription) {
+              candidateSub = cloudData.subscription;
+              if (manualEntitlement?.isPremium && (!cloudData.subscription.isPremium || (cloudData.subscription.expiresAt && cloudData.subscription.expiresAt < Date.now()))) {
+                candidateSub = manualEntitlement;
+              }
+            } else if (manualEntitlement) {
+              candidateSub = manualEntitlement;
+            }
+            const resolvedSub = resolveEffectiveSubscription(candidateSub);
 
-            if (resolvedSub) {
+            if (activeAuthUidRef.current === user.uid) {
               setSubscription(resolvedSub);
               try {
                 localStorage.setItem(STORAGE_KEY_SUBSCRIPTION, JSON.stringify(resolvedSub));
+                localStorage.setItem(getSubscriptionStorageKey(user.uid), JSON.stringify(resolvedSub));
               } catch {}
+              if (resolvedSub.isPremium) {
+                setShowHouseAdModal(false);
+              }
             }
 
             // Intelligently merge streak states across devices using union of active days
             // CRITICAL ACCOUNT ISOLATION: Local streak MUST be read for this specific user, not from previous user's in-memory streak!
-            const userLocalStreak = !isSwitchingUser ? getInitialStreak(user.uid) : getInitialStreak('guest');
+            const userLocalStreak = getInitialStreak(user.uid);
             const mergedStreak = mergeStreakStates(userLocalStreak, cloudData.streak, getTodayDateString(), user.email, user.uid);
 
             if (cloudData.savedWords && cloudData.savedWords.length > 0) {
@@ -1438,8 +1481,16 @@ export default function App() {
             mergedStreak.currentStreak = Math.max(mergedStreak.currentStreak, recalc.currentStreak);
             mergedStreak.longestStreak = Math.max(mergedStreak.longestStreak, recalc.longestStreak);
 
+            // ACTIVE-UID GUARD: Verify that this UID is still the active authenticated user
+            if (activeAuthUidRef.current !== user.uid) {
+              console.log(`[Sync] Stale cloud streak merge ignored for inactive UID: ${user.uid}`);
+              return;
+            }
+
             setStreak(mergedStreak);
             saveStreakState(mergedStreak, user.uid);
+            streakHydratedUidRef.current = user.uid;
+            setStreakHydratedUid(user.uid);
 
             if (typeof window !== 'undefined') {
               window.dispatchEvent(new CustomEvent('daily-challenge-updated'));
@@ -1447,20 +1498,22 @@ export default function App() {
               window.dispatchEvent(new CustomEvent('daily-target-updated'));
             }
 
-            // Asynchronously write clean repaired data back to Firestore in background without blocking UI
-            saveUserDataToFirestore(
-              user.uid,
-              { 
-                player: resolvedPlayer, 
-                subscription: resolvedSub, 
-                streak: mergedStreak, 
-                savedWords: (cloudData.savedWords && cloudData.savedWords.length > 0) ? cloudData.savedWords : savedWords,
-                dailyTarget: cloudData.dailyTarget || getDailyTargetState(user.uid),
-                dailyChallengeHistory: getDailyChallengeHistory(user.uid),
-              },
-              user
-            ).catch((err) => console.warn('Background sync notice:', err));
-            syncUserToLeaderboard(resolvedPlayer, user.uid).catch((err) => console.warn('Leaderboard sync notice:', err));
+            // Asynchronously write clean repaired data back to Firestore in background without blocking UI (only if active)
+            if (activeAuthUidRef.current === user.uid) {
+              saveUserDataToFirestore(
+                user.uid,
+                { 
+                  player: resolvedPlayer, 
+                  subscription: resolvedSub, 
+                  streak: mergedStreak, 
+                  savedWords: (cloudData.savedWords && cloudData.savedWords.length > 0) ? cloudData.savedWords : savedWords,
+                  dailyTarget: cloudData.dailyTarget || getDailyTargetState(user.uid),
+                  dailyChallengeHistory: getDailyChallengeHistory(user.uid),
+                },
+                user
+              ).catch((err) => console.warn('Background sync notice:', err));
+              syncUserToLeaderboard(resolvedPlayer, user.uid).catch((err) => console.warn('Leaderboard sync notice:', err));
+            }
           } else if (fetchResult.status === 'NOT_FOUND') {
             // CRITICAL SAFETY GUARD:
             // Positively confirmed that Firestore document does NOT exist (docSnap.exists() === false).
@@ -1522,9 +1575,17 @@ export default function App() {
 
             const existingGuestHistory = getDailyChallengeHistory(null);
             const userHistory = mergeDailyChallengeHistory(existingGuestHistory, user.uid);
-            const freshUserStreak = !isSwitchingUser ? getInitialStreak(user.uid) : getInitialStreak('guest');
+            const freshUserStreak = getInitialStreak(user.uid);
+            // ACTIVE-UID GUARD: Verify that this UID is still the active authenticated user
+            if (activeAuthUidRef.current !== user.uid) {
+              console.log(`[Sync] Stale not-found streak update ignored for inactive UID: ${user.uid}`);
+              return;
+            }
+
             setStreak(freshUserStreak);
             saveStreakState(freshUserStreak, user.uid);
+            streakHydratedUidRef.current = user.uid;
+            setStreakHydratedUid(user.uid);
 
             setPlayer(newPlayer);
             rankStore.handleAuthChange(user, newPlayer);
@@ -1545,24 +1606,27 @@ export default function App() {
             setIsProfileReady(true);
 
             const manualEntitlement = resolveManualEntitlement(user.uid, user.email);
-            const initialSub = manualEntitlement || subscription;
             if (manualEntitlement) {
               setSubscription(manualEntitlement);
+            } else {
+              setSubscription(INITIAL_SUBSCRIPTION);
             }
 
-            saveUserDataToFirestore(
-              user.uid,
-              { 
-                player: newPlayer, 
-                subscription: initialSub, 
-                streak: freshUserStreak, 
-                savedWords, 
-                dailyTarget: getDailyTargetState(user.uid),
-                dailyChallengeHistory: userHistory,
-              },
-              user
-            ).catch((err) => console.warn('Initial save notice:', err));
-            syncUserToLeaderboard(newPlayer, user.uid).catch((err) => console.warn('Leaderboard sync notice:', err));
+            if (activeAuthUidRef.current === user.uid) {
+              saveUserDataToFirestore(
+                user.uid,
+                { 
+                  player: newPlayer, 
+                  ...(manualEntitlement ? { subscription: manualEntitlement } : {}),
+                  streak: freshUserStreak, 
+                  savedWords, 
+                  dailyTarget: getDailyTargetState(user.uid),
+                  dailyChallengeHistory: userHistory,
+                },
+                user
+              ).catch((err) => console.warn('Initial save notice:', err));
+              syncUserToLeaderboard(newPlayer, user.uid).catch((err) => console.warn('Leaderboard sync notice:', err));
+            }
           } else {
             // fetchResult.status === 'ERROR_OR_TIMEOUT'
             // Timeout, network failure, or Firestore error.
@@ -1585,20 +1649,35 @@ export default function App() {
                 email: user.email || prev.email,
               }));
             }
+            // If user had an existing UID-scoped local streak cache explicitly stored, mark ownership as user.uid
+            const hadExplicitLocalStreak = typeof window !== 'undefined' && Boolean(localStorage.getItem(getStreakStorageKey(user.uid)));
+            if (hadExplicitLocalStreak && activeAuthUidRef.current === user.uid) {
+              streakHydratedUidRef.current = user.uid;
+              setStreakHydratedUid(user.uid);
+            }
             // Do NOT call saveUserDataToFirestore here.
             // Do NOT sign the user out.
             // When connection recovers or app resumes, safe background hydration will reconcile.
           }
         } catch (error) {
-          console.warn('Session cloud data fetch failed, keeping local state safe:', error);
+          if (activeAuthUidRef.current === user.uid) {
+            console.warn('Session cloud data fetch failed, keeping local state safe:', error);
+          }
         } finally {
-          setIsAuthResolving(false);
-          setIsSyncing(false);
-          setSessionLoaded(true);
-          setIsProfileReady(true);
+          if (activeAuthUidRef.current === user.uid) {
+            setIsAuthResolving(false);
+            setIsSyncing(false);
+            setSessionLoaded(true);
+            setIsProfileReady(true);
+          }
         }
       } else {
         // If transitioning from a logged-in user to null (e.g. sign out occurred or token revoked)
+        activeAuthUidRef.current = null;
+        reconciledGooglePlayUidRef.current = null;
+        isReconcilingPlayBillingRef.current = false;
+        setStreakHydratedUid(null);
+        streakHydratedUidRef.current = null;
         const signingOutUid = previousUserUidRef.current || (typeof window !== 'undefined' ? localStorage.getItem('vocabclash_last_active_user_uid') : null);
         if (signingOutUid) {
           clearUserDataOnSignOut(signingOutUid);
@@ -1678,21 +1757,33 @@ export default function App() {
     } catch {}
   }, [subscription, currentUser]);
 
+  // Save to user-scoped localStorage on streak change (Strictly guarded by streak hydration ownership)
   useEffect(() => {
-    saveStreakState(streak, currentUser?.uid);
-  }, [streak, currentUser]);
+    if (currentUser?.uid) {
+      if (streakHydratedUidRef.current === currentUser.uid) {
+        saveStreakState(streak, currentUser.uid);
+      }
+    } else {
+      // Guest mode persists into guest streak key
+      saveStreakState(streak, null);
+    }
+  }, [streak, currentUser, streakHydratedUid]);
 
   // Sync to Firestore when state changes if user is logged in & session is fully loaded
   useEffect(() => {
-    if (currentUser && sessionLoaded && !isSyncing) {
+    if (currentUser && sessionLoaded && !isSyncing && activeAuthUidRef.current === currentUser.uid && streakHydratedUidRef.current === currentUser.uid) {
       const timer = setTimeout(() => {
+        // ACTIVE-UID & OWNERSHIP GUARD: Never write stale or unhydrated streak to Firestore
+        if (activeAuthUidRef.current !== currentUser.uid || streakHydratedUidRef.current !== currentUser.uid) {
+          return;
+        }
         saveUserDataToFirestore(
           currentUser.uid,
           { 
             player, 
             subscription, 
             streak, 
-            savedWords,
+            savedWords, 
             dailyTarget: getDailyTargetState(currentUser.uid),
             dailyChallengeHistory: getDailyChallengeHistory(currentUser.uid),
           },
@@ -1701,16 +1792,43 @@ export default function App() {
       }, 1000);
       return () => clearTimeout(timer);
     }
-  }, [player, subscription, streak, savedWords, currentUser, sessionLoaded, isSyncing]);
+  }, [player, subscription, streak, savedWords, currentUser, sessionLoaded, isSyncing, streakHydratedUid]);
 
   // Real-time listener for instant cross-device sync (phone <-> laptop / multi-device)
   useEffect(() => {
     if (!currentUser || !sessionLoaded || currentUser.uid === 'default_user') return;
-    const unsubscribe = subscribeToUserCloudData(currentUser.uid, (cloudData) => {
+    const listenerUid = currentUser.uid;
+    const unsubscribe = subscribeToUserCloudData(listenerUid, (cloudData) => {
+      // ACTIVE-UID GUARD: Ignore snapshot if listenerUid is no longer the active authenticated UID
+      if (!listenerUid || activeAuthUidRef.current !== listenerUid || currentUser.uid !== listenerUid) {
+        console.warn('[Sync] Ignored stale real-time cloud data for:', listenerUid);
+        return;
+      }
+      if (cloudData.subscription && activeAuthUidRef.current === listenerUid && currentUser.uid === listenerUid) {
+        const cloudSub = resolveEffectiveSubscription(cloudData.subscription);
+        setSubscription(cloudSub);
+        try {
+          localStorage.setItem(STORAGE_KEY_SUBSCRIPTION, JSON.stringify(cloudSub));
+          localStorage.setItem(getSubscriptionStorageKey(listenerUid), JSON.stringify(cloudSub));
+        } catch {}
+        if (cloudSub.isPremium) {
+          setShowHouseAdModal(false);
+        }
+      }
       if (cloudData.streak) {
         setStreak(prev => {
-          const merged = mergeStreakStates(prev, cloudData.streak, getTodayDateString(), currentUser.email, currentUser.uid);
-          saveStreakState(merged, currentUser.uid);
+          if (activeAuthUidRef.current !== listenerUid) return prev;
+          // MERGE ONLY BELONGING DATA:
+          // If in-memory streak is not yet hydrated for listenerUid, load B's local cache directly rather than merging B's cloud data with Account A's state.
+          const baseStreak = (streakHydratedUidRef.current === listenerUid)
+            ? prev
+            : getInitialStreak(listenerUid);
+          const merged = mergeStreakStates(baseStreak, cloudData.streak, getTodayDateString(), currentUser.email, listenerUid);
+          if (activeAuthUidRef.current === listenerUid) {
+            streakHydratedUidRef.current = listenerUid;
+            setStreakHydratedUid(listenerUid);
+            saveStreakState(merged, listenerUid);
+          }
           return merged;
         });
       }
@@ -1783,6 +1901,11 @@ export default function App() {
 
       try {
         const freshCloud = await fetchUserDataFromFirestore(currentUser.uid, 4500);
+        // ACTIVE-UID GUARD: Verify that this UID is still the active authenticated user
+        if (!currentUser?.uid || activeAuthUidRef.current !== currentUser.uid) {
+          console.log('[Sync] Stale resume reconcile ignored for inactive UID:', currentUser?.uid);
+          return;
+        }
         if (freshCloud) {
           if (freshCloud.player) {
             const currentPlayer = playerRef.current;
@@ -1858,10 +1981,30 @@ export default function App() {
 
           if (freshCloud.streak) {
             setStreak(prev => {
-              const merged = mergeStreakStates(prev, freshCloud.streak, getTodayDateString(), currentUser.email, currentUser.uid);
-              saveStreakState(merged, currentUser.uid);
+              if (activeAuthUidRef.current !== currentUser.uid) return prev;
+              const baseStreak = (streakHydratedUidRef.current === currentUser.uid)
+                ? prev
+                : getInitialStreak(currentUser.uid);
+              const merged = mergeStreakStates(baseStreak, freshCloud.streak, getTodayDateString(), currentUser.email, currentUser.uid);
+              if (activeAuthUidRef.current === currentUser.uid) {
+                streakHydratedUidRef.current = currentUser.uid;
+                setStreakHydratedUid(currentUser.uid);
+                saveStreakState(merged, currentUser.uid);
+              }
               return merged;
             });
+          }
+
+          if (freshCloud.subscription && activeAuthUidRef.current === currentUser.uid) {
+            const effectiveSub = resolveEffectiveSubscription(freshCloud.subscription);
+            setSubscription(effectiveSub);
+            try {
+              localStorage.setItem(STORAGE_KEY_SUBSCRIPTION, JSON.stringify(effectiveSub));
+              localStorage.setItem(getSubscriptionStorageKey(currentUser.uid), JSON.stringify(effectiveSub));
+            } catch {}
+            if (effectiveSub.isPremium) {
+              setShowHouseAdModal(false);
+            }
           }
         }
       } catch (err) {
@@ -1907,6 +2050,62 @@ export default function App() {
       }
     };
   }, [currentUser?.uid]);
+
+  // Native Android Google Play ownership reconciliation:
+  // Runs ONCE per authenticated login/session initialization on Android Capacitor devices only.
+  // Performs safe backend verification of any owned Google Play purchases without opening the purchase sheet.
+  useEffect(() => {
+    // 1. Android native only
+    if (!isAndroidCapacitor()) return;
+
+    // 2. Authenticated Firebase user only
+    if (!currentUser || !currentUser.uid || currentUser.uid === 'default_user' || !sessionLoaded) return;
+
+    const targetUid = currentUser.uid;
+    const targetEmail = currentUser.email || undefined;
+
+    // 3. Once per login/app initialization (prevent duplicate calls)
+    if (reconciledGooglePlayUidRef.current === targetUid || isReconcilingPlayBillingRef.current) {
+      return;
+    }
+
+    reconciledGooglePlayUidRef.current = targetUid;
+    isReconcilingPlayBillingRef.current = true;
+
+    console.log(`[GooglePlayReconcile] Initiating one-time native Google Play ownership check for ${targetUid}...`);
+
+    restoreCapacitorPlayPurchases(targetUid, targetEmail)
+      .then((verifiedSub) => {
+        isReconcilingPlayBillingRef.current = false;
+        // ACTIVE-UID GUARD: Ensure user has not logged out or switched accounts during verification
+        if (activeAuthUidRef.current !== targetUid) {
+          console.log('[GooglePlayReconcile] Inactive UID discard:', targetUid);
+          return;
+        }
+
+        if (verifiedSub && verifiedSub.isPremium) {
+          const effectiveSub = resolveEffectiveSubscription(verifiedSub);
+          if (effectiveSub.isPremium) {
+            console.log('[GooglePlayReconcile] Confirmed active Google Play entitlement from backend:', effectiveSub.planId);
+            setSubscription(effectiveSub);
+            try {
+              localStorage.setItem(STORAGE_KEY_SUBSCRIPTION, JSON.stringify(effectiveSub));
+              localStorage.setItem(getSubscriptionStorageKey(targetUid), JSON.stringify(effectiveSub));
+            } catch {}
+            setShowHouseAdModal(false);
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('user-stats-updated'));
+            }
+          }
+        } else {
+          console.log('[GooglePlayReconcile] No active unlinked Google Play purchases found for', targetUid);
+        }
+      })
+      .catch((reconcileErr) => {
+        isReconcilingPlayBillingRef.current = false;
+        console.warn('[GooglePlayReconcile] Notice during background check:', reconcileErr);
+      });
+  }, [currentUser?.uid, sessionLoaded]);
 
   // Daily challenge completion LP awarding and synchronization
   useEffect(() => {
@@ -2031,6 +2230,12 @@ export default function App() {
   const handleSignOutUser = async () => {
     setIsSyncing(false);
     const userToSignOut = currentUser;
+    const wasStreakHydratedForUser = !!userToSignOut && streakHydratedUidRef.current === userToSignOut.uid;
+    activeAuthUidRef.current = null;
+    reconciledGooglePlayUidRef.current = null;
+    isReconcilingPlayBillingRef.current = false;
+    setStreakHydratedUid(null);
+    streakHydratedUidRef.current = null;
 
     // Immediately clear active user's identity from UI so their avatar/name vanishes instantly
     setIsProfileReady(true);
@@ -2053,13 +2258,15 @@ export default function App() {
     }
 
     // 1. Immediately save snapshot in background with max 800ms race so UI is never blocked
+    // CRITICAL: NEVER include subscription in logout save - a logout must NEVER modify cloud entitlement!
     if (userToSignOut) {
       try {
         const currentDailyTarget = getDailyTargetState(userToSignOut.uid);
+        const userStreakToSave = wasStreakHydratedForUser ? streak : getInitialStreak(userToSignOut.uid);
         Promise.race([
           saveUserDataToFirestore(
             userToSignOut.uid,
-            { player, subscription, streak, savedWords, dailyTarget: currentDailyTarget },
+            { player, streak: userStreakToSave, savedWords, dailyTarget: currentDailyTarget },
             userToSignOut
           ),
           new Promise(r => setTimeout(r, 600))
@@ -2258,8 +2465,14 @@ export default function App() {
   // Immediately persists to both local storage and cloud database to sync with all devices!
   const handleRecordQuestionSolved = useCallback(() => {
     setStreak(prev => {
-      const { updatedStreak } = recordDailyQuestionSolved(prev, currentUser?.uid);
-      saveStreakState(updatedStreak, currentUser?.uid);
+      const { updatedStreak } = recordDailyQuestionSolved(prev, getTodayDateString(), currentUser?.uid);
+      if (currentUser?.uid) {
+        if (streakHydratedUidRef.current === currentUser.uid) {
+          saveStreakState(updatedStreak, currentUser.uid);
+        }
+      } else {
+        saveStreakState(updatedStreak, null);
+      }
       if (currentUser && currentUser.uid !== 'default_user') {
         saveUserDataToFirestore(
           currentUser.uid,
@@ -3774,8 +3987,9 @@ export default function App() {
           currentUserEmail={currentUser?.email || undefined}
           onClose={() => setShowPremiumModal(false)}
           onUpdateSubscription={updated => {
-            setSubscription(updated);
-            if (updated.isPremium) {
+            const effective = resolveEffectiveSubscription(updated);
+            setSubscription(effective);
+            if (effective.isPremium) {
               setShowHouseAdModal(false);
             }
           }}
@@ -3793,7 +4007,16 @@ export default function App() {
           streak={streak}
           uid={currentUser?.uid}
           onClose={() => setShowStreakModal(false)}
-          onUpdateStreak={updated => setStreak(updated)}
+          onUpdateStreak={updated => {
+            setStreak(updated);
+            if (currentUser?.uid) {
+              if (streakHydratedUidRef.current === currentUser.uid) {
+                saveStreakState(updated, currentUser.uid);
+              }
+            } else {
+              saveStreakState(updated, null);
+            }
+          }}
           onAddLP={handleAddLP}
           onGoToPractice={() => {
             setShowStreakModal(false);

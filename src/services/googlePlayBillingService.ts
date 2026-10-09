@@ -266,10 +266,10 @@ export async function purchaseWithGooglePlay(
     if (isAlreadyOwned) {
       console.log(`[Play Billing] Item ${playMapping.sku} already owned in Google Play ledger. Initiating auto-recovery...`);
       const restored = await restoreGooglePlayPurchases(userId, userEmail);
-      if (restored) {
+      if (restored && restored.isPremium) {
         return restored;
       }
-      throw new Error("We found your Google Play subscription but couldn't verify it yet. Please tap Restore Purchases.");
+      throw new Error("We found your Google Play subscription but couldn't verify cloud entitlement yet. Please tap Restore Purchases or log in.");
     }
 
     console.error(`[Play Billing] paymentRequest.show() error for ${playMapping.sku}:`, err);
@@ -299,9 +299,9 @@ export async function purchaseWithGooglePlay(
     orderId: details.orderId,
   });
 
-  if (!verifyResult.success || !verifyResult.verified || !verifyResult.subscription) {
+  if (!verifyResult.success || !verifyResult.verified || !verifyResult.subscription || !verifyResult.subscription.isPremium) {
     await paymentResponse.complete('fail').catch(() => {});
-    throw new Error(verifyResult.error || 'Google Play purchase verification failed on server.');
+    throw new Error(verifyResult.error || 'Google Play purchase verification failed on server. No entitlement granted.');
   }
 
   await paymentResponse.complete('success').catch(() => {});
@@ -374,7 +374,7 @@ export async function restoreGooglePlayPurchases(
         userEmail,
       });
 
-      if (verifyResult.success && verifyResult.verified && verifyResult.subscription) {
+      if (verifyResult.success && verifyResult.verified && verifyResult.subscription && verifyResult.subscription.isPremium) {
         if (!p.acknowledged) {
           try {
             await service.acknowledge(p.purchaseToken, isLifetime ? 'onetime' : 'repeatable');

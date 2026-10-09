@@ -206,6 +206,16 @@ export const PremiumModal: React.FC<PremiumModalProps> = ({
       userName: effectiveName,
       userId: currentUser?.uid,
       onSuccess: (updatedSub) => {
+        if (!updatedSub || !updatedSub.isPremium) {
+          console.warn('[Play Billing] onSuccess called without confirmed premium entitlement from server');
+          setIsProcessing(false);
+          setStatusMessage({
+            text: 'Subscription verification did not complete. Entitlement could not be verified.',
+            type: 'error',
+          });
+          setTimeout(() => setStatusMessage(null), 5000);
+          return;
+        }
         soundManager.playCorrect();
         setIsProcessing(false);
         setShowAuthGate(false);
@@ -287,7 +297,7 @@ export const PremiumModal: React.FC<PremiumModalProps> = ({
     try {
       const restored = await restoreGooglePlayPurchases(currentUser?.uid, effectiveEmail);
       setIsRestoring(false);
-      if (restored) {
+      if (restored && restored.isPremium) {
         soundManager.playCorrect();
         onUpdateSubscription(restored);
         if (typeof window !== 'undefined') {

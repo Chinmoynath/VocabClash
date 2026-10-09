@@ -56,15 +56,14 @@ export function createFreshStreak(): DailyStreakState {
 }
 
 /**
- * Clears streak caches for a specific user or guest
+ * Clears streak caches for guest or legacy unscoped keys.
+ * Authenticated user-scoped caches (vocabclash_streak_state_v3_<uid>) are safely preserved
+ * so the user can quickly restore their own streak on future re-login without cross-account leaks.
  */
 export function clearStreakCacheForUser(uid?: string | null): void {
   if (typeof window === 'undefined') return;
   try {
-    if (uid) {
-      localStorage.removeItem(getStreakStorageKey(uid));
-      localStorage.removeItem(getStreakBonusStorageKey(uid));
-    } else {
+    if (!uid || uid === 'guest') {
       localStorage.removeItem(getStreakStorageKey('guest'));
       localStorage.removeItem(getStreakBonusStorageKey('guest'));
     }
