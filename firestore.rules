@@ -176,9 +176,10 @@ service cloud.firestore {
       // Direct listing is forbidden: users must provide the exact 6-digit room code
       allow list: if false;
 
-      // Reading a room is permitted if open for joining, or if user is host/guest
+      // Reading a room is permitted if non-existent (collision check), open for joining, or if user is host/guest
       allow get: if isAuthenticated() && (
-        resource.data.status == 'waiting'
+        resource == null
+        || resource.data.status == 'waiting'
         || isHost()
         || isGuest()
       );
@@ -234,7 +235,8 @@ service cloud.firestore {
     match /friendRooms/{lobbyCode} {
       allow list: if false;
       allow get: if isAuthenticated() && (
-        resource.data.status == 'waiting'
+        resource == null
+        || resource.data.status == 'waiting'
         || request.auth.uid == resource.data.host.id
         || (resource.data.guest != null && request.auth.uid == resource.data.guest.id)
       );

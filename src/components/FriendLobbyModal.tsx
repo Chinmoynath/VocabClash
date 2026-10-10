@@ -37,6 +37,7 @@ import {
   FriendLobby 
 } from '../types';
 import { soundManager } from '../utils/audio';
+import { isAndroidCapacitor } from '../utils/platform';
 import { validateProperEmail } from '../utils/emailValidator';
 import { openExternalUrl } from '../utils/externalLinks';
 import { UserAvatar } from './UserAvatar';
@@ -344,7 +345,7 @@ export const FriendLobbyModal: React.FC<FriendLobbyModalProps> = ({
       return;
     }
     const c0 = Date.now();
-    console.log(`[FriendLobbyTiming] C0: Create tapped at ${c0}`);
+    console.log(`[FriendLobbyTiming] AC0: Android Create button tapped at ${c0} (isAndroid: ${isAndroidCapacitor()})`);
     setIsCreating(true);
     soundManager.playTap();
 
@@ -353,8 +354,8 @@ export const FriendLobbyModal: React.FC<FriendLobbyModalProps> = ({
       if (res.success && res.code && res.lobby) {
         activeLobbyRef.current = res.lobby;
         setActiveLobby(res.lobby);
-        const c6 = Date.now();
-        console.log(`[FriendLobbyTiming] C6: Room Ready rendered in ${c6 - c0}ms from tap (Code: ${res.code})`);
+        const ac10Time = Date.now();
+        console.log(`[FriendLobbyTiming] AC10: FriendLobbyModal setActiveLobby called / Room Ready rendered in +${ac10Time - c0}ms from tap (Code: ${res.code})`);
 
         // Subscribe to real-time updates for this code
         if (unsubscribeRef.current) unsubscribeRef.current();

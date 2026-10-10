@@ -38,29 +38,46 @@ export async function createFriendLobby(
 ): Promise<{ success: boolean; code?: string; roomId?: string; lobby?: FriendLobby; error?: string }> {
   try {
     const c0 = t0;
-    console.log(`[FriendLobbyTiming] C0: Create tapped at ${c0} for host: ${host.name || host.id}`);
+    console.log(`[FriendLobbyTiming] AC0: Android Create button tapped at ${c0} (isAndroid: ${isAndroidCapacitor()})`);
 
+    console.log(`[FriendLobbyTiming] AC1: ensureAuthenticatedUser started at +${Date.now() - c0}ms`);
     const authUser = await ensureAuthenticatedUser();
     if (!authUser || !authUser.uid) {
       throw new Error('Authentication required before creating lobby');
     }
-    const c1 = Date.now();
-    console.log(`[FriendLobbyTiming] C1: authentication ready in ${c1 - c0}ms`);
-
+    const ac2Time = Date.now();
     const verifiedHost: PlayerProfile = {
       ...host,
       id: authUser.uid,
     };
 
+    console.log(`[FriendLobbyTiming] AC2: ensureAuthenticatedUser resolved in +${ac2Time - c0}ms`, {
+      authUid: authUser.uid,
+      isAnonymous: authUser.isAnonymous,
+      verifiedHostId: verifiedHost.id,
+      originalPlayerId: host.id,
+      uidMatchesVerifiedHost: authUser.uid === verifiedHost.id,
+    });
+
     let code = generate6DigitLobbyCode();
-    const c2 = Date.now();
-    console.log(`[FriendLobbyTiming] C2: code generated in ${c2 - c0}ms (Code: ${code})`);
+    const ac3Time = Date.now();
+    console.log(`[FriendLobbyTiming] AC3: code generated in +${ac3Time - c0}ms (Code: ${code})`);
 
     let lobbyRef = doc(db, 'friend_lobbies', code);
 
-    // Ensure no room-code collision in Firestore
+    // AC4 & AC5: Ensure no room-code collision in Firestore
+    const ac4Time = Date.now();
+    console.log(`[FriendLobbyTiming] AC4: collision getDoc started for code ${code} at +${ac4Time - c0}ms`);
+
+    let collisionExists = false;
+    let collisionFromCache: boolean | undefined = undefined;
+    let collisionError: string | null = null;
+
     try {
       let existingSnap = await getDoc(lobbyRef);
+      collisionExists = existingSnap.exists();
+      collisionFromCache = existingSnap.metadata?.fromCache;
+
       let attempts = 0;
       while (existingSnap.exists() && attempts < 5) {
         const data = existingSnap.data() as FriendLobby;
@@ -68,17 +85,24 @@ export async function createFriendLobby(
           code = generate6DigitLobbyCode();
           lobbyRef = doc(db, 'friend_lobbies', code);
           existingSnap = await getDoc(lobbyRef);
+          collisionExists = existingSnap.exists();
+          collisionFromCache = existingSnap.metadata?.fromCache;
           attempts++;
         } else {
           break;
         }
       }
-    } catch (checkErr) {
-      console.warn('[FriendLobby] Collision check notice (safe to ignore if non-existent document):', checkErr);
+    } catch (checkErr: any) {
+      collisionError = checkErr?.code || checkErr?.message || String(checkErr);
+      console.warn('[FriendLobbyTiming] Collision check notice (safe to ignore if non-existent document):', checkErr);
     }
 
-    const c3 = Date.now();
-    console.log(`[FriendLobbyTiming] C3: collision check complete in ${c3 - c0}ms`);
+    const ac5Time = Date.now();
+    console.log(`[FriendLobbyTiming] AC5: collision getDoc resolved/rejected in +${ac5Time - c0}ms (${ac5Time - ac4Time}ms getDoc latency)`, {
+      exists: collisionExists,
+      fromCache: collisionFromCache,
+      error: collisionError,
+    });
 
     const roomId = `duel_friend_${code}_${Date.now()}`;
     const now = Date.now();
@@ -109,23 +133,59 @@ export async function createFriendLobby(
       updatedAt: now,
     };
 
-    // Payload comparison measurement
-    const lightSize = JSON.stringify(lightweightLobbyDoc).length;
-    const oldSimulatedSize = JSON.stringify({ ...lightweightLobbyDoc, questions }).length;
-    console.log(`[FriendLobbyPayload] Lightweight lobby size: ${lightSize} bytes (Old full payload: ${oldSimulatedSize} bytes, saved: ${((oldSimulatedSize - lightSize) / 1024).toFixed(1)} KB / ${(((oldSimulatedSize - lightSize) / oldSimulatedSize) * 100).toFixed(1)}%)`);
-
     const sanitizedLightweightData = sanitizeForFirestore(lightweightLobbyDoc);
 
-    // 1. Write to authoritative canonical Firestore collection (friend_lobbies)
-    const c4 = Date.now();
-    console.log(`[FriendLobbyTiming] C4: lightweight lobby write started in ${c4 - c0}ms`);
+    const ac6Time = Date.now();
+    console.log(`[FriendLobbyTiming] AC6: lightweight lobby object prepared in +${ac6Time - c0}ms`, {
+      code,
+      roomId,
+      hostUid: verifiedHost.id,
+      hostName: verifiedHost.name,
+      guest: sanitizedLightweightData.guest,
+      status: sanitizedLightweightData.status,
+      roundCount: sanitizedLightweightData.roundCount,
+      questionsLength: sanitizedLightweightData.questions?.length,
+      createdAt: sanitizedLightweightData.createdAt,
+      expiresAt: sanitizedLightweightData.expiresAt,
+    });
 
-    await setDoc(lobbyRef, sanitizedLightweightData);
+    // AC7 & AC8: Write to authoritative canonical Firestore collection (friend_lobbies)
+    const ac7Time = Date.now();
+    console.log(`[FriendLobbyTiming] AC7: canonical setDoc(friend_lobbies/${code}) started at +${ac7Time - c0}ms`);
 
-    const c5 = Date.now();
-    console.log(`[FriendLobbyTiming] C5: lightweight lobby write resolved in ${c5 - c0}ms (${c5 - c4}ms Firestore write latency)`);
+    // Pending setDoc warning timers
+    const timer3s = setTimeout(() => {
+      console.warn(`[FriendLobbyTiming:Warning] AC7 canonical setDoc pending after 3000ms (+${Date.now() - c0}ms total)`);
+    }, 3000);
+    const timer5s = setTimeout(() => {
+      console.warn(`[FriendLobbyTiming:Warning] AC7 canonical setDoc pending after 5000ms (+${Date.now() - c0}ms total)`);
+    }, 5000);
+    const timer10s = setTimeout(() => {
+      console.warn(`[FriendLobbyTiming:Warning] AC7 canonical setDoc pending after 10000ms (+${Date.now() - c0}ms total)`);
+    }, 10000);
 
-    // 2. Secondary non-blocking operation: friendRooms alias write
+    try {
+      await setDoc(lobbyRef, sanitizedLightweightData);
+      clearTimeout(timer3s);
+      clearTimeout(timer5s);
+      clearTimeout(timer10s);
+
+      const ac8Time = Date.now();
+      console.log(`[FriendLobbyTiming] AC8: canonical setDoc resolved in +${ac8Time - c0}ms (${ac8Time - ac7Time}ms setDoc latency)`);
+    } catch (setErr: any) {
+      clearTimeout(timer3s);
+      clearTimeout(timer5s);
+      clearTimeout(timer10s);
+
+      const ac8Time = Date.now();
+      console.error(`[FriendLobbyTiming] AC8: canonical setDoc rejected in +${ac8Time - c0}ms (${ac8Time - ac7Time}ms setDoc latency)`, {
+        code: setErr?.code,
+        message: setErr?.message,
+      });
+      throw setErr;
+    }
+
+    // Secondary non-blocking operation: friendRooms alias write
     (async () => {
       try {
         const aliasRef = doc(db, 'friendRooms', code);
@@ -135,7 +195,7 @@ export async function createFriendLobby(
       }
     })();
 
-    // 3. Secondary non-blocking operation: Server API registration
+    // Secondary non-blocking operation: Server API registration
     if (!isAndroidCapacitor()) {
       (async () => {
         try {
@@ -165,7 +225,7 @@ export async function createFriendLobby(
       questions,
     };
 
-    console.log('[FriendLobby] room created and returning immediately:', code);
+    console.log(`[FriendLobbyTiming] AC9: createFriendLobby returned success in +${Date.now() - c0}ms (Code: ${code})`);
     return { success: true, code, roomId, lobby: returnLobby };
   } catch (error: any) {
     console.error('[FriendLobby] Error creating friend lobby:', error);
