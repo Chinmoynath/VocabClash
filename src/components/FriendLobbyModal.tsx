@@ -169,6 +169,8 @@ export const FriendLobbyModal: React.FC<FriendLobbyModalProps> = ({
 
     // If match was launched by host
     if (lobby.status === 'in_progress' && lobby.guest && !isMatchLaunchedRef.current) {
+      const g4 = Date.now();
+      console.log(`[FriendLobbyTiming] G4: in_progress snapshot received at ${g4}`);
       isMatchLaunchedRef.current = true;
       soundManager.playMatchFound();
 
@@ -176,9 +178,9 @@ export const FriendLobbyModal: React.FC<FriendLobbyModalProps> = ({
       const questions = lobby.questions || [];
       const roomId = lobby.roomId;
 
-      setTimeout(() => {
-        onStartMatch(opponent, questions, roomId);
-      }, 500);
+      const g5 = Date.now();
+      console.log(`[FriendLobbyTiming] G5: guest onStartMatch called immediately in ${g5 - g4}ms from snapshot`);
+      onStartMatch(opponent, questions, roomId);
     }
   };
 
@@ -270,14 +272,18 @@ export const FriendLobbyModal: React.FC<FriendLobbyModalProps> = ({
       soundManager.playWrong();
       return;
     }
+    const t0 = Date.now();
+    console.log(`[FriendLobbyTiming] T0: Create button tapped at ${t0}`);
     setIsCreating(true);
     soundManager.playTap();
 
     try {
-      const res = await createFriendLobby(player, category, exam, roundCount);
+      const res = await createFriendLobby(player, category, exam, roundCount, t0);
       if (res.success && res.code && res.lobby) {
         activeLobbyRef.current = res.lobby;
         setActiveLobby(res.lobby);
+        const t4 = Date.now();
+        console.log(`[FriendLobbyTiming] T4: UI active lobby state set in ${t4 - t0}ms`);
 
         // Subscribe to real-time updates for this code
         if (unsubscribeRef.current) unsubscribeRef.current();
@@ -331,6 +337,9 @@ export const FriendLobbyModal: React.FC<FriendLobbyModalProps> = ({
   const handleStartLobbyMatch = async () => {
     if (!activeLobby || !activeLobby.guest) return;
 
+    const h2 = Date.now();
+    console.log(`[FriendLobbyTiming] H2: Start button tapped at ${h2}`);
+
     setIsStartingDuel(true);
     soundManager.playTap();
 
@@ -339,6 +348,24 @@ export const FriendLobbyModal: React.FC<FriendLobbyModalProps> = ({
       if (!res.success) {
         alert(res.error || 'Failed to launch duel.');
         setIsStartingDuel(false);
+        return;
+      }
+
+      // Host starts immediately locally after successful launch
+      // Prevent double-launch: set isMatchLaunchedRef.current BEFORE calling onStartMatch
+      if (!isMatchLaunchedRef.current) {
+        isMatchLaunchedRef.current = true;
+        soundManager.playMatchFound();
+
+        const opponent = activeLobby.guest;
+        const questions = (activeLobby.questions && activeLobby.questions.length > 0)
+          ? activeLobby.questions
+          : (res.questions || []);
+        const roomId = res.roomId || activeLobby.roomId;
+
+        const h5 = Date.now();
+        console.log(`[FriendLobbyTiming] H5: host onStartMatch called locally in ${h5 - h2}ms from tap`);
+        onStartMatch(opponent, questions, roomId);
       }
     } catch (err) {
       console.error('Error launching duel:', err);

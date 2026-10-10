@@ -8,10 +8,11 @@ import {
   runTransaction,
   Unsubscribe 
 } from 'firebase/firestore';
-import { db, sanitizeForFirestore } from './firebaseService';
+import { db, sanitizeForFirestore, ensureAuthenticatedUser } from './firebaseService';
 import { PlayerProfile, QuestionCategory, ExamType, Question, FriendLobby } from '../types';
 import { getFilteredQuestions, getFirstMatchQuestions } from './matchmakingService';
 import { LiveDuelRoom } from './realtimeMatchmaking';
+import { isAndroidCapacitor } from '../utils/platform';
 
 /**
  * Generates a clean, unambiguous 6-digit numeric room code (100000 - 999999)
@@ -27,10 +28,14 @@ export async function createFriendLobby(
   host: PlayerProfile,
   category: QuestionCategory | 'mixed',
   exam: ExamType,
-  roundCount: number
+  roundCount: number,
+  t0: number = Date.now()
 ): Promise<{ success: boolean; code?: string; roomId?: string; lobby?: FriendLobby; error?: string }> {
   try {
     let code = generate6DigitLobbyCode();
+    const t1 = Date.now();
+    console.log(`[FriendLobbyTiming] T1: code generated in ${t1 - t0}ms (Code: ${code})`);
+
     let lobbyRef = doc(db, 'friend_lobbies', code);
 
     // Ensure no room-code collision in Firestore
@@ -52,19 +57,28 @@ export async function createFriendLobby(
       console.warn('[FriendLobby] Collision check notice:', checkErr);
     }
 
+    const t2 = Date.now();
+    console.log(`[FriendLobbyTiming] T2: collision check ready in ${t2 - t0}ms`);
+
     console.log('[FriendLobby] creating room', code);
+    const authUser = await ensureAuthenticatedUser();
+    const verifiedHost: PlayerProfile = {
+      ...host,
+      id: (host.id && host.id === authUser.uid) ? host.id : authUser.uid,
+    };
+
     const roomId = `duel_friend_${code}_${Date.now()}`;
     const now = Date.now();
 
     // Curate synchronized questions
-    const questions = host.matchesPlayed === 0 && roundCount === 10 && category === 'mixed'
+    const questions = verifiedHost.matchesPlayed === 0 && roundCount === 10 && category === 'mixed'
       ? getFirstMatchQuestions(exam)
       : getFilteredQuestions(category, exam, roundCount);
 
     const lobbyData: FriendLobby = {
       code,
       roomId,
-      host,
+      host: verifiedHost,
       guest: null as any,
       category,
       exam,
@@ -80,37 +94,53 @@ export async function createFriendLobby(
 
     const sanitizedData = sanitizeForFirestore(lobbyData);
 
-    // 1. Write to Firestore canonical collections and WAIT for write completion
+    // 1. Write to authoritative canonical Firestore collection (friend_lobbies)
     await setDoc(lobbyRef, sanitizedData);
-    
-    // Also save to alias collection for total compatibility
-    try {
-      const aliasRef = doc(db, 'friendRooms', code);
-      await setDoc(aliasRef, sanitizedData);
-    } catch {
-      // ignore alias write if collection is unchanged
+
+    const t3 = Date.now();
+    console.log(`[FriendLobbyTiming] T3: canonical friend_lobbies write complete in ${t3 - t0}ms`);
+
+    // 2. Secondary non-blocking operation: friendRooms alias write
+    (async () => {
+      try {
+        const aliasRef = doc(db, 'friendRooms', code);
+        await setDoc(aliasRef, sanitizedData);
+        const t5 = Date.now();
+        console.log(`[FriendLobbyTiming] T5: alias write complete in ${t5 - t0}ms`);
+      } catch (aliasErr) {
+        console.warn('[FriendLobby] Alias write notice (background):', aliasErr);
+      }
+    })();
+
+    // 3. Secondary non-blocking operation: Server API registration
+    if (!isAndroidCapacitor()) {
+      (async () => {
+        try {
+          await fetch('/api/lobby/create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              code,
+              roomId,
+              host,
+              category,
+              exam,
+              roundCount,
+              questions,
+            }),
+          });
+          const t6 = Date.now();
+          console.log(`[FriendLobbyTiming] T6: /api/lobby/create complete in ${t6 - t0}ms`);
+        } catch (serverErr) {
+          console.warn('[FriendLobby] Server registration notice (background):', serverErr);
+        }
+      })();
+    } else {
+      const t6 = Date.now();
+      console.log(`[FriendLobbyTiming] T6: /api/lobby/create skipped on Android (${t6 - t0}ms from tap)`);
     }
 
-    // 2. Register on Server API with the exact code
-    try {
-      await fetch('/api/lobby/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          code,
-          roomId,
-          host,
-          category,
-          exam,
-          roundCount,
-          questions,
-        }),
-      });
-    } catch (serverErr) {
-      console.warn('[FriendLobby] Server registration notice:', serverErr);
-    }
-
-    console.log('[FriendLobby] room created', code);
+    console.log('[FriendLobby] room created and returning immediately:', code);
     return { success: true, code, roomId, lobby: lobbyData };
   } catch (error: any) {
     console.error('[FriendLobby] Error creating friend lobby:', error);
@@ -129,6 +159,12 @@ export async function joinFriendLobby(
   if (cleanCode.length !== 6) {
     return { success: false, error: 'Please enter a valid 6-digit numeric room code.' };
   }
+
+  const authUser = await ensureAuthenticatedUser();
+  const verifiedGuest: PlayerProfile = {
+    ...guest,
+    id: (guest.id && guest.id === authUser.uid) ? guest.id : authUser.uid,
+  };
 
   console.log('[FriendLobby] joining room', cleanCode);
 
@@ -206,7 +242,7 @@ export async function joinFriendLobby(
         // ignore
       }
 
-      if (!fallbackLobby) {
+      if (!fallbackLobby && !isAndroidCapacitor()) {
         try {
           const res = await fetch(`/api/lobby/${cleanCode}`);
           if (res.ok) {
@@ -266,18 +302,20 @@ export async function joinFriendLobby(
       return { success: false, error: result.error, lobby: result.lobby };
     }
 
-    // Sync with server API
-    try {
-      fetch('/api/lobby/join', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          code: cleanCode,
-          guest,
-        }),
-      }).catch(() => {});
-    } catch {
-      // ignore
+    // Sync with server API (web browser only)
+    if (!isAndroidCapacitor()) {
+      try {
+        fetch('/api/lobby/join', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            code: cleanCode,
+            guest,
+          }),
+        }).catch(() => {});
+      } catch {
+        // ignore
+      }
     }
 
     console.log('[FriendLobby] guest joined');
@@ -297,7 +335,8 @@ export async function joinFriendLobby(
 
 /**
  * Subscribes to real-time changes of a Friend Lobby (room joins, readiness, match start)
- * Uses simultaneous Firestore onSnapshot + active server polling for 100% reliable cross-device sync.
+ * Uses simultaneous Firestore onSnapshot + active server polling for 100% reliable cross-device sync on web.
+ * On Capacitor Android, uses purely Firestore onSnapshot to prevent relative HTTP calls to localhost.
  */
 export function subscribeToFriendLobby(
   code: string,
@@ -321,7 +360,7 @@ export function subscribeToFriendLobby(
     }
   };
 
-  // 1. Real-time Firestore snapshot
+  // 1. Real-time Firestore snapshot (Primary source on all platforms)
   let unsubscribeFirestore: Unsubscribe = () => {};
   try {
     unsubscribeFirestore = onSnapshot(
@@ -341,25 +380,28 @@ export function subscribeToFriendLobby(
     console.warn('[FriendLobby] Firestore subscribe error:', err);
   }
 
-  // 2. Active server polling heartbeat (every 800ms)
-  const pollInterval = setInterval(async () => {
-    if (isUnsubscribed) return;
-    try {
-      const res = await fetch(`/api/lobby/${cleanCode}`);
-      if (res.ok) {
-        const json = await res.json();
-        if (json.success && json.lobby) {
-          handleUpdateSafe(json.lobby);
+  // 2. Active server polling heartbeat (every 800ms) - Web browser only
+  let pollInterval: any = null;
+  if (!isAndroidCapacitor()) {
+    pollInterval = setInterval(async () => {
+      if (isUnsubscribed) return;
+      try {
+        const res = await fetch(`/api/lobby/${cleanCode}`);
+        if (res.ok) {
+          const json = await res.json();
+          if (json.success && json.lobby) {
+            handleUpdateSafe(json.lobby);
+          }
         }
+      } catch {
+        // ignore network blips
       }
-    } catch {
-      // ignore network blips
-    }
-  }, 800);
+    }, 800);
+  }
 
   return () => {
     isUnsubscribed = true;
-    clearInterval(pollInterval);
+    if (pollInterval) clearInterval(pollInterval);
     try {
       unsubscribeFirestore();
     } catch {
@@ -370,17 +412,23 @@ export function subscribeToFriendLobby(
 
 /**
  * Host launches the match from the lobby:
- * 1. Updates Server API with questions & status
- * 2. Creates the synchronized LiveDuelRoom in Firestore
- * 3. Updates lobby status to 'in_progress'
+ * 1. Creates the synchronized LiveDuelRoom in Firestore
+ * 2. Updates lobby status to 'in_progress'
+ * 3. Updates Server API (web browser background)
  */
 export async function launchFriendLobbyDuel(
   lobby: FriendLobby
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; roomId?: string; questions?: Question[]; error?: string }> {
   try {
     if (!lobby.guest) {
       return { success: false, error: 'Cannot start duel without a second player.' };
     }
+
+    const authUser = await ensureAuthenticatedUser();
+    const verifiedHost: PlayerProfile = {
+      ...lobby.host,
+      id: (lobby.host.id && lobby.host.id === authUser.uid) ? lobby.host.id : authUser.uid,
+    };
 
     const roomId = lobby.roomId || `duel_friend_${lobby.code}_${Date.now()}`;
     const roomRef = doc(db, 'live_rooms', roomId);
@@ -397,20 +445,20 @@ export async function launchFriendLobbyDuel(
       category: lobby.category,
       exam: lobby.exam,
       roundCount: lobby.roundCount,
-      player1: lobby.host,
+      player1: verifiedHost,
       player2: lobby.guest,
       questions,
       status: 'in_progress',
       scores: {
-        [lobby.host.id]: 0,
+        [verifiedHost.id]: 0,
         [lobby.guest.id]: 0,
       },
       combos: {
-        [lobby.host.id]: 0,
+        [verifiedHost.id]: 0,
         [lobby.guest.id]: 0,
       },
       answers: {
-        [lobby.host.id]: [],
+        [verifiedHost.id]: [],
         [lobby.guest.id]: [],
       },
       completedPlayers: [],
@@ -421,20 +469,27 @@ export async function launchFriendLobbyDuel(
 
     const sanitizedLiveRoom = sanitizeForFirestore(liveRoomData);
 
-    // 1. Create Live Room in Firestore
-    await setDoc(roomRef, sanitizedLiveRoom);
+    const h3 = Date.now();
+    console.log(`[FriendLobbyTiming] H3: launch Firestore writes started (roomId: ${roomId}) at ${h3}`);
 
-    // 2. Mark lobby in_progress in Firestore
-    await setDoc(lobbyRef, sanitizeForFirestore({
-      status: 'in_progress',
-      roomId,
-      questions,
-      updatedAt: Date.now(),
-    }), { merge: true });
+    // Parallelize required Firestore writes:
+    // 1. Create Live Room in Firestore (contains questions for the duel arena)
+    // 2. Mark friend_lobbies in_progress with merge (DO NOT re-upload questions array; existing questions preserved)
+    await Promise.all([
+      setDoc(roomRef, sanitizedLiveRoom),
+      setDoc(lobbyRef, sanitizeForFirestore({
+        status: 'in_progress',
+        roomId,
+        updatedAt: Date.now(),
+      }), { merge: true }),
+    ]);
 
-    // 3. Update Server API so server-side polling channels receive immediate notification
-    try {
-      await fetch('/api/lobby/start', {
+    const h4 = Date.now();
+    console.log(`[FriendLobbyTiming] H4: both Firestore writes complete in ${h4 - h3}ms`);
+
+    // 3. Update Server API non-blocking in background (web browser only)
+    if (!isAndroidCapacitor()) {
+      fetch('/api/lobby/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -442,12 +497,12 @@ export async function launchFriendLobbyDuel(
           hostId: lobby.host.id,
           questions,
         }),
+      }).catch((serverErr) => {
+        console.warn('[FriendLobby] Server match start notice:', serverErr);
       });
-    } catch (serverErr) {
-      console.warn('[FriendLobby] Server match start notice:', serverErr);
     }
 
-    return { success: true };
+    return { success: true, roomId, questions };
   } catch (error: any) {
     console.error('[FriendLobby] Error launching friend lobby duel:', error);
     return { success: false, error: error.message || 'Failed to start duel' };
@@ -485,15 +540,17 @@ export async function leaveOrCancelLobby(
       }).catch(() => {});
     }
 
-    // Call server endpoint
-    await fetch('/api/lobby/leave', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        code: cleanCode,
-        playerId,
-      }),
-    }).catch(() => {});
+    // Call server endpoint (web browser only)
+    if (!isAndroidCapacitor()) {
+      fetch('/api/lobby/leave', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: cleanCode,
+          playerId,
+        }),
+      }).catch(() => {});
+    }
   } catch (err) {
     console.warn('[FriendLobby] Error leaving lobby:', err);
   }
