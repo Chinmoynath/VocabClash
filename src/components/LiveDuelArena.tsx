@@ -179,11 +179,12 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
       const isFriendLobbyMatch = Boolean(matchState.realRoomId && matchState.realRoomId.startsWith('duel_friend_'));
       if (isFriendLobbyMatch) {
         hasLoggedQ1RenderRef.current = true;
-        const isHostPlayer = liveRoom ? (liveRoom.player1.id === myPlayerId) : true;
+        const storedRole = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('vclash_friend_lobby_role') : null;
+        const isHostPlayer = storedRole === 'guest' ? false : (storedRole === 'host' ? true : (liveRoom ? liveRoom.player1.id === myPlayerId : true));
         if (isHostPlayer) {
           console.log(`[FriendLobbyTiming] S3: host first question rendered at ${Date.now()} (Q: ${currentQuestion.wordOrPhrase || currentQuestion.question})`);
         } else {
-          console.log(`[FriendLobbyTiming] S6: guest first question rendered at ${Date.now()} (Q: ${currentQuestion.wordOrPhrase || currentQuestion.question})`);
+          console.log(`[FriendLobbyTiming] G6: first Guest question rendered at ${Date.now()} (Q: ${currentQuestion.wordOrPhrase || currentQuestion.question})`);
         }
       }
     }

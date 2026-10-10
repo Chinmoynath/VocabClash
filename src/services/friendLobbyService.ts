@@ -6,6 +6,7 @@ import {
   deleteDoc, 
   onSnapshot, 
   runTransaction,
+  writeBatch,
   Unsubscribe 
 } from 'firebase/firestore';
 import { db, sanitizeForFirestore, ensureAuthenticatedUser } from './firebaseService';
@@ -528,26 +529,21 @@ export async function launchFriendLobbyDuel(
     const sanitizedLiveRoom = sanitizeForFirestore(liveRoomData);
 
     const s1 = Date.now();
-    console.log(`[FriendLobbyTiming] S1: live_rooms + lobby update started in ${s1 - s0}ms (roomId: ${roomId}, host: ${verifiedHost.id})`);
+    console.log(`[FriendLobbyTiming] S1: atomic writeBatch start in ${s1 - s0}ms (roomId: ${roomId}, host: ${verifiedHost.id})`);
 
-    // Execute writes with explicit diagnostic logging
+    // Execute atomic writeBatch commit: live_rooms and friend_lobbies commit together
     try {
-      await Promise.all([
-        setDoc(roomRef, sanitizedLiveRoom).catch((err) => {
-          console.error(`[FriendLobby] setDoc live_rooms/${roomId} failed:`, err);
-          throw err;
-        }),
-        setDoc(lobbyRef, sanitizeForFirestore({
-          status: 'in_progress',
-          roomId,
-          updatedAt: Date.now(),
-        }), { merge: true }).catch((err) => {
-          console.error(`[FriendLobby] setDoc friend_lobbies/${lobby.code} failed:`, err);
-          throw err;
-        }),
-      ]);
+      const batch = writeBatch(db);
+      batch.set(roomRef, sanitizedLiveRoom);
+      batch.set(lobbyRef, sanitizeForFirestore({
+        status: 'in_progress',
+        roomId,
+        updatedAt: Date.now(),
+      }), { merge: true });
+
+      await batch.commit();
     } catch (writeErr: any) {
-      console.error('[FriendLobby] Firestore start writes failed:', writeErr);
+      console.error('[FriendLobby] Firestore atomic writeBatch commit failed:', writeErr);
       const isPerm = writeErr?.code === 'permission-denied' || (writeErr?.message && writeErr.message.includes('permission'));
       return {
         success: false,
@@ -558,7 +554,7 @@ export async function launchFriendLobbyDuel(
     }
 
     const s2 = Date.now();
-    console.log(`[FriendLobbyTiming] S2: writes complete in ${s2 - s0}ms (${s2 - s1}ms Firestore write latency)`);
+    console.log(`[FriendLobbyTiming] S2: atomic batch commit complete in ${s2 - s0}ms (${s2 - s1}ms Firestore batch write latency)`);
 
     // 3. Update Server API non-blocking in background (web browser only)
     if (!isAndroidCapacitor()) {
@@ -582,58 +578,107 @@ export async function launchFriendLobbyDuel(
   }
 }
 
+export interface FetchLiveRoomQuestionsResult {
+  success: boolean;
+  questions: Question[];
+  error?: string;
+  isPermissionDenied?: boolean;
+}
+
 /**
  * Fetches authoritative match questions from live_rooms/{roomId} for the Guest.
- * Resolves as soon as the live room document exists with questions.
+ * Because the Host commits both live_rooms and friend_lobbies in an atomic writeBatch,
+ * a direct getDoc resolves immediately without waiting for listener propagation.
+ * Includes short bounded retries (250ms, 500ms, 1000ms) for transient network anomalies.
+ * If retries fail or if permission is denied, NO emergency local questions are generated.
+ * Returns a clear result object so the Guest can retry fetching the authoritative room.
  */
-export async function fetchLiveRoomQuestions(roomId: string, maxWaitMs = 5000): Promise<Question[]> {
-  const fetchStart = Date.now();
-  console.log(`[FriendLobbyTiming] Guest fetching authoritative questions from live_rooms/${roomId} at ${fetchStart}`);
-  const roomRef = doc(db, 'live_rooms', roomId);
+export async function fetchLiveRoomQuestions(
+  roomId: string,
+  guestPlayer?: PlayerProfile,
+  g4: number = Date.now()
+): Promise<FetchLiveRoomQuestionsResult> {
+  const g4a = Date.now();
+  console.log(`[FriendLobbyTiming] G4A: live_rooms getDoc started at ${g4a} (${g4a - g4}ms from G4) for room: ${roomId}`);
 
-  // 1. Quick initial getDoc
-  try {
-    const snap = await getDoc(roomRef);
-    if (snap.exists()) {
-      const data = snap.data() as LiveDuelRoom;
-      if (data.questions && data.questions.length > 0) {
-        console.log(`[FriendLobbyTiming] Live room questions obtained via getDoc in ${Date.now() - fetchStart}ms (${data.questions.length} questions)`);
-        return data.questions;
-      }
-    }
-  } catch (err) {
-    console.warn('[FriendLobby] Initial getDoc for live room questions notice:', err);
+  // Confirm authenticated Firebase UID exists before reading live_rooms/{roomId}
+  const authUser = await ensureAuthenticatedUser();
+  const currentUid = authUser?.uid || null;
+
+  if (!currentUid) {
+    console.error(`[FriendLobby] Auth Guard Warning: Guest has no authenticated Firebase UID before reading live_rooms/${roomId}`);
   }
 
-  // 2. Real-time snapshot fallback if the document write propagates slightly after the lobby status change
-  return new Promise<Question[]>((resolve) => {
-    let unsub: Unsubscribe | null = null;
-    const timeout = setTimeout(() => {
-      if (unsub) unsub();
-      console.warn(`[FriendLobby] fetchLiveRoomQuestions timed out after ${maxWaitMs}ms for ${roomId}`);
-      resolve([]);
-    }, maxWaitMs);
+  const roomRef = doc(db, 'live_rooms', roomId);
+  const retryDelays = [250, 500, 1000];
 
+  for (let attempt = 0; attempt <= retryDelays.length; attempt++) {
     try {
-      unsub = onSnapshot(roomRef, (snapshot) => {
-        if (snapshot.exists()) {
-          const data = snapshot.data() as LiveDuelRoom;
-          if (data.questions && data.questions.length > 0) {
-            clearTimeout(timeout);
-            if (unsub) unsub();
-            console.log(`[FriendLobbyTiming] Live room questions obtained via onSnapshot in ${Date.now() - fetchStart}ms (${data.questions.length} questions)`);
-            resolve(data.questions);
-          }
+      const snap = await getDoc(roomRef);
+      const g4b = Date.now();
+      const fromCache = snap.metadata?.fromCache ?? false;
+      console.log(`[FriendLobbyTiming] G4B: live_rooms getDoc resolved in ${g4b - g4a}ms (attempt ${attempt + 1}, exists: ${snap.exists()}, fromCache: ${fromCache})`);
+
+      if (snap.exists()) {
+        const data = snap.data() as LiveDuelRoom;
+        const questions = data.questions;
+        if (questions && Array.isArray(questions) && questions.length > 0) {
+          const g4c = Date.now();
+          console.log(`[FriendLobbyTiming] G4C: questions extracted in ${g4c - g4a}ms total from G4A (${g4c - g4}ms from G4, ${questions.length} questions)`);
+          return {
+            success: true,
+            questions,
+          };
+        } else {
+          console.warn(`[FriendLobby] live_rooms/${roomId} exists but questions array is missing or empty on attempt ${attempt + 1}`);
         }
-      }, (err) => {
-        console.warn('[FriendLobby] onSnapshot live_rooms notice:', err);
+      } else {
+        console.warn(`[FriendLobby] live_rooms/${roomId} unavailable (does not exist yet) on attempt ${attempt + 1}`);
+      }
+    } catch (err: any) {
+      const g4b = Date.now();
+      const isPermissionDenied = err?.code === 'permission-denied' || (err?.message && err.message.includes('permission'));
+      console.error(`[FriendLobbyTiming] G4B: live_rooms getDoc rejected in ${g4b - g4a}ms on attempt ${attempt + 1}:`, {
+        code: err?.code,
+        message: err?.message,
+        isPermissionDenied,
+        activeUID: currentUid,
+        roomId,
+        guestId: guestPlayer?.id,
       });
-    } catch (subErr) {
-      clearTimeout(timeout);
-      console.warn('[FriendLobby] subscribe live_rooms error:', subErr);
-      resolve([]);
+
+      if (isPermissionDenied) {
+        console.error(`[FriendLobby] Diagnostic PERMISSION-DENIED reading live_rooms/${roomId}:`, {
+          activeUID: currentUid,
+          roomId,
+          guestPlayerId: guestPlayer?.id,
+          errorCode: err?.code,
+          errorMessage: err?.message,
+        });
+        // Fail immediately on permission-denied; do not retry as a network failure
+        return {
+          success: false,
+          questions: [],
+          error: 'Permission denied reading duel room.',
+          isPermissionDenied: true,
+        };
+      }
     }
-  });
+
+    if (attempt < retryDelays.length) {
+      const delay = retryDelays[attempt];
+      console.log(`[FriendLobbyTiming] retry attempted in ${delay}ms (attempt ${attempt + 1}/${retryDelays.length}) for room: ${roomId}`);
+      await new Promise((res) => setTimeout(res, delay));
+    }
+  }
+
+  console.warn(`[FriendLobby] Bounded retries exhausted for live_rooms/${roomId}. No emergency fallback questions will be generated.`);
+  return {
+    success: false,
+    questions: [],
+    error: "Couldn't load the battle. Tap to retry.",
+    isPermissionDenied: false,
+  };
 }
 
 /**

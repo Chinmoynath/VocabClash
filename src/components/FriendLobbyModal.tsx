@@ -46,9 +46,9 @@ import {
   subscribeToFriendLobby, 
   launchFriendLobbyDuel, 
   leaveOrCancelLobby,
-  fetchLiveRoomQuestions
+  fetchLiveRoomQuestions,
+  FetchLiveRoomQuestionsResult
 } from '../services/friendLobbyService';
-import { getFilteredQuestions } from '../services/matchmakingService';
 import { 
   signInWithGoogle, 
   signInWithGoogleRedirect, 
@@ -117,6 +117,11 @@ export const FriendLobbyModal: React.FC<FriendLobbyModalProps> = ({
   const [isCreating, setIsCreating] = useState<boolean>(false);
   const [createElapsedSec, setCreateElapsedSec] = useState<number>(0);
   const [isStartingDuel, setIsStartingDuel] = useState<boolean>(false);
+  
+  // Guest match launch & failure retry state
+  const [isGuestLoadingBattle, setIsGuestLoadingBattle] = useState<boolean>(false);
+  const [guestBattleError, setGuestBattleError] = useState<string | null>(null);
+  const [guestBattlePermissionDenied, setGuestBattlePermissionDenied] = useState<boolean>(false);
   
   // Join Room Input State
   const [joinCodeDigits, setJoinCodeDigits] = useState<string[]>(() => {
@@ -200,36 +205,53 @@ export const FriendLobbyModal: React.FC<FriendLobbyModalProps> = ({
     }
 
     // If match was launched by host
-    if (lobby.status === 'in_progress' && lobby.guest && !isMatchLaunchedRef.current) {
-      const s4 = Date.now();
-      console.log(`[FriendLobbyTiming] S4: guest receives in_progress snapshot at ${s4}`);
-      isMatchLaunchedRef.current = true;
-      soundManager.playMatchFound();
+    if (lobby.status === 'in_progress' && lobby.roomId && lobby.guest && !isMatchLaunchedRef.current) {
+      const g4 = Date.now();
+      console.log(`[FriendLobbyTiming] G4: Guest receives in_progress lobby snapshot at ${g4} (roomId: ${lobby.roomId})`);
 
-      const opponent = lobby.host.id === player.id ? lobby.guest : lobby.host;
-      const roomId = lobby.roomId;
+      const isGuestPlayer = lobby.host.id !== player.id;
+      if (isGuestPlayer) {
+        handleGuestFetchAndLaunch(lobby, g4);
+      }
+    }
+  };
 
-      (async () => {
-        let questions: Question[] = [];
-        // If host already had questions in local memory
-        if (lobby.questions && lobby.questions.length > 0) {
-          questions = lobby.questions;
-        } else {
-          // Guest fetches authoritative questions directly from live_rooms/{roomId}
-          const s5Start = Date.now();
-          questions = await fetchLiveRoomQuestions(roomId);
-          const s5End = Date.now();
-          console.log(`[FriendLobbyTiming] S5: guest gets live room in ${s5End - s5Start}ms (${questions.length} questions)`);
+  // Attempt to fetch authoritative questions for the Guest from live_rooms/{roomId}
+  const handleGuestFetchAndLaunch = async (lobbyToLaunch: FriendLobby, g4Timestamp = Date.now()) => {
+    if (!lobbyToLaunch.roomId) return;
+    const roomId = lobbyToLaunch.roomId;
+    const opponent = lobbyToLaunch.host;
+
+    setIsGuestLoadingBattle(true);
+    setGuestBattleError(null);
+    setGuestBattlePermissionDenied(false);
+
+    try {
+      const result: FetchLiveRoomQuestionsResult = await fetchLiveRoomQuestions(roomId, player, g4Timestamp);
+      if (result.success && result.questions && result.questions.length > 0) {
+        // Authoritative questions fetched successfully from live_rooms
+        isMatchLaunchedRef.current = true;
+        if (typeof sessionStorage !== 'undefined') {
+          sessionStorage.setItem('vclash_friend_lobby_role', 'guest');
         }
+        soundManager.playMatchFound();
 
-        // Safety fallback if questions could not be retrieved
-        if (!questions || questions.length === 0) {
-          console.warn('[FriendLobby] Fallback: Generating local questions as safety backup');
-          questions = getFilteredQuestions(lobby.category, lobby.exam, lobby.roundCount);
-        }
-
-        onStartMatch(opponent, questions, roomId);
-      })();
+        const g5 = Date.now();
+        console.log(`[FriendLobbyTiming] G5: guest onStartMatch called in ${g5 - g4Timestamp}ms from G4 (${result.questions.length} questions)`);
+        onStartMatch(opponent, result.questions, roomId);
+      } else {
+        // Failed: DO NOT generate replacement questions. DO NOT launch with different question set.
+        // Keep Guest in the lobby/start-loading state with a concise retry option.
+        setIsGuestLoadingBattle(false);
+        setGuestBattleError(result.error || "Couldn't load the battle. Tap to retry.");
+        setGuestBattlePermissionDenied(Boolean(result.isPermissionDenied));
+        isMatchLaunchedRef.current = false;
+      }
+    } catch (err: any) {
+      console.error('[FriendLobby] Unexpected error in handleGuestFetchAndLaunch:', err);
+      setIsGuestLoadingBattle(false);
+      setGuestBattleError("Couldn't load the battle. Tap to retry.");
+      isMatchLaunchedRef.current = false;
     }
   };
 
@@ -409,6 +431,9 @@ export const FriendLobbyModal: React.FC<FriendLobbyModalProps> = ({
       // Prevent double-launch: set isMatchLaunchedRef.current BEFORE calling onStartMatch
       if (!isMatchLaunchedRef.current) {
         isMatchLaunchedRef.current = true;
+        if (typeof sessionStorage !== 'undefined') {
+          sessionStorage.setItem('vclash_friend_lobby_role', 'host');
+        }
         soundManager.playMatchFound();
 
         const opponent = activeLobby.guest;
@@ -493,6 +518,9 @@ export const FriendLobbyModal: React.FC<FriendLobbyModalProps> = ({
       leaveOrCancelLobby(activeLobby.code, player.id, isHost);
     }
     setActiveLobby(null);
+    setIsGuestLoadingBattle(false);
+    setGuestBattleError(null);
+    setGuestBattlePermissionDenied(false);
     onClose();
   };
 
@@ -728,15 +756,43 @@ export const FriendLobbyModal: React.FC<FriendLobbyModalProps> = ({
                 </button>
               ) : (
                 /* Guest Waiting View */
-                <div className="bg-slate-950/80 border border-sky-500/40 rounded-2xl p-3.5 text-center space-y-1.5">
-                  <div className="flex items-center justify-center gap-2 text-sky-300 text-xs font-bold">
-                    <Loader2 className="w-4 h-4 animate-spin text-sky-400" />
-                    <span>Waiting for Host ({activeLobby.host.name}) to start match...</span>
+                guestBattleError ? (
+                  <div className="bg-rose-950/80 border border-rose-500/60 rounded-2xl p-3.5 text-center space-y-2.5">
+                    <div className="flex items-center justify-center gap-2 text-rose-300 text-xs font-bold">
+                      <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                      <span>{guestBattleError}</span>
+                    </div>
+                    {!guestBattlePermissionDenied && (
+                      <button
+                        onClick={() => handleGuestFetchAndLaunch(activeLobby)}
+                        className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 text-xs font-black uppercase tracking-wider shadow-lg flex items-center justify-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        <span>Couldn't load the battle. Tap to retry</span>
+                      </button>
+                    )}
                   </div>
-                  <p className="text-[11px] text-slate-400">
-                    The duel will begin automatically for both of you in real-time.
-                  </p>
-                </div>
+                ) : isGuestLoadingBattle || activeLobby.status === 'in_progress' ? (
+                  <div className="bg-slate-950/80 border border-amber-500/50 rounded-2xl p-3.5 text-center space-y-1.5">
+                    <div className="flex items-center justify-center gap-2 text-amber-300 text-xs font-bold">
+                      <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
+                      <span>Joining duel battle...</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400">
+                      Synchronizing battle questions with host...
+                    </p>
+                  </div>
+                ) : (
+                  <div className="bg-slate-950/80 border border-sky-500/40 rounded-2xl p-3.5 text-center space-y-1.5">
+                    <div className="flex items-center justify-center gap-2 text-sky-300 text-xs font-bold">
+                      <Loader2 className="w-4 h-4 animate-spin text-sky-400" />
+                      <span>Waiting for Host ({activeLobby.host.name}) to start match...</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400">
+                      The duel will begin automatically for both of you in real-time.
+                    </p>
+                  </div>
+                )
               )}
 
               {/* Leave Room Option */}
