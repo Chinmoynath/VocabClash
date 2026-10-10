@@ -45,8 +45,10 @@ import {
   joinFriendLobby, 
   subscribeToFriendLobby, 
   launchFriendLobbyDuel, 
-  leaveOrCancelLobby 
+  leaveOrCancelLobby,
+  fetchLiveRoomQuestions
 } from '../services/friendLobbyService';
+import { getFilteredQuestions } from '../services/matchmakingService';
 import { 
   signInWithGoogle, 
   signInWithGoogleRedirect, 
@@ -113,6 +115,7 @@ export const FriendLobbyModal: React.FC<FriendLobbyModalProps> = ({
   const [activeLobby, setActiveLobby] = useState<FriendLobby | null>(null);
   const activeLobbyRef = useRef<FriendLobby | null>(null);
   const [isCreating, setIsCreating] = useState<boolean>(false);
+  const [createElapsedSec, setCreateElapsedSec] = useState<number>(0);
   const [isStartingDuel, setIsStartingDuel] = useState<boolean>(false);
   
   // Join Room Input State
@@ -156,6 +159,35 @@ export const FriendLobbyModal: React.FC<FriendLobbyModalProps> = ({
     };
   }, []);
 
+  // Rotate create lobby loading messages based on elapsed time (0-6s, 6-12s, 12-18s, 18s+)
+  useEffect(() => {
+    if (!isCreating) {
+      setCreateElapsedSec(0);
+      return;
+    }
+    setCreateElapsedSec(0);
+    const startTime = Date.now();
+    const interval = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      setCreateElapsedSec(elapsed);
+    }, 250);
+
+    return () => clearInterval(interval);
+  }, [isCreating]);
+
+  const getCreateLoadingMessage = (): string => {
+    if (createElapsedSec >= 18) {
+      return 'Still working — this is taking a little longer than usual...';
+    }
+    if (createElapsedSec >= 12) {
+      return 'Almost there — connecting your room...';
+    }
+    if (createElapsedSec >= 6) {
+      return 'Setting up your private lobby...';
+    }
+    return 'Generating your 6-digit room...';
+  };
+
   // Handle Real-Time Lobby State Updates
   const handleLobbyUpdate = (lobby: FriendLobby) => {
     const prevGuest = activeLobbyRef.current?.guest;
@@ -169,18 +201,35 @@ export const FriendLobbyModal: React.FC<FriendLobbyModalProps> = ({
 
     // If match was launched by host
     if (lobby.status === 'in_progress' && lobby.guest && !isMatchLaunchedRef.current) {
-      const g4 = Date.now();
-      console.log(`[FriendLobbyTiming] G4: in_progress snapshot received at ${g4}`);
+      const s4 = Date.now();
+      console.log(`[FriendLobbyTiming] S4: guest receives in_progress snapshot at ${s4}`);
       isMatchLaunchedRef.current = true;
       soundManager.playMatchFound();
 
       const opponent = lobby.host.id === player.id ? lobby.guest : lobby.host;
-      const questions = lobby.questions || [];
       const roomId = lobby.roomId;
 
-      const g5 = Date.now();
-      console.log(`[FriendLobbyTiming] G5: guest onStartMatch called immediately in ${g5 - g4}ms from snapshot`);
-      onStartMatch(opponent, questions, roomId);
+      (async () => {
+        let questions: Question[] = [];
+        // If host already had questions in local memory
+        if (lobby.questions && lobby.questions.length > 0) {
+          questions = lobby.questions;
+        } else {
+          // Guest fetches authoritative questions directly from live_rooms/{roomId}
+          const s5Start = Date.now();
+          questions = await fetchLiveRoomQuestions(roomId);
+          const s5End = Date.now();
+          console.log(`[FriendLobbyTiming] S5: guest gets live room in ${s5End - s5Start}ms (${questions.length} questions)`);
+        }
+
+        // Safety fallback if questions could not be retrieved
+        if (!questions || questions.length === 0) {
+          console.warn('[FriendLobby] Fallback: Generating local questions as safety backup');
+          questions = getFilteredQuestions(lobby.category, lobby.exam, lobby.roundCount);
+        }
+
+        onStartMatch(opponent, questions, roomId);
+      })();
     }
   };
 
@@ -272,18 +321,18 @@ export const FriendLobbyModal: React.FC<FriendLobbyModalProps> = ({
       soundManager.playWrong();
       return;
     }
-    const t0 = Date.now();
-    console.log(`[FriendLobbyTiming] T0: Create button tapped at ${t0}`);
+    const c0 = Date.now();
+    console.log(`[FriendLobbyTiming] C0: Create tapped at ${c0}`);
     setIsCreating(true);
     soundManager.playTap();
 
     try {
-      const res = await createFriendLobby(player, category, exam, roundCount, t0);
+      const res = await createFriendLobby(player, category, exam, roundCount, c0);
       if (res.success && res.code && res.lobby) {
         activeLobbyRef.current = res.lobby;
         setActiveLobby(res.lobby);
-        const t4 = Date.now();
-        console.log(`[FriendLobbyTiming] T4: UI active lobby state set in ${t4 - t0}ms`);
+        const c6 = Date.now();
+        console.log(`[FriendLobbyTiming] C6: Room Ready rendered in ${c6 - c0}ms from tap (Code: ${res.code})`);
 
         // Subscribe to real-time updates for this code
         if (unsubscribeRef.current) unsubscribeRef.current();
@@ -309,15 +358,20 @@ export const FriendLobbyModal: React.FC<FriendLobbyModalProps> = ({
       return;
     }
 
+    const j0 = Date.now();
+    console.log(`[FriendLobbyTiming] J0: Join tapped at ${j0} for code: ${fullCode}`);
+
     setIsJoining(true);
     setJoinError(null);
     soundManager.playTap();
 
     try {
-      const res = await joinFriendLobby(fullCode, player);
+      const res = await joinFriendLobby(fullCode, player, j0);
       if (res.success && res.lobby) {
         activeLobbyRef.current = res.lobby;
         setActiveLobby(res.lobby);
+        const j4 = Date.now();
+        console.log(`[FriendLobbyTiming] J4: joined lobby UI rendered in ${j4 - j0}ms from tap`);
         soundManager.playMatchFound();
 
         // Subscribe to real-time updates
@@ -337,14 +391,14 @@ export const FriendLobbyModal: React.FC<FriendLobbyModalProps> = ({
   const handleStartLobbyMatch = async () => {
     if (!activeLobby || !activeLobby.guest) return;
 
-    const h2 = Date.now();
-    console.log(`[FriendLobbyTiming] H2: Start button tapped at ${h2}`);
+    const s0 = Date.now();
+    console.log(`[FriendLobbyTiming] S0: Start tapped at ${s0}`);
 
     setIsStartingDuel(true);
     soundManager.playTap();
 
     try {
-      const res = await launchFriendLobbyDuel(activeLobby);
+      const res = await launchFriendLobbyDuel(activeLobby, s0);
       if (!res.success) {
         alert(res.error || 'Failed to launch duel.');
         setIsStartingDuel(false);
@@ -363,8 +417,6 @@ export const FriendLobbyModal: React.FC<FriendLobbyModalProps> = ({
           : (res.questions || []);
         const roomId = res.roomId || activeLobby.roomId;
 
-        const h5 = Date.now();
-        console.log(`[FriendLobbyTiming] H5: host onStartMatch called locally in ${h5 - h2}ms from tap`);
         onStartMatch(opponent, questions, roomId);
       }
     } catch (err) {
@@ -1156,17 +1208,19 @@ export const FriendLobbyModal: React.FC<FriendLobbyModalProps> = ({
                 <button
                   disabled={isCreating}
                   onClick={handleCreateLobby}
-                  className="w-full mt-2 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-500 hover:from-amber-400 hover:to-orange-400 active:scale-[0.98] text-slate-950 font-black py-3.5 px-4 rounded-2xl shadow-xl shadow-orange-950/60 flex items-center justify-center gap-2 uppercase tracking-wide transition-all cursor-pointer"
+                  className="w-full mt-2 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-500 hover:from-amber-400 hover:to-orange-400 active:scale-[0.98] text-slate-950 font-black py-3.5 px-4 rounded-2xl shadow-xl shadow-orange-950/60 flex items-center justify-center gap-2 transition-all cursor-pointer"
                 >
                   {isCreating ? (
                     <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Generating 6-Digit Room...</span>
+                      <Loader2 className="w-4 h-4 animate-spin shrink-0 text-slate-950" />
+                      <span className="text-xs sm:text-sm font-black normal-case text-center leading-snug">
+                        {getCreateLoadingMessage()}
+                      </span>
                     </>
                   ) : (
                     <>
-                      <Sparkles className="w-4 h-4" />
-                      <span>Create 6-Digit Room</span>
+                      <Sparkles className="w-4 h-4 shrink-0" />
+                      <span className="uppercase tracking-wide">Create 6-Digit Room</span>
                     </>
                   )}
                 </button>

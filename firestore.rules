@@ -205,7 +205,7 @@ service cloud.firestore {
           && request.resource.data.status == 'ready'
           && request.resource.data.host == resource.data.host
           && request.resource.data.code == resource.data.code
-          && request.resource.data.questions == resource.data.questions
+          && (!('questions' in resource.data) || !('questions' in request.resource.data) || request.resource.data.questions == resource.data.questions)
         )
         // B: Host starts the battle or cancels the room
         || (

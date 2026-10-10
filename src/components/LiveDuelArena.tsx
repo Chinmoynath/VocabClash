@@ -172,17 +172,22 @@ export const LiveDuelArena: React.FC<LiveDuelArenaProps> = ({
     setLiveOpponentCombo(matchState.opponentCombo);
   }, [currentQIndex]);
 
-  // Performance timing log for H6 / G6: first question rendered
+  // Performance timing log for S3 (host) and S6 (guest): first question rendered
   const hasLoggedQ1RenderRef = useRef<boolean>(false);
   useEffect(() => {
     if (!hasLoggedQ1RenderRef.current && currentQIndex === 0 && currentQuestion.id !== 'placeholder') {
-      hasLoggedQ1RenderRef.current = true;
       const isFriendLobbyMatch = Boolean(matchState.realRoomId && matchState.realRoomId.startsWith('duel_friend_'));
       if (isFriendLobbyMatch) {
-        console.log(`[FriendLobbyTiming] H6/G6: first question rendered in LiveDuelArena at ${Date.now()} (Q: ${currentQuestion.wordOrPhrase || currentQuestion.question})`);
+        hasLoggedQ1RenderRef.current = true;
+        const isHostPlayer = liveRoom ? (liveRoom.player1.id === myPlayerId) : true;
+        if (isHostPlayer) {
+          console.log(`[FriendLobbyTiming] S3: host first question rendered at ${Date.now()} (Q: ${currentQuestion.wordOrPhrase || currentQuestion.question})`);
+        } else {
+          console.log(`[FriendLobbyTiming] S6: guest first question rendered at ${Date.now()} (Q: ${currentQuestion.wordOrPhrase || currentQuestion.question})`);
+        }
       }
     }
-  }, [currentQIndex, currentQuestion, matchState.realRoomId]);
+  }, [currentQIndex, currentQuestion, matchState.realRoomId, liveRoom, myPlayerId]);
 
   // 1. REAL-PLAYER REAL-TIME SUBSCRIPTION
   useEffect(() => {

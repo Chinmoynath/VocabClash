@@ -14,6 +14,9 @@ import { getFilteredQuestions, getFirstMatchQuestions } from './matchmakingServi
 import { LiveDuelRoom } from './realtimeMatchmaking';
 import { isAndroidCapacitor } from '../utils/platform';
 
+// In-memory cache of curated questions for the host to avoid re-generating or duplicating
+const hostQuestionsCache = new Map<string, Question[]>();
+
 /**
  * Generates a clean, unambiguous 6-digit numeric room code (100000 - 999999)
  */
@@ -23,6 +26,7 @@ export function generate6DigitLobbyCode(): string {
 
 /**
  * Creates a custom 6-digit Friend Lobby in Firestore and backend
+ * Writes a LIGHTWEIGHT lobby document (~500 bytes) without the 30-70 KB Question payload.
  */
 export async function createFriendLobby(
   host: PlayerProfile,
@@ -32,19 +36,24 @@ export async function createFriendLobby(
   t0: number = Date.now()
 ): Promise<{ success: boolean; code?: string; roomId?: string; lobby?: FriendLobby; error?: string }> {
   try {
-    console.log('[FriendLobby] initializing lobby creation for host:', host.displayName || host.username || host.id);
+    const c0 = t0;
+    console.log(`[FriendLobbyTiming] C0: Create tapped at ${c0} for host: ${host.name || host.id}`);
+
     const authUser = await ensureAuthenticatedUser();
     if (!authUser || !authUser.uid) {
       throw new Error('Authentication required before creating lobby');
     }
+    const c1 = Date.now();
+    console.log(`[FriendLobbyTiming] C1: authentication ready in ${c1 - c0}ms`);
+
     const verifiedHost: PlayerProfile = {
       ...host,
       id: authUser.uid,
     };
 
     let code = generate6DigitLobbyCode();
-    const t1 = Date.now();
-    console.log(`[FriendLobbyTiming] T1: code generated in ${t1 - t0}ms (Code: ${code})`);
+    const c2 = Date.now();
+    console.log(`[FriendLobbyTiming] C2: code generated in ${c2 - c0}ms (Code: ${code})`);
 
     let lobbyRef = doc(db, 'friend_lobbies', code);
 
@@ -67,29 +76,31 @@ export async function createFriendLobby(
       console.warn('[FriendLobby] Collision check notice (safe to ignore if non-existent document):', checkErr);
     }
 
-    const t2 = Date.now();
-    console.log(`[FriendLobbyTiming] T2: collision check ready in ${t2 - t0}ms`);
-
-    console.log('[FriendLobby] creating room', code);
+    const c3 = Date.now();
+    console.log(`[FriendLobbyTiming] C3: collision check complete in ${c3 - c0}ms`);
 
     const roomId = `duel_friend_${code}_${Date.now()}`;
     const now = Date.now();
 
-    // Curate synchronized questions
+    // Curate synchronized questions locally (synchronous, in-memory)
     const questions = verifiedHost.matchesPlayed === 0 && roundCount === 10 && category === 'mixed'
       ? getFirstMatchQuestions(exam)
       : getFilteredQuestions(category, exam, roundCount);
 
-    const lobbyData: FriendLobby = {
+    // Cache questions locally on host for authoritative match start
+    hostQuestionsCache.set(roomId, questions);
+
+    // LIGHTWEIGHT waiting-room document: metadata only, NO large questions array!
+    const lightweightLobbyDoc = {
       code,
       roomId,
       host: verifiedHost,
-      guest: null as any,
+      guest: null,
       category,
       exam,
       roundCount,
       status: 'waiting',
-      questions,
+      questions: [], // 2-byte empty array for rule compatibility
       hostReady: true,
       guestReady: false,
       createdAt: now,
@@ -97,21 +108,27 @@ export async function createFriendLobby(
       updatedAt: now,
     };
 
-    const sanitizedData = sanitizeForFirestore(lobbyData);
+    // Payload comparison measurement
+    const lightSize = JSON.stringify(lightweightLobbyDoc).length;
+    const oldSimulatedSize = JSON.stringify({ ...lightweightLobbyDoc, questions }).length;
+    console.log(`[FriendLobbyPayload] Lightweight lobby size: ${lightSize} bytes (Old full payload: ${oldSimulatedSize} bytes, saved: ${((oldSimulatedSize - lightSize) / 1024).toFixed(1)} KB / ${(((oldSimulatedSize - lightSize) / oldSimulatedSize) * 100).toFixed(1)}%)`);
+
+    const sanitizedLightweightData = sanitizeForFirestore(lightweightLobbyDoc);
 
     // 1. Write to authoritative canonical Firestore collection (friend_lobbies)
-    await setDoc(lobbyRef, sanitizedData);
+    const c4 = Date.now();
+    console.log(`[FriendLobbyTiming] C4: lightweight lobby write started in ${c4 - c0}ms`);
 
-    const t3 = Date.now();
-    console.log(`[FriendLobbyTiming] T3: canonical friend_lobbies write complete in ${t3 - t0}ms`);
+    await setDoc(lobbyRef, sanitizedLightweightData);
+
+    const c5 = Date.now();
+    console.log(`[FriendLobbyTiming] C5: lightweight lobby write resolved in ${c5 - c0}ms (${c5 - c4}ms Firestore write latency)`);
 
     // 2. Secondary non-blocking operation: friendRooms alias write
     (async () => {
       try {
         const aliasRef = doc(db, 'friendRooms', code);
-        await setDoc(aliasRef, sanitizedData);
-        const t5 = Date.now();
-        console.log(`[FriendLobbyTiming] T5: alias write complete in ${t5 - t0}ms`);
+        await setDoc(aliasRef, sanitizedLightweightData);
       } catch (aliasErr) {
         console.warn('[FriendLobby] Alias write notice (background):', aliasErr);
       }
@@ -127,26 +144,28 @@ export async function createFriendLobby(
             body: JSON.stringify({
               code,
               roomId,
-              host,
+              host: verifiedHost,
               category,
               exam,
               roundCount,
-              questions,
             }),
           });
-          const t6 = Date.now();
-          console.log(`[FriendLobbyTiming] T6: /api/lobby/create complete in ${t6 - t0}ms`);
         } catch (serverErr) {
           console.warn('[FriendLobby] Server registration notice (background):', serverErr);
         }
       })();
-    } else {
-      const t6 = Date.now();
-      console.log(`[FriendLobbyTiming] T6: /api/lobby/create skipped on Android (${t6 - t0}ms from tap)`);
     }
 
+    // Return the lobby with cached questions in host's memory so host is ready
+    const returnLobby: FriendLobby = {
+      ...lightweightLobbyDoc,
+      guest: null as any,
+      status: 'waiting',
+      questions,
+    };
+
     console.log('[FriendLobby] room created and returning immediately:', code);
-    return { success: true, code, roomId, lobby: lobbyData };
+    return { success: true, code, roomId, lobby: returnLobby };
   } catch (error: any) {
     console.error('[FriendLobby] Error creating friend lobby:', error);
     return { success: false, error: error.message || 'Failed to create lobby' };
@@ -155,20 +174,27 @@ export async function createFriendLobby(
 
 /**
  * Joins an existing 6-digit Friend Lobby using an atomic Firestore transaction
+ * Operates on a lightweight document without downloading heavy Question payloads.
  */
 export async function joinFriendLobby(
   code: string,
-  guest: PlayerProfile
+  guest: PlayerProfile,
+  j0: number = Date.now()
 ): Promise<{ success: boolean; lobby?: FriendLobby; error?: string }> {
   const cleanCode = code.trim().replace(/\D/g, '');
   if (cleanCode.length !== 6) {
     return { success: false, error: 'Please enter a valid 6-digit numeric room code.' };
   }
 
+  console.log(`[FriendLobbyTiming] J0: Join tapped at ${j0} for code: ${cleanCode}`);
+
   const authUser = await ensureAuthenticatedUser();
   if (!authUser || !authUser.uid) {
     return { success: false, error: 'Authentication required before joining lobby.' };
   }
+  const j1 = Date.now();
+  console.log(`[FriendLobbyTiming] J1: authentication ready in ${j1 - j0}ms`);
+
   const verifiedGuest: PlayerProfile = {
     ...guest,
     id: authUser.uid,
@@ -178,6 +204,9 @@ export async function joinFriendLobby(
 
   try {
     const lobbyRef = doc(db, 'friend_lobbies', cleanCode);
+
+    const j2 = Date.now();
+    console.log(`[FriendLobbyTiming] J2: transaction started in ${j2 - j0}ms`);
 
     // Execute atomic transaction to prevent two people joining the same slot simultaneously
     const result = await runTransaction(db, async (transaction) => {
@@ -217,7 +246,7 @@ export async function joinFriendLobby(
         return { error: 'This lobby already has two players.' };
       }
 
-      // Atomic Guest Assignment
+      // Atomic Guest Assignment on lightweight lobby document
       const updatedLobby: FriendLobby = {
         ...lobbyData,
         guest: verifiedGuest,
@@ -235,6 +264,9 @@ export async function joinFriendLobby(
 
       return { success: true, lobby: updatedLobby };
     });
+
+    const j3 = Date.now();
+    console.log(`[FriendLobbyTiming] J3: transaction complete in ${j3 - j0}ms (${j3 - j2}ms Firestore transaction latency)`);
 
     if (result.notFound) {
       // Fallback check against server in-memory / Firestore alias
@@ -326,7 +358,7 @@ export async function joinFriendLobby(
       }
     }
 
-    console.log('[FriendLobby] guest joined');
+    console.log('[FriendLobby] guest joined successfully');
     return { success: true, lobby: result.lobby };
   } catch (error: any) {
     console.error('[FriendLobby] Error joining friend lobby:', error);
@@ -420,14 +452,17 @@ export function subscribeToFriendLobby(
 
 /**
  * Host launches the match from the lobby:
- * 1. Creates the synchronized LiveDuelRoom in Firestore
- * 2. Updates lobby status to 'in_progress'
+ * 1. Creates the synchronized LiveDuelRoom in Firestore with the authoritative questions
+ * 2. Updates lobby status to 'in_progress' (lightweight update without questions)
  * 3. Updates Server API (web browser background)
  */
 export async function launchFriendLobbyDuel(
-  lobby: FriendLobby
+  lobby: FriendLobby,
+  s0: number = Date.now()
 ): Promise<{ success: boolean; roomId?: string; questions?: Question[]; error?: string }> {
   try {
+    console.log(`[FriendLobbyTiming] S0: Start match requested at ${s0} for code: ${lobby.code}`);
+
     if (!lobby.guest) {
       return { success: false, error: 'Cannot start duel without a second player.' };
     }
@@ -451,9 +486,15 @@ export async function launchFriendLobbyDuel(
     const roomRef = doc(db, 'live_rooms', roomId);
     const lobbyRef = doc(db, 'friend_lobbies', lobby.code);
 
+    // Retrieve curated questions: either from host's in-memory cache, lobby object, or generate synchronously
     const questions = (lobby.questions && lobby.questions.length > 0)
       ? lobby.questions
-      : getFilteredQuestions(lobby.category, lobby.exam, lobby.roundCount);
+      : (hostQuestionsCache.get(roomId) || (verifiedHost.matchesPlayed === 0 && lobby.roundCount === 10 && lobby.category === 'mixed'
+          ? getFirstMatchQuestions(lobby.exam)
+          : getFilteredQuestions(lobby.category, lobby.exam, lobby.roundCount)));
+
+    // Ensure cache has the authoritative match questions
+    hostQuestionsCache.set(roomId, questions);
 
     const liveRoomData: LiveDuelRoom = {
       id: roomId,
@@ -464,7 +505,7 @@ export async function launchFriendLobbyDuel(
       roundCount: lobby.roundCount,
       player1: verifiedHost,
       player2: lobby.guest,
-      questions,
+      questions, // Authoritative match questions stored in live_rooms/{roomId}
       status: 'in_progress',
       scores: {
         [verifiedHost.id]: 0,
@@ -486,10 +527,10 @@ export async function launchFriendLobbyDuel(
 
     const sanitizedLiveRoom = sanitizeForFirestore(liveRoomData);
 
-    const h3 = Date.now();
-    console.log(`[FriendLobbyTiming] H3: launch Firestore writes started (roomId: ${roomId}, host: ${verifiedHost.id}) at ${h3}`);
+    const s1 = Date.now();
+    console.log(`[FriendLobbyTiming] S1: live_rooms + lobby update started in ${s1 - s0}ms (roomId: ${roomId}, host: ${verifiedHost.id})`);
 
-    // Execute writes with explicit diagnostic logging to isolate any individual failure or permission error
+    // Execute writes with explicit diagnostic logging
     try {
       await Promise.all([
         setDoc(roomRef, sanitizedLiveRoom).catch((err) => {
@@ -516,8 +557,8 @@ export async function launchFriendLobbyDuel(
       };
     }
 
-    const h4 = Date.now();
-    console.log(`[FriendLobbyTiming] H4: both Firestore writes complete in ${h4 - h3}ms`);
+    const s2 = Date.now();
+    console.log(`[FriendLobbyTiming] S2: writes complete in ${s2 - s0}ms (${s2 - s1}ms Firestore write latency)`);
 
     // 3. Update Server API non-blocking in background (web browser only)
     if (!isAndroidCapacitor()) {
@@ -539,6 +580,60 @@ export async function launchFriendLobbyDuel(
     console.error('[FriendLobby] Error launching friend lobby duel:', error);
     return { success: false, error: error.message || 'Failed to start duel' };
   }
+}
+
+/**
+ * Fetches authoritative match questions from live_rooms/{roomId} for the Guest.
+ * Resolves as soon as the live room document exists with questions.
+ */
+export async function fetchLiveRoomQuestions(roomId: string, maxWaitMs = 5000): Promise<Question[]> {
+  const fetchStart = Date.now();
+  console.log(`[FriendLobbyTiming] Guest fetching authoritative questions from live_rooms/${roomId} at ${fetchStart}`);
+  const roomRef = doc(db, 'live_rooms', roomId);
+
+  // 1. Quick initial getDoc
+  try {
+    const snap = await getDoc(roomRef);
+    if (snap.exists()) {
+      const data = snap.data() as LiveDuelRoom;
+      if (data.questions && data.questions.length > 0) {
+        console.log(`[FriendLobbyTiming] Live room questions obtained via getDoc in ${Date.now() - fetchStart}ms (${data.questions.length} questions)`);
+        return data.questions;
+      }
+    }
+  } catch (err) {
+    console.warn('[FriendLobby] Initial getDoc for live room questions notice:', err);
+  }
+
+  // 2. Real-time snapshot fallback if the document write propagates slightly after the lobby status change
+  return new Promise<Question[]>((resolve) => {
+    let unsub: Unsubscribe | null = null;
+    const timeout = setTimeout(() => {
+      if (unsub) unsub();
+      console.warn(`[FriendLobby] fetchLiveRoomQuestions timed out after ${maxWaitMs}ms for ${roomId}`);
+      resolve([]);
+    }, maxWaitMs);
+
+    try {
+      unsub = onSnapshot(roomRef, (snapshot) => {
+        if (snapshot.exists()) {
+          const data = snapshot.data() as LiveDuelRoom;
+          if (data.questions && data.questions.length > 0) {
+            clearTimeout(timeout);
+            if (unsub) unsub();
+            console.log(`[FriendLobbyTiming] Live room questions obtained via onSnapshot in ${Date.now() - fetchStart}ms (${data.questions.length} questions)`);
+            resolve(data.questions);
+          }
+        }
+      }, (err) => {
+        console.warn('[FriendLobby] onSnapshot live_rooms notice:', err);
+      });
+    } catch (subErr) {
+      clearTimeout(timeout);
+      console.warn('[FriendLobby] subscribe live_rooms error:', subErr);
+      resolve([]);
+    }
+  });
 }
 
 /**
