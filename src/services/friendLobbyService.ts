@@ -32,6 +32,16 @@ export async function createFriendLobby(
   t0: number = Date.now()
 ): Promise<{ success: boolean; code?: string; roomId?: string; lobby?: FriendLobby; error?: string }> {
   try {
+    console.log('[FriendLobby] initializing lobby creation for host:', host.displayName || host.username || host.id);
+    const authUser = await ensureAuthenticatedUser();
+    if (!authUser || !authUser.uid) {
+      throw new Error('Authentication required before creating lobby');
+    }
+    const verifiedHost: PlayerProfile = {
+      ...host,
+      id: authUser.uid,
+    };
+
     let code = generate6DigitLobbyCode();
     const t1 = Date.now();
     console.log(`[FriendLobbyTiming] T1: code generated in ${t1 - t0}ms (Code: ${code})`);
@@ -54,18 +64,13 @@ export async function createFriendLobby(
         }
       }
     } catch (checkErr) {
-      console.warn('[FriendLobby] Collision check notice:', checkErr);
+      console.warn('[FriendLobby] Collision check notice (safe to ignore if non-existent document):', checkErr);
     }
 
     const t2 = Date.now();
     console.log(`[FriendLobbyTiming] T2: collision check ready in ${t2 - t0}ms`);
 
     console.log('[FriendLobby] creating room', code);
-    const authUser = await ensureAuthenticatedUser();
-    const verifiedHost: PlayerProfile = {
-      ...host,
-      id: (host.id && host.id === authUser.uid) ? host.id : authUser.uid,
-    };
 
     const roomId = `duel_friend_${code}_${Date.now()}`;
     const now = Date.now();
@@ -161,12 +166,15 @@ export async function joinFriendLobby(
   }
 
   const authUser = await ensureAuthenticatedUser();
+  if (!authUser || !authUser.uid) {
+    return { success: false, error: 'Authentication required before joining lobby.' };
+  }
   const verifiedGuest: PlayerProfile = {
     ...guest,
-    id: (guest.id && guest.id === authUser.uid) ? guest.id : authUser.uid,
+    id: authUser.uid,
   };
 
-  console.log('[FriendLobby] joining room', cleanCode);
+  console.log('[FriendLobby] joining room', cleanCode, 'as verified guest:', verifiedGuest.id);
 
   try {
     const lobbyRef = doc(db, 'friend_lobbies', cleanCode);
@@ -184,7 +192,7 @@ export async function joinFriendLobby(
       const lobbyData = snapshot.data() as FriendLobby;
 
       // Validate Host cannot join own room
-      if (lobbyData.host.id === guest.id) {
+      if (lobbyData.host.id === verifiedGuest.id) {
         return { 
           isSelf: true, 
           lobby: lobbyData,
@@ -205,21 +213,21 @@ export async function joinFriendLobby(
         return { error: 'This room has expired. Ask your friend to create a new lobby.' };
       }
 
-      if (lobbyData.guest && lobbyData.guest.id !== guest.id && lobbyData.status !== 'waiting') {
+      if (lobbyData.guest && lobbyData.guest.id !== verifiedGuest.id && lobbyData.status !== 'waiting') {
         return { error: 'This lobby already has two players.' };
       }
 
       // Atomic Guest Assignment
       const updatedLobby: FriendLobby = {
         ...lobbyData,
-        guest: guest,
+        guest: verifiedGuest,
         guestReady: true,
         status: 'ready',
         updatedAt: Date.now(),
       };
 
       transaction.update(lobbyRef, sanitizeForFirestore({
-        guest,
+        guest: verifiedGuest,
         guestReady: true,
         status: 'ready',
         updatedAt: Date.now(),
@@ -257,7 +265,7 @@ export async function joinFriendLobby(
       }
 
       if (fallbackLobby) {
-        if (fallbackLobby.host.id === guest.id) {
+        if (fallbackLobby.host.id === verifiedGuest.id) {
           return {
             success: false,
             error: 'You created this room. Join from a different account/device to duel as a challenger.'
@@ -269,13 +277,13 @@ export async function joinFriendLobby(
         if (fallbackLobby.status === 'in_progress') {
           return { success: false, error: 'The battle in this room has already started.' };
         }
-        if (fallbackLobby.guest && fallbackLobby.guest.id !== guest.id && fallbackLobby.status !== 'waiting') {
+        if (fallbackLobby.guest && fallbackLobby.guest.id !== verifiedGuest.id && fallbackLobby.status !== 'waiting') {
           return { success: false, error: 'This lobby already has two players.' };
         }
 
         const updatedLobby: FriendLobby = {
           ...fallbackLobby,
-          guest,
+          guest: verifiedGuest,
           guestReady: true,
           status: 'ready',
           updatedAt: Date.now(),
@@ -310,7 +318,7 @@ export async function joinFriendLobby(
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             code: cleanCode,
-            guest,
+            guest: verifiedGuest,
           }),
         }).catch(() => {});
       } catch {
@@ -425,9 +433,18 @@ export async function launchFriendLobbyDuel(
     }
 
     const authUser = await ensureAuthenticatedUser();
+    if (!authUser || !authUser.uid) {
+      return { success: false, error: 'Authentication required before launching duel.' };
+    }
+
+    // Diagnostic validation: host identity must match authUser.uid
+    if (lobby.host.id !== authUser.uid) {
+      console.warn(`[FriendLobby] Host ID mismatch in lobby object: lobby.host.id=${lobby.host.id}, authUser.uid=${authUser.uid}. Enforcing authenticated UID.`);
+    }
+
     const verifiedHost: PlayerProfile = {
       ...lobby.host,
-      id: (lobby.host.id && lobby.host.id === authUser.uid) ? lobby.host.id : authUser.uid,
+      id: authUser.uid,
     };
 
     const roomId = lobby.roomId || `duel_friend_${lobby.code}_${Date.now()}`;
@@ -470,19 +487,34 @@ export async function launchFriendLobbyDuel(
     const sanitizedLiveRoom = sanitizeForFirestore(liveRoomData);
 
     const h3 = Date.now();
-    console.log(`[FriendLobbyTiming] H3: launch Firestore writes started (roomId: ${roomId}) at ${h3}`);
+    console.log(`[FriendLobbyTiming] H3: launch Firestore writes started (roomId: ${roomId}, host: ${verifiedHost.id}) at ${h3}`);
 
-    // Parallelize required Firestore writes:
-    // 1. Create Live Room in Firestore (contains questions for the duel arena)
-    // 2. Mark friend_lobbies in_progress with merge (DO NOT re-upload questions array; existing questions preserved)
-    await Promise.all([
-      setDoc(roomRef, sanitizedLiveRoom),
-      setDoc(lobbyRef, sanitizeForFirestore({
-        status: 'in_progress',
-        roomId,
-        updatedAt: Date.now(),
-      }), { merge: true }),
-    ]);
+    // Execute writes with explicit diagnostic logging to isolate any individual failure or permission error
+    try {
+      await Promise.all([
+        setDoc(roomRef, sanitizedLiveRoom).catch((err) => {
+          console.error(`[FriendLobby] setDoc live_rooms/${roomId} failed:`, err);
+          throw err;
+        }),
+        setDoc(lobbyRef, sanitizeForFirestore({
+          status: 'in_progress',
+          roomId,
+          updatedAt: Date.now(),
+        }), { merge: true }).catch((err) => {
+          console.error(`[FriendLobby] setDoc friend_lobbies/${lobby.code} failed:`, err);
+          throw err;
+        }),
+      ]);
+    } catch (writeErr: any) {
+      console.error('[FriendLobby] Firestore start writes failed:', writeErr);
+      const isPerm = writeErr?.code === 'permission-denied' || (writeErr?.message && writeErr.message.includes('permission'));
+      return {
+        success: false,
+        error: isPerm
+          ? 'Unable to start match: permission denied. Please verify both players are in the lobby.'
+          : (writeErr?.message || 'Failed to start match due to database write failure.')
+      };
+    }
 
     const h4 = Date.now();
     console.log(`[FriendLobbyTiming] H4: both Firestore writes complete in ${h4 - h3}ms`);
