@@ -652,13 +652,42 @@ export default function App() {
   // VIP / Premium Subscription state
   const [subscription, setSubscription] = useState<UserSubscription>(() => {
     if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem(STORAGE_KEY_SUBSCRIPTION);
+      const lastActiveUid = localStorage.getItem('vocabclash_last_active_user_uid');
+      const userKey = getSubscriptionStorageKey(lastActiveUid);
+      const saved = localStorage.getItem(userKey) || localStorage.getItem(STORAGE_KEY_SUBSCRIPTION);
       if (saved) {
         try { return resolveEffectiveSubscription(JSON.parse(saved)); } catch { /* ignore */ }
       }
     }
     return INITIAL_SUBSCRIPTION;
   });
+
+  // Explicit subscription entitlement hydration guard:
+  // Starts FALSE when app/auth session begins and entitlement has not yet resolved from cloud/billing.
+  // Becomes TRUE only when confirmed from Firestore cloud subscription, local verified VIP cache,
+  // Google Play purchase reconciliation, or confirmed unauthenticated/guest state.
+  const [subscriptionHydrated, setSubscriptionHydrated] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const lastActiveUid = localStorage.getItem('vocabclash_last_active_user_uid');
+      const userKey = getSubscriptionStorageKey(lastActiveUid);
+      const saved = localStorage.getItem(userKey) || localStorage.getItem(STORAGE_KEY_SUBSCRIPTION);
+      if (saved) {
+        try {
+          const parsed = resolveEffectiveSubscription(JSON.parse(saved));
+          if (parsed && parsed.isPremium) {
+            return true; // Confirmed active VIP from previous valid session
+          }
+        } catch { /* ignore */ }
+      }
+    }
+    return false;
+  });
+  const subscriptionHydratedRef = useRef<boolean>(subscriptionHydrated);
+
+  // Keep ref synchronized with state
+  useEffect(() => {
+    subscriptionHydratedRef.current = subscriptionHydrated;
+  }, [subscriptionHydrated]);
 
   // Daily Streak state (evaluates day difference and resets to 0 if 1 day missed)
   const [streak, setStreak] = useState<DailyStreakState>(() => getInitialStreak());
@@ -1071,10 +1100,18 @@ export default function App() {
     });
   }, []);
 
-  // Initialize Native AdMob on Android Capacitor (interstitials only)
+  // Initialize Native AdMob on Android Capacitor (interstitials only, waited until subscription hydrated)
   useEffect(() => {
-    if (isAndroidCapacitor()) {
+    if (isAndroidCapacitor() && subscriptionHydrated) {
       initNativeAdMob(subscription.isPremium);
+    }
+  }, [subscriptionHydrated, subscription.isPremium]);
+
+  // Instantly dismiss house ad / interstitial modals if user is or becomes VIP
+  useEffect(() => {
+    if (subscription.isPremium) {
+      setShowHouseAdModal(false);
+      setShowAdModal(false);
     }
   }, [subscription.isPremium]);
 
@@ -1229,10 +1266,28 @@ export default function App() {
           console.log('[Auth] Account switch detected:', priorUid, '->', user.uid, '- purging previous user local cache');
           clearUserDataOnSignOut(priorUid);
           setPlayer({ ...INITIAL_PLAYER });
+          setSubscription({ ...INITIAL_SUBSCRIPTION });
+          subscriptionHydratedRef.current = false;
+          setSubscriptionHydrated(false);
           setIsProfileReady(false);
         }
         if (typeof window !== 'undefined') {
           localStorage.setItem('vocabclash_last_active_user_uid', user.uid);
+        }
+
+        // SYNCHRONOUS USER SUBSCRIPTION RESTORATION:
+        // If user already has a valid active VIP subscription cached under their UID, hydrate immediately
+        const userSubKey = getSubscriptionStorageKey(user.uid);
+        const cachedUserSubRaw = typeof window !== 'undefined' ? localStorage.getItem(userSubKey) : null;
+        if (cachedUserSubRaw) {
+          try {
+            const parsedCachedSub = resolveEffectiveSubscription(JSON.parse(cachedUserSubRaw));
+            if (parsedCachedSub.isPremium) {
+              setSubscription(parsedCachedSub);
+              subscriptionHydratedRef.current = true;
+              setSubscriptionHydrated(true);
+            }
+          } catch {}
         }
         activeAuthUidRef.current = user.uid;
         previousUserUidRef.current = user.uid;
@@ -1449,6 +1504,8 @@ export default function App() {
 
             if (activeAuthUidRef.current === user.uid) {
               setSubscription(resolvedSub);
+              subscriptionHydratedRef.current = true;
+              setSubscriptionHydrated(true);
               try {
                 localStorage.setItem(STORAGE_KEY_SUBSCRIPTION, JSON.stringify(resolvedSub));
                 localStorage.setItem(getSubscriptionStorageKey(user.uid), JSON.stringify(resolvedSub));
@@ -1620,6 +1677,8 @@ export default function App() {
             } else {
               setSubscription(INITIAL_SUBSCRIPTION);
             }
+            subscriptionHydratedRef.current = true;
+            setSubscriptionHydrated(true);
 
             if (activeAuthUidRef.current === user.uid) {
               saveUserDataToFirestore(
@@ -1646,6 +1705,8 @@ export default function App() {
             if (manualEntitlement) {
               setSubscription(manualEntitlement);
             }
+            subscriptionHydratedRef.current = true;
+            setSubscriptionHydrated(true);
 
             // If user had local player cache with positive progress, keep it active
             if (localPlayer && typeof localPlayer.rankPoints === 'number' && localPlayer.rankPoints > 0) {
@@ -1678,6 +1739,8 @@ export default function App() {
             setIsSyncing(false);
             setSessionLoaded(true);
             setIsProfileReady(true);
+            subscriptionHydratedRef.current = true;
+            setSubscriptionHydrated(true);
           }
         }
       } else {
@@ -1696,6 +1759,8 @@ export default function App() {
         }
         setPlayer({ ...INITIAL_PLAYER });
         setSubscription({ ...INITIAL_SUBSCRIPTION });
+        subscriptionHydratedRef.current = true;
+        setSubscriptionHydrated(true);
         setSavedWords([]);
         setStreak(getInitialStreak('guest'));
         setActiveStreakUser(null);
@@ -1816,6 +1881,8 @@ export default function App() {
       if (cloudData.subscription && activeAuthUidRef.current === listenerUid && currentUser.uid === listenerUid) {
         const cloudSub = resolveEffectiveSubscription(cloudData.subscription);
         setSubscription(cloudSub);
+        subscriptionHydratedRef.current = true;
+        setSubscriptionHydrated(true);
         try {
           localStorage.setItem(STORAGE_KEY_SUBSCRIPTION, JSON.stringify(cloudSub));
           localStorage.setItem(getSubscriptionStorageKey(listenerUid), JSON.stringify(cloudSub));
@@ -2007,6 +2074,8 @@ export default function App() {
           if (freshCloud.subscription && activeAuthUidRef.current === currentUser.uid) {
             const effectiveSub = resolveEffectiveSubscription(freshCloud.subscription);
             setSubscription(effectiveSub);
+            subscriptionHydratedRef.current = true;
+            setSubscriptionHydrated(true);
             try {
               localStorage.setItem(STORAGE_KEY_SUBSCRIPTION, JSON.stringify(effectiveSub));
               localStorage.setItem(getSubscriptionStorageKey(currentUser.uid), JSON.stringify(effectiveSub));
@@ -2097,6 +2166,8 @@ export default function App() {
           if (effectiveSub.isPremium) {
             console.log('[GooglePlayReconcile] Confirmed active Google Play entitlement from backend:', effectiveSub.planId);
             setSubscription(effectiveSub);
+            subscriptionHydratedRef.current = true;
+            setSubscriptionHydrated(true);
             try {
               localStorage.setItem(STORAGE_KEY_SUBSCRIPTION, JSON.stringify(effectiveSub));
               localStorage.setItem(getSubscriptionStorageKey(targetUid), JSON.stringify(effectiveSub));
@@ -2250,6 +2321,8 @@ export default function App() {
     setIsProfileReady(true);
     setPlayer({ ...INITIAL_PLAYER });
     setSubscription({ ...INITIAL_SUBSCRIPTION });
+    subscriptionHydratedRef.current = true;
+    setSubscriptionHydrated(true);
     setSavedWords([]);
     setStreak(getInitialStreak('guest'));
     setActiveStreakUser(null);
@@ -2309,7 +2382,12 @@ export default function App() {
 
   // Check 10-minute ad trigger safely at natural breaks (never during active play, modals, or offline)
   const triggerAdIfDue = async (overrideMatchesPlayed?: number) => {
-    if (!isAdSystemActive() || subscription.isPremium) {
+    // Subscription hydration guard: NEVER trigger ads or house fallback before subscription entitlement is resolved
+    if (!subscriptionHydratedRef.current || !subscriptionHydrated || subscription.isPremium) {
+      return;
+    }
+
+    if (!isAdSystemActive()) {
       return;
     }
     
@@ -2333,20 +2411,29 @@ export default function App() {
 
     if (isAndroidCapacitor()) {
       console.log('[AdMob:trigger] Natural break reached on Android');
-      const showedNative = await showNativeInterstitialIfDue(subscription.isPremium, overrideMatchesPlayed);
+      const showedNative = await showNativeInterstitialIfDue(subscription.isPremium, overrideMatchesPlayed, subscriptionHydratedRef.current);
       if (!showedNative) {
-        console.log('[AdMob:fallback-house] Native AdMob unavailable; opening Study Break fallback');
-        setShowHouseAdModal(true);
+        if (subscriptionHydratedRef.current && !subscription.isPremium) {
+          console.log('[AdMob:fallback-house] Native AdMob unavailable; opening Study Break fallback');
+          setShowHouseAdModal(true);
+        }
       }
     } else {
       // Web / non-native environment: Study Break modal is primary ad experience
-      setShowHouseAdModal(true);
+      if (subscriptionHydratedRef.current && !subscription.isPremium) {
+        setShowHouseAdModal(true);
+      }
     }
   };
 
   // Safe check & trigger for mobile-app-only study-triggered VIP promotion
   const checkAndTriggerStudyVipPromo = (delayMs: number = 0): boolean => {
-    if (!isAndroidCapacitor() || subscription.isPremium) {
+    // Subscription hydration guard: NEVER trigger Study Break / VIP promo before subscription entitlement is resolved
+    if (!subscriptionHydratedRef.current || !subscriptionHydrated || subscription.isPremium) {
+      return false;
+    }
+
+    if (!isAndroidCapacitor()) {
       return false;
     }
 
@@ -2375,12 +2462,16 @@ export default function App() {
       return false;
     }
 
-    if (!isStudyVipPromoEligible(currentUser?.uid, subscription.isPremium)) {
+    if (!isStudyVipPromoEligible(currentUser?.uid, subscription.isPremium, subscriptionHydratedRef.current)) {
       return false;
     }
 
     const firePromo = () => {
-      // Re-verify modal & battle guards immediately prior to presentation
+      // Re-verify modal, hydration & battle guards immediately prior to presentation
+      if (!subscriptionHydratedRef.current || subscription.isPremium) {
+        return;
+      }
+
       if (
         showPremiumModal ||
         showProfileModal ||
@@ -2402,7 +2493,7 @@ export default function App() {
         return;
       }
 
-      if (!isStudyVipPromoEligible(currentUser?.uid, subscription.isPremium)) {
+      if (!isStudyVipPromoEligible(currentUser?.uid, subscription.isPremium, subscriptionHydratedRef.current)) {
         return;
       }
 
@@ -2423,8 +2514,10 @@ export default function App() {
   // Switch navigation tabs with natural break interstitial check
   const handleNavigateTab = (newTab: TabType) => {
     if (newTab !== currentTab) {
-      triggerAdIfDue();
-      checkAndTriggerStudyVipPromo(250);
+      if (subscriptionHydratedRef.current && !subscription.isPremium) {
+        triggerAdIfDue();
+        checkAndTriggerStudyVipPromo(250);
+      }
       setCurrentTab(newTab);
     }
   };
@@ -2794,8 +2887,8 @@ export default function App() {
 
     // Trigger 10-min interval ad safely after match completion (only for free tier at natural break)
     // NEVER show ad after the user's first duel (to maximize new player retention)
-    const isAdDueForMatch = isAdSystemActive() && !subscription.isPremium && networkManager.isOnline() && (player.matchesPlayed > 0 && nextMatchesPlayed > 1) && isAdDue(subscription.isPremium, nextMatchesPlayed);
-    if (isAdSystemActive() && !subscription.isPremium && networkManager.isOnline()) {
+    const isAdDueForMatch = subscriptionHydratedRef.current && !subscription.isPremium && isAdSystemActive() && networkManager.isOnline() && (player.matchesPlayed > 0 && nextMatchesPlayed > 1) && isAdDue(subscription.isPremium, nextMatchesPlayed);
+    if (subscriptionHydratedRef.current && !subscription.isPremium && isAdSystemActive() && networkManager.isOnline()) {
       const isFirstDuel = player.matchesPlayed === 0 || nextMatchesPlayed <= 1;
       if (isFirstDuel) {
         // Cleanly start their ad timer cooldown so they get a full grace period going forward
@@ -2803,17 +2896,20 @@ export default function App() {
       } else {
         if (isAdDueForMatch) {
           setTimeout(async () => {
+            if (!subscriptionHydratedRef.current || subscription.isPremium) {
+              return;
+            }
             if (showPremiumModal || showProfileModal || showEditProfileModal || showHouseAdModal) {
               return;
             }
             if (isAndroidCapacitor()) {
               console.log('[AdMob:trigger] Match completion natural break on Android');
-              const showedNative = await showNativeInterstitialIfDue(subscription.isPremium, nextMatchesPlayed);
-              if (!showedNative) {
+              const showedNative = await showNativeInterstitialIfDue(subscription.isPremium, nextMatchesPlayed, subscriptionHydratedRef.current);
+              if (!showedNative && subscriptionHydratedRef.current && !subscription.isPremium) {
                 console.log('[AdMob:fallback-house] Match completion native ad unavailable; opening Study Break fallback');
                 setShowHouseAdModal(true);
               }
-            } else {
+            } else if (subscriptionHydratedRef.current && !subscription.isPremium) {
               setShowHouseAdModal(true);
             }
           }, 700);
@@ -2822,7 +2918,7 @@ export default function App() {
     }
 
     // If no ad is scheduled to display, evaluate study-triggered VIP promotion
-    if (!isAdDueForMatch) {
+    if (!isAdDueForMatch && subscriptionHydratedRef.current && !subscription.isPremium) {
       checkAndTriggerStudyVipPromo(800);
     }
   };
@@ -3395,6 +3491,7 @@ export default function App() {
           onSelectTab={handleNavigateTab}
           player={player}
           subscription={subscription}
+          subscriptionHydrated={subscriptionHydrated}
           dailyStreak={streak}
           currentUser={currentUser}
           mistakeCount={activeMistakeCount}
@@ -3582,6 +3679,7 @@ export default function App() {
               <ArenaHome
                 player={player}
                 subscription={subscription}
+                subscriptionHydrated={subscriptionHydrated}
                 dailyStreak={streak}
                 savedWords={savedWords}
                 selectedCategory={selectedCategory}
@@ -4098,6 +4196,8 @@ export default function App() {
           onUpdateSubscription={updated => {
             const effective = resolveEffectiveSubscription(updated);
             setSubscription(effective);
+            subscriptionHydratedRef.current = true;
+            setSubscriptionHydrated(true);
             if (effective.isPremium) {
               setShowHouseAdModal(false);
             }
@@ -4135,7 +4235,7 @@ export default function App() {
       )}
 
       {/* VocabClash House Interstitial (Web Primary & Android Fallback) */}
-      {showHouseAdModal && !subscription.isPremium && (
+      {showHouseAdModal && subscriptionHydrated && !subscription.isPremium && (
         <HouseInterstitialModal
           onClose={() => setShowHouseAdModal(false)}
           onOpenPremium={() => {
@@ -4147,7 +4247,7 @@ export default function App() {
       )}
 
       {/* 10-Minute Interstitial AdSense Modal (Fallback when USE_HOUSE_INTERSTITIAL is false on Web) */}
-      {!USE_HOUSE_INTERSTITIAL && ADS_ENABLED && showAdModal && (
+      {!USE_HOUSE_INTERSTITIAL && ADS_ENABLED && showAdModal && subscriptionHydrated && !subscription.isPremium && (
         <InterstitialAdModal
           onClose={() => setShowAdModal(false)}
           onOpenPremium={() => {

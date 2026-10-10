@@ -17,9 +17,17 @@ interface HouseInterstitialModalProps {
 export const HouseInterstitialModal: React.FC<HouseInterstitialModalProps> = ({
   onClose,
   onOpenPremium,
+  isPremium,
 }) => {
   const [countdown, setCountdown] = useState<number>(5);
   const [canDismiss, setCanDismiss] = useState<boolean>(false);
+
+  // If user is VIP or becomes VIP via cloud hydration while modal is mounted, dismiss instantly
+  useEffect(() => {
+    if (isPremium) {
+      onClose();
+    }
+  }, [isPremium, onClose]);
 
   useEffect(() => {
     const timer = setInterval(() => {

@@ -26,6 +26,7 @@ interface DesktopSidebarProps {
   onSelectTab: (tab: TabType) => void;
   player: PlayerProfile;
   subscription: UserSubscription;
+  subscriptionHydrated?: boolean;
   dailyStreak: DailyStreakState;
   currentUser?: FirebaseUser | null;
   mistakeCount?: number;
@@ -48,6 +49,7 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
   onSelectTab,
   player,
   subscription,
+  subscriptionHydrated = true,
   dailyStreak,
   currentUser,
   mistakeCount = 0,
@@ -300,8 +302,8 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
           </div>
         )}
 
-        {/* Premium VIP Banner if not VIP */}
-        {!subscription.isPremium ? (
+        {/* Premium VIP Banner if not VIP (suppressed while entitlement is hydrating) */}
+        {subscriptionHydrated && !subscription.isPremium ? (
           <button
             onClick={() => {
               soundManager.playTap();

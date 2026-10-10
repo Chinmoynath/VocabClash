@@ -41,6 +41,7 @@ import { SavedWord } from '../types';
 interface ArenaHomeProps {
   player: PlayerProfile;
   subscription: UserSubscription;
+  subscriptionHydrated?: boolean;
   dailyStreak: DailyStreakState;
   savedWords?: SavedWord[];
   selectedCategory: QuestionCategory | 'mixed';
@@ -69,6 +70,7 @@ interface ArenaHomeProps {
 export const ArenaHome: React.FC<ArenaHomeProps> = ({
   player,
   subscription,
+  subscriptionHydrated = true,
   dailyStreak,
   savedWords = [],
   selectedCategory,
@@ -335,8 +337,8 @@ export const ArenaHome: React.FC<ArenaHomeProps> = ({
             </div>
           ) : null}
 
-          {/* AdSense Unit (Rendered only when ADS_ENABLED is true) */}
-          {ADS_ENABLED && !subscription.isPremium && (
+          {/* AdSense Unit (Rendered only when ADS_ENABLED is true and subscription is hydrated as free) */}
+          {ADS_ENABLED && subscriptionHydrated && !subscription.isPremium && (
             <div className="pt-1">
               <AdSenseUnit slotId={ADSENSE_BANNER_SLOT} format="horizontal" />
             </div>

@@ -246,8 +246,10 @@ export function recordMistakeVaultCompleted(
  */
 export function isStudyVipPromoEligible(
   uid?: string | null,
-  isPremium?: boolean
+  isPremium?: boolean,
+  subscriptionHydrated: boolean = true
 ): boolean {
+  if (!subscriptionHydrated) return false;
   if (!isAndroidCapacitor()) return false;
   if (isPremium) return false;
 

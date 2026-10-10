@@ -247,10 +247,11 @@ export async function prepareInterstitial(isPremium: boolean): Promise<boolean> 
  */
 export async function showNativeInterstitialIfDue(
   isPremium: boolean,
-  matchesPlayed?: number
+  matchesPlayed?: number,
+  subscriptionHydrated: boolean = true
 ): Promise<boolean> {
   console.log('[AdMob:trigger] Evaluating ad eligibility');
-  if (!isAndroidCapacitor() || isPremium) {
+  if (!subscriptionHydrated || !isAndroidCapacitor() || isPremium) {
     return false;
   }
 
