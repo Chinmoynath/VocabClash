@@ -1056,7 +1056,10 @@ async function getServerGooglePlayAccessToken(req) {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        scope: ["https://www.googleapis.com/auth/androidpublisher"]
+        scope: [
+          "https://www.googleapis.com/auth/androidpublisher",
+          "https://www.googleapis.com/auth/datastore"
+        ]
       })
     });
     if (!iamRes.ok) {
@@ -1115,11 +1118,20 @@ app.post("/api/payments/google/verify", async (req, res) => {
       });
     }
     const candidateProduct = (productId || sku || "").trim();
+    const serverAccessToken = await getServerGooglePlayAccessToken(req);
+    if (!serverAccessToken) {
+      console.warn("[Google Play] Keyless Vercel OIDC / WIF authentication could not be completed.");
+      return res.status(503).json({
+        success: false,
+        verified: false,
+        error: "Keyless Vercel OIDC / Workload Identity Federation authentication failed. Please ensure OpenID Connect is enabled in Vercel project settings."
+      });
+    }
     const tokenHash = import_crypto.default.createHash("sha256").update(purchaseToken).digest("hex");
     const tokenRecordUrl = `${baseUrl}/google_play_purchases/${tokenHash}`;
     try {
       const existingTokenRes = await fetch(tokenRecordUrl, {
-        headers: { "Authorization": `Bearer ${idToken}` }
+        headers: { "Authorization": `Bearer ${serverAccessToken}` }
       });
       if (existingTokenRes.ok) {
         const tokenDoc = await existingTokenRes.json();
@@ -1136,93 +1148,83 @@ app.post("/api/payments/google/verify", async (req, res) => {
     } catch (replayErr) {
       console.warn("[Token Replay] Check notice:", replayErr);
     }
-    const playAccessToken = await getServerGooglePlayAccessToken(req);
     let verifiedProductId = candidateProduct;
     let verifiedExpiryTimeMs = null;
     let verifiedOrderId = `GPA-${Date.now()}`;
     let verifiedState = "ACTIVE";
     let isAcknowledged = false;
-    if (playAccessToken) {
-      if (candidateProduct !== "vocabclash_lifetime") {
-        const playUrl = `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${packageName}/purchases/subscriptionsv2/tokens/${encodeURIComponent(purchaseToken)}`;
-        const playRes = await fetch(playUrl, {
-          headers: { "Authorization": `Bearer ${playAccessToken}` }
-        });
-        if (!playRes.ok) {
-          const playErr = await playRes.text();
-          console.error("[Google Play API] Subscription verification error:", playRes.status, playErr);
-          return res.status(400).json({
-            success: false,
-            verified: false,
-            error: `Google Play API rejected purchase verification (${playRes.status})`
-          });
-        }
-        const subData = await playRes.json();
-        const state = subData.subscriptionState;
-        const lineItem = subData.lineItems?.[0];
-        verifiedProductId = lineItem?.productId || candidateProduct;
-        isAcknowledged = subData.acknowledgementState === "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED";
-        verifiedOrderId = subData.latestOrderId || verifiedOrderId;
-        const expiryTimeIso = lineItem?.expiryTime;
-        if (expiryTimeIso) {
-          verifiedExpiryTimeMs = new Date(expiryTimeIso).getTime();
-        }
-        const nowMs = Date.now();
-        const isCurrentlyEntitled = state === "SUBSCRIPTION_STATE_ACTIVE" || state === "SUBSCRIPTION_STATE_IN_GRACE_PERIOD" || state === "SUBSCRIPTION_STATE_CANCELED" && verifiedExpiryTimeMs !== null && verifiedExpiryTimeMs > nowMs;
-        if (!isCurrentlyEntitled) {
-          return res.status(400).json({
-            success: false,
-            verified: false,
-            error: `Subscription is not currently active in Google Play (State: ${state})`
-          });
-        }
-        verifiedState = state;
-      } else {
-        const playUrl = `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${packageName}/purchases/productsv2/tokens/${encodeURIComponent(purchaseToken)}`;
-        const playRes = await fetch(playUrl, {
-          headers: { "Authorization": `Bearer ${playAccessToken}` }
-        });
-        if (!playRes.ok) {
-          const playErr = await playRes.text();
-          console.error("[Google Play API] Productsv2 verification error:", playRes.status, playErr);
-          return res.status(400).json({
-            success: false,
-            verified: false,
-            error: `Google Play API rejected product verification (${playRes.status})`
-          });
-        }
-        const prodData = await playRes.json();
-        const purchaseState = prodData.purchaseStateContext?.purchaseState || prodData.purchaseState || "";
-        if (purchaseState !== "PURCHASED" && purchaseState !== 0) {
-          return res.status(400).json({
-            success: false,
-            verified: false,
-            error: `One-time purchase state is not complete (purchaseState: ${purchaseState || "UNKNOWN"})`
-          });
-        }
-        const lineItems = Array.isArray(prodData.productLineItem) ? prodData.productLineItem : prodData.productLineItem ? [prodData.productLineItem] : Array.isArray(prodData.lineItems) ? prodData.lineItems : [];
-        const hasLifetimeProduct = lineItems.some((item) => item.productId === "vocabclash_lifetime");
-        if (!hasLifetimeProduct && prodData.productId !== "vocabclash_lifetime") {
-          return res.status(400).json({
-            success: false,
-            verified: false,
-            error: "Google Play response does not contain the vocabclash_lifetime product."
-          });
-        }
-        verifiedProductId = "vocabclash_lifetime";
-        const matchedItem = lineItems.find((item) => item.productId === "vocabclash_lifetime") || lineItems[0];
-        verifiedOrderId = matchedItem?.orderId || prodData.orderId || prodData.latestOrderId || verifiedOrderId;
-        isAcknowledged = prodData.acknowledgementState === "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED" || prodData.acknowledgementState === 1 || prodData.acknowledgementState === true;
-        verifiedExpiryTimeMs = null;
-        verifiedState = "PURCHASED";
-      }
-    } else {
-      console.warn("[Google Play] Keyless Vercel OIDC / WIF authentication could not be completed.");
-      return res.status(503).json({
-        success: false,
-        verified: false,
-        error: "Keyless Vercel OIDC / Workload Identity Federation authentication failed. Please ensure OpenID Connect is enabled in Vercel project settings."
+    if (candidateProduct !== "vocabclash_lifetime") {
+      const playUrl = `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${packageName}/purchases/subscriptionsv2/tokens/${encodeURIComponent(purchaseToken)}`;
+      const playRes = await fetch(playUrl, {
+        headers: { "Authorization": `Bearer ${serverAccessToken}` }
       });
+      if (!playRes.ok) {
+        const playErr = await playRes.text();
+        console.error("[Google Play API] Subscription verification error:", playRes.status, playErr);
+        return res.status(400).json({
+          success: false,
+          verified: false,
+          error: `Google Play API rejected purchase verification (${playRes.status})`
+        });
+      }
+      const subData = await playRes.json();
+      const state = subData.subscriptionState;
+      const lineItem = subData.lineItems?.[0];
+      verifiedProductId = lineItem?.productId || candidateProduct;
+      isAcknowledged = subData.acknowledgementState === "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED";
+      verifiedOrderId = subData.latestOrderId || verifiedOrderId;
+      const expiryTimeIso = lineItem?.expiryTime;
+      if (expiryTimeIso) {
+        verifiedExpiryTimeMs = new Date(expiryTimeIso).getTime();
+      }
+      const nowMs = Date.now();
+      const isCurrentlyEntitled = state === "SUBSCRIPTION_STATE_ACTIVE" || state === "SUBSCRIPTION_STATE_IN_GRACE_PERIOD" || state === "SUBSCRIPTION_STATE_CANCELED" && verifiedExpiryTimeMs !== null && verifiedExpiryTimeMs > nowMs;
+      if (!isCurrentlyEntitled) {
+        return res.status(400).json({
+          success: false,
+          verified: false,
+          error: `Subscription is not currently active in Google Play (State: ${state})`
+        });
+      }
+      verifiedState = state;
+    } else {
+      const playUrl = `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${packageName}/purchases/productsv2/tokens/${encodeURIComponent(purchaseToken)}`;
+      const playRes = await fetch(playUrl, {
+        headers: { "Authorization": `Bearer ${serverAccessToken}` }
+      });
+      if (!playRes.ok) {
+        const playErr = await playRes.text();
+        console.error("[Google Play API] Productsv2 verification error:", playRes.status, playErr);
+        return res.status(400).json({
+          success: false,
+          verified: false,
+          error: `Google Play API rejected product verification (${playRes.status})`
+        });
+      }
+      const prodData = await playRes.json();
+      const purchaseState = prodData.purchaseStateContext?.purchaseState || prodData.purchaseState || "";
+      if (purchaseState !== "PURCHASED" && purchaseState !== 0) {
+        return res.status(400).json({
+          success: false,
+          verified: false,
+          error: `One-time purchase state is not complete (purchaseState: ${purchaseState || "UNKNOWN"})`
+        });
+      }
+      const lineItems = Array.isArray(prodData.productLineItem) ? prodData.productLineItem : prodData.productLineItem ? [prodData.productLineItem] : Array.isArray(prodData.lineItems) ? prodData.lineItems : [];
+      const hasLifetimeProduct = lineItems.some((item) => item.productId === "vocabclash_lifetime");
+      if (!hasLifetimeProduct && prodData.productId !== "vocabclash_lifetime") {
+        return res.status(400).json({
+          success: false,
+          verified: false,
+          error: "Google Play response does not contain the vocabclash_lifetime product."
+        });
+      }
+      verifiedProductId = "vocabclash_lifetime";
+      const matchedItem = lineItems.find((item) => item.productId === "vocabclash_lifetime") || lineItems[0];
+      verifiedOrderId = matchedItem?.orderId || prodData.orderId || prodData.latestOrderId || verifiedOrderId;
+      isAcknowledged = prodData.acknowledgementState === "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED" || prodData.acknowledgementState === 1 || prodData.acknowledgementState === true;
+      verifiedExpiryTimeMs = null;
+      verifiedState = "PURCHASED";
     }
     const isLifetime = verifiedProductId === "vocabclash_lifetime";
     let effectivePlanId = planId || "quarterly";
@@ -1251,27 +1253,51 @@ app.post("/api/payments/google/verify", async (req, res) => {
       expiresAt: isLifetime ? null : verifiedExpiryTimeMs,
       verifiedAt: now
     };
+    const userDocUrl = `${baseUrl}/users/${verifiedUid}`;
+    let userDocExists = false;
+    try {
+      const userDocCheckRes = await fetch(userDocUrl, {
+        headers: { "Authorization": `Bearer ${serverAccessToken}` }
+      });
+      userDocExists = userDocCheckRes.ok;
+    } catch {
+      userDocExists = false;
+    }
+    const userWrite = userDocExists ? {
+      update: {
+        name: `projects/${projectId}/databases/${databaseId}/documents/users/${verifiedUid}`,
+        fields: {
+          subscription: toFsValueHelper(subscriptionPayload),
+          updatedAt: toFsValueHelper(now)
+        }
+      },
+      updateMask: {
+        fieldPaths: ["subscription", "updatedAt"]
+      }
+    } : {
+      update: {
+        name: `projects/${projectId}/databases/${databaseId}/documents/users/${verifiedUid}`,
+        fields: {
+          uid: toFsValueHelper(verifiedUid),
+          ...verifiedCaller.email ? { email: toFsValueHelper(verifiedCaller.email) } : {},
+          subscription: toFsValueHelper(subscriptionPayload),
+          updatedAt: toFsValueHelper(now)
+        }
+      },
+      updateMask: {
+        fieldPaths: ["uid", "subscription", "updatedAt", ...verifiedCaller.email ? ["email"] : []]
+      }
+    };
     const commitUrl = `${baseUrl}:commit`;
     const commitRes = await fetch(commitUrl, {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${idToken}`,
+        "Authorization": `Bearer ${serverAccessToken}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
         writes: [
-          {
-            update: {
-              name: `projects/${projectId}/databases/${databaseId}/documents/users/${verifiedUid}`,
-              fields: {
-                subscription: toFsValueHelper(subscriptionPayload),
-                updatedAt: toFsValueHelper(now)
-              }
-            },
-            updateMask: {
-              fieldPaths: ["subscription", "updatedAt"]
-            }
-          },
+          userWrite,
           {
             update: {
               name: `projects/${projectId}/databases/${databaseId}/documents/google_play_purchases/${tokenHash}`,
@@ -1295,6 +1321,57 @@ app.post("/api/payments/google/verify", async (req, res) => {
         success: false,
         verified: false,
         error: `Entitlement write failed (${commitRes.status}): ${errorText}`
+      });
+    }
+    try {
+      const verifyDocRes = await fetch(userDocUrl, {
+        headers: { "Authorization": `Bearer ${serverAccessToken}` }
+      });
+      if (!verifyDocRes.ok) {
+        console.error("[Google Play Verification] Entitlement users/{uid} could not be verified after commit");
+        return res.status(500).json({
+          success: false,
+          verified: false,
+          error: "Firestore entitlement could not be verified after commit."
+        });
+      }
+      const verifyDocJson = await verifyDocRes.json();
+      const confirmedSub = verifyDocJson?.fields?.subscription?.mapValue?.fields;
+      if (!confirmedSub || confirmedSub?.isPremium?.booleanValue !== true) {
+        console.error("[Google Play Verification] Entitlement subscription is not active in Firestore");
+        return res.status(500).json({
+          success: false,
+          verified: false,
+          error: "Firestore entitlement verification failed: subscription is not active."
+        });
+      }
+    } catch (verifyReadErr) {
+      console.error("[Google Play Verification] Post-commit user document read failed:", verifyReadErr);
+      return res.status(500).json({
+        success: false,
+        verified: false,
+        error: "Firestore entitlement could not be verified after commit."
+      });
+    }
+    const purchaseDocUrl = `${baseUrl}/google_play_purchases/${tokenHash}`;
+    try {
+      const verifyPurchaseRes = await fetch(purchaseDocUrl, {
+        headers: { "Authorization": `Bearer ${serverAccessToken}` }
+      });
+      if (!verifyPurchaseRes.ok) {
+        console.error("[Google Play Verification] google_play_purchases/{tokenHash} could not be verified after commit");
+        return res.status(500).json({
+          success: false,
+          verified: false,
+          error: "Google Play token registry could not be confirmed in cloud database."
+        });
+      }
+    } catch (verifyPurchaseErr) {
+      console.error("[Google Play Verification] Post-commit token registry read failed:", verifyPurchaseErr);
+      return res.status(500).json({
+        success: false,
+        verified: false,
+        error: "Google Play token registry could not be confirmed in cloud database."
       });
     }
     res.json({

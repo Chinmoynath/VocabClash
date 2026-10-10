@@ -27,7 +27,7 @@ import {
 
 // Production AdMob Identifiers from Project Specification
 export const PROD_ADMOB_APP_ID = 'ca-app-pub-6402582146558440~1650072679';
-export const PROD_ADMOB_BANNER_ID = 'ca-app-pub-6402582146558440/5596523711';
+export const PROD_ADMOB_BANNER_ID = 'ca-app-pub-6402582146558440/9479443308';
 export const PROD_ADMOB_INTERSTITIAL_ID = 'ca-app-pub-6402582146558440/7224124091';
 
 // Google Official Android Test Ad Units (Prevents accidental invalid traffic during dev/review)
@@ -35,9 +35,13 @@ export const TEST_ADMOB_BANNER_ID = 'ca-app-pub-3940256099942544/6300978111';
 export const TEST_ADMOB_INTERSTITIAL_ID = 'ca-app-pub-3940256099942544/1033173712';
 export const TEST_ADMOB_REWARDED_ID = 'ca-app-pub-3940256099942544/5224354917';
 
-// Environment Switch: defaults to test ads unless explicitly configured for production
+// Environment Switch: production builds automatically use real AdMob ads via .env.production / import.meta.env.PROD,
+// while local development (npm run dev) safely uses official Google test ad units.
+// Can be explicitly overridden with VITE_ADMOB_PROD=false for testing release builds.
 export const IS_TEST_MODE: boolean =
-  import.meta.env.VITE_ADMOB_PROD === 'true' ? false : true;
+  import.meta.env.VITE_ADMOB_PROD === 'false'
+    ? true
+    : (import.meta.env.VITE_ADMOB_PROD === 'true' || import.meta.env.PROD ? false : true);
 
 export function getBannerAdUnitId(): string {
   return IS_TEST_MODE ? TEST_ADMOB_BANNER_ID : PROD_ADMOB_BANNER_ID;
